@@ -1,5 +1,5 @@
 import { useAuth } from "@workos-inc/authkit-react"
-import { useMutation, useQuery } from "convex/react"
+import { useAction, useConvexAuth, useMutation, useQuery } from "convex/react"
 import { Component, type ErrorInfo, type ReactNode, useEffect, useMemo, useState } from "react"
 import { api } from "../../convex/_generated/api"
 import type { Id } from "../../convex/_generated/dataModel"
@@ -56,12 +56,18 @@ export function ConvexDogfoodApp() {
 
 function ConvexDogfoodChat() {
   const auth = useAuth()
-  const ensureViewer = useMutation(api.chat.ensureViewer)
+  const convexAuth = useConvexAuth()
+  const ensureViewer = useAction(api.chat.ensureViewer)
   const sendMessage = useMutation(api.chat.sendMessage)
+  const editMessage = useMutation(api.chat.editMessage)
+  const deleteMessage = useMutation(api.chat.deleteMessage)
   const [ensuredUserId, setEnsuredUserId] = useState<string | null>(null)
   const [error, setError] = useState<ConvexDogfoodError | null>(null)
   const [signInOpening, setSignInOpening] = useState(false)
-  const viewerReady = auth.user !== null && ensuredUserId === auth.user.id && error === null
+  const [ensureAttempt, setEnsureAttempt] = useState(0)
+  const authUserId = auth.user?.id ?? null
+  const sessionReady = authUserId !== null && convexAuth.isAuthenticated
+  const viewerReady = sessionReady && ensuredUserId === authUserId && error === null
   const workspace = useQuery(api.chat.defaultWorkspace, viewerReady ? {} : "skip")
   const messages = useQuery(
     api.chat.channelMessages,
@@ -70,7 +76,9 @@ function ConvexDogfoodChat() {
 
   useEffect(() => {
     const user = auth.user
-    if (auth.isLoading || user === null || ensuredUserId === user.id) return
+    if (auth.isLoading || convexAuth.isLoading || !convexAuth.isAuthenticated || user === null || ensuredUserId === user.id) {
+      return
+    }
 
     let cancelled = false
     void ensureViewer({})
@@ -87,7 +95,7 @@ function ConvexDogfoodChat() {
     return () => {
       cancelled = true
     }
-  }, [auth.isLoading, auth.user, ensureViewer, ensuredUserId])
+  }, [auth.isLoading, auth.user, convexAuth.isAuthenticated, convexAuth.isLoading, ensureAttempt, ensureViewer, ensuredUserId])
 
   const model = useMemo(
     () => workspace === undefined || workspace === null || messages === undefined
@@ -115,10 +123,25 @@ function ConvexDogfoodChat() {
     )
   }
 
+  if (!convexAuth.isAuthenticated) {
+    return <DogfoodShell title="Checking Session">Waiting for your AuthKit session to reach Convex...</DogfoodShell>
+  }
+
   if (error !== null) {
     return (
       <DogfoodShell title="Could Not Join">
         <p className="errorText">{error.message}</p>
+        <button
+          type="button"
+          className="dogfoodPrimaryButton"
+          onClick={() => {
+            setError(null)
+            setEnsuredUserId(null)
+            setEnsureAttempt((attempt) => attempt + 1)
+          }}
+        >
+          Try again
+        </button>
         <button type="button" className="dogfoodSecondaryButton" onClick={() => auth.signOut()}>
           Sign out
         </button>
@@ -145,10 +168,14 @@ function ConvexDogfoodChat() {
   return (
     <WorkspaceChat
       model={model}
-      canDeleteMessages={false}
       profileMenuActions={[{ label: "Sign out", onSelect: () => auth.signOut() }]}
       createChannelMessage={({ body }) => sendMessage({ channelId: toConvexChannelId(model.channel.id), body })}
-      deleteChannelMessage={() => Promise.resolve()}
+      editChannelMessage={({ channelId, messageId, body }) =>
+        editMessage({ channelId: toConvexChannelId(channelId), messageId: toConvexMessageId(messageId), body })}
+      deleteChannelMessage={({ channelId, messageId }) =>
+        deleteMessage({ channelId: toConvexChannelId(channelId), messageId: toConvexMessageId(messageId) })}
+      canEditMessage={(message) => message.authorId === model.currentUser.id}
+      canDeleteMessage={(message) => message.authorId === model.currentUser.id}
     />
   )
 }
@@ -276,6 +303,8 @@ const toChannelId = (id: Id<"channels">): ChannelId => String(id) as ChannelId
 const toChannelMessageId = (id: Id<"messages">): ChannelMessageId => String(id) as ChannelMessageId
 
 const toConvexChannelId = (id: ChannelId): Id<"channels"> => String(id) as Id<"channels">
+
+const toConvexMessageId = (id: ChannelMessageId): Id<"messages"> => String(id) as Id<"messages">
 
 const errorMessage = (cause: unknown): string =>
   cause instanceof Error ? cause.message : "Something went wrong."

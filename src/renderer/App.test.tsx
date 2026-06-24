@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { Atom } from "@effect-atom/atom"
 import { RegistryProvider } from "@effect-atom/atom-react"
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { cleanup, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { Effect, Layer, Stream } from "effect"
 import { afterEach, describe, expect, it } from "vitest"
 import {
@@ -304,14 +304,137 @@ describe("App", () => {
     expect((await screen.findAllByLabelText("Deselect message from Maya Patel")).length).toBeGreaterThan(0)
   })
 
-  it("deletes a message from the message action menu", async () => {
+  it("waits for delete confirmation before deleting a message", async () => {
     const calls = renderApp(makeSnapshot())
 
     fireEvent.click(await screen.findByLabelText("More actions for message from Maya Patel"))
     const menu = await screen.findByRole("menu", { name: /message from Maya Patel/ })
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Delete message" }))
 
+    const dialog = await screen.findByRole("dialog", { name: "Delete Message?" })
+    expect(within(dialog).getByText(/Delete this message from Maya Patel/)).toBeTruthy()
+    expect(calls).not.toContainEqual({ method: "deleteChannelMessage", args: messageId })
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }))
+
     await waitFor(() => expect(calls).toContainEqual({ method: "deleteChannelMessage", args: messageId }))
+  })
+
+  it("cancels a pending message delete", async () => {
+    const calls = renderApp(makeSnapshot())
+
+    fireEvent.click(await screen.findByLabelText("More actions for message from Maya Patel"))
+    const menu = await screen.findByRole("menu", { name: /message from Maya Patel/ })
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Delete message" }))
+
+    const dialog = await screen.findByRole("dialog", { name: "Delete Message?" })
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
+
+    expect(screen.queryByRole("dialog", { name: "Delete Message?" })).toBeNull()
+    expect(calls).not.toContainEqual({ method: "deleteChannelMessage", args: messageId })
+  })
+
+  it("shows edit and delete actions only for messages allowed by per-message guards", async () => {
+    const calls: Array<{ method: string; args: unknown }> = []
+    const model = makeSnapshot([
+      ...makeSnapshot().channelMessages,
+      new ChannelMessage({
+        id: "message-2" as ChannelMessageId,
+        channelId,
+        authorType: "human",
+        authorId: "human-2",
+        authorDisplayName: "Lee Chen",
+        body: "I pulled the incidents into the notes.",
+        createdAt: 3,
+        deletedAt: null
+      })
+    ])
+
+    render(
+      <WorkspaceChat
+        model={model}
+        createChannelMessage={() => Promise.resolve()}
+        editChannelMessage={(input) => {
+          calls.push({ method: "editChannelMessage", args: input })
+          return Promise.resolve()
+        }}
+        deleteChannelMessage={(input) => {
+          calls.push({ method: "deleteChannelMessage", args: input.messageId })
+          return Promise.resolve()
+        }}
+        canEditMessage={(message) => message.authorId === model.currentUser.id}
+        canDeleteMessage={(message) => message.authorId === model.currentUser.id}
+      />
+    )
+
+    expect(await screen.findByLabelText("Edit message from Maya Patel")).toBeTruthy()
+    expect(screen.getByLabelText("Delete message from Maya Patel")).toBeTruthy()
+    expect(screen.queryByLabelText("Edit message from Lee Chen")).toBeNull()
+    expect(screen.queryByLabelText("Delete message from Lee Chen")).toBeNull()
+
+    fireEvent.contextMenu(screen.getByText(/incidents into the notes/), { clientX: 20, clientY: 30 })
+    const menu = await screen.findByRole("menu", { name: /message from Lee Chen/ })
+    expect(within(menu).queryByRole("menuitem", { name: "Edit message" })).toBeNull()
+    expect(within(menu).queryByRole("menuitem", { name: "Delete message" })).toBeNull()
+  })
+
+  it("saves an inline message edit with Enter", async () => {
+    const calls: Array<{ method: string; args: unknown }> = []
+
+    render(
+      <WorkspaceChat
+        model={makeSnapshot()}
+        createChannelMessage={() => Promise.resolve()}
+        editChannelMessage={(input) => {
+          calls.push({ method: "editChannelMessage", args: input })
+          return Promise.resolve()
+        }}
+        deleteChannelMessage={() => Promise.resolve()}
+      />
+    )
+
+    fireEvent.click(await screen.findByLabelText("Edit message from Maya Patel"))
+    const editor = await screen.findByLabelText("Edit message text from Maya Patel")
+    fireEvent.change(editor, { target: { value: "The partner brief is ready for review." } })
+    fireEvent.keyDown(editor, { key: "Enter", code: "Enter" })
+
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        method: "editChannelMessage",
+        args: {
+          channelId,
+          messageId,
+          body: "The partner brief is ready for review."
+        }
+      })
+    )
+  })
+
+  it("keeps Shift+Enter in an inline message edit without saving", async () => {
+    const calls: Array<{ method: string; args: unknown }> = []
+
+    render(
+      <WorkspaceChat
+        model={makeSnapshot()}
+        createChannelMessage={() => Promise.resolve()}
+        editChannelMessage={(input) => {
+          calls.push({ method: "editChannelMessage", args: input })
+          return Promise.resolve()
+        }}
+        deleteChannelMessage={() => Promise.resolve()}
+      />
+    )
+
+    fireEvent.click(await screen.findByLabelText("Edit message from Maya Patel"))
+    const editor = await screen.findByLabelText("Edit message text from Maya Patel")
+    fireEvent.change(editor, { target: { value: "Line one" } })
+    const enterEvent = createEvent.keyDown(editor, { key: "Enter", code: "Enter", shiftKey: true })
+    fireEvent(editor, enterEvent)
+    fireEvent.change(editor, { target: { value: "Line one\nLine two" } })
+
+    expect(enterEvent.defaultPrevented).toBe(false)
+    expect((editor as HTMLTextAreaElement).value).toBe("Line one\nLine two")
+    expect(calls).toEqual([])
   })
 
   it("collapses and reopens the channel members panel", async () => {

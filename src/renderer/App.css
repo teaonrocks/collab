@@ -294,7 +294,8 @@ body,
 .messageActions button,
 .composer button,
 .chatHeaderActions button,
-.messageContextMenu button {
+.messageContextMenu button,
+.deleteMessageDialog button {
   font: inherit;
 }
 
@@ -485,6 +486,10 @@ body,
   color: #80848e;
 }
 
+.channelMessage.editing {
+  background: #f2f3f5;
+}
+
 .channelMessage.deleted .messageContent p {
   color: #80848e;
   font-style: italic;
@@ -541,6 +546,66 @@ body,
   font-size: 14px;
   line-height: 1.42;
   overflow-wrap: anywhere;
+}
+
+.messageEditForm {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 6px;
+}
+
+.messageEditForm textarea {
+  width: 100%;
+  min-height: 48px;
+  max-height: 180px;
+  resize: none;
+  padding: 8px 10px;
+  border: 1px solid #c7ccd1;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #313338;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.42;
+  overflow: hidden;
+}
+
+.messageEditForm textarea:focus {
+  outline: 2px solid #9ca3af;
+  outline-offset: 1px;
+}
+
+.messageEditActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.messageEditActions button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid #c7ccd1;
+  border-radius: 5px;
+  background: #ffffff;
+  color: #4e5058;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.messageEditActions button[type="submit"] {
+  border-color: #4e5058;
+  background: #4e5058;
+  color: #ffffff;
+}
+
+.messageEditActions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .messageActions {
@@ -737,6 +802,75 @@ body,
 
 .messageContextMenu button:last-child {
   border-bottom: 0;
+}
+
+.dialogScrim {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(49, 51, 56, 0.28);
+}
+
+.deleteMessageDialog {
+  width: min(360px, 100%);
+  padding: 16px;
+  border: 1px solid #c7ccd1;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 16px 40px rgba(32, 33, 36, 0.2);
+}
+
+.deleteMessageDialog h2 {
+  margin: 0;
+  color: #313338;
+  font-size: 16px;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+
+.deleteMessageDialog p {
+  margin: 8px 0 0;
+  color: #4e5058;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.deleteMessageActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.deleteMessageActions button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid #c7ccd1;
+  border-radius: 5px;
+  background: #ffffff;
+  color: #4e5058;
+  font-size: 13px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.deleteMessageActions button:hover,
+.deleteMessageActions button:focus-visible {
+  background: #f2f3f5;
+}
+
+.deleteMessageActions button.danger {
+  border-color: #b3261e;
+  background: #b3261e;
+  color: #ffffff;
+}
+
+.deleteMessageActions button.danger:hover,
+.deleteMessageActions button.danger:focus-visible {
+  background: #921b16;
 }
 
 .loadingShell {

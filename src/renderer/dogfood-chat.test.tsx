@@ -13,8 +13,14 @@ const mocks = vi.hoisted(() => ({
     signOut: vi.fn(),
     getSignInUrl: vi.fn()
   },
+  convexAuth: {
+    isLoading: false,
+    isAuthenticated: false
+  },
   ensureViewer: vi.fn(),
   sendMessage: vi.fn(),
+  editMessage: vi.fn(),
+  deleteMessage: vi.fn(),
   mutationCallCount: 0,
   workspace: undefined as DogfoodWorkspaceView | null | undefined,
   messages: undefined as ReadonlyArray<DogfoodChannelMessageView> | undefined
@@ -25,9 +31,12 @@ vi.mock("@workos-inc/authkit-react", () => ({
 }))
 
 vi.mock("convex/react", () => ({
+  useConvexAuth: () => mocks.convexAuth,
+  useAction: () => mocks.ensureViewer,
   useMutation: () => {
+    const mutation = [mocks.sendMessage, mocks.editMessage, mocks.deleteMessage][mocks.mutationCallCount % 3]
     mocks.mutationCallCount += 1
-    return mocks.mutationCallCount % 2 === 1 ? mocks.ensureViewer : mocks.sendMessage
+    return mutation
   },
   useQuery: (_query: unknown, args: unknown) => {
     if (args === "skip") return undefined
@@ -39,22 +48,63 @@ vi.mock("./App", () => ({
   WorkspaceChat: ((props: {
     readonly model: CollabSnapshot
     readonly createChannelMessage: (input: { readonly channelId: string; readonly body: string }) => Promise<unknown>
+    readonly editChannelMessage?: (input: { readonly channelId: string; readonly messageId: string; readonly body: string }) => Promise<unknown>
+    readonly deleteChannelMessage: (input: { readonly channelId: string; readonly messageId: string }) => Promise<unknown>
+    readonly canEditMessage?: (message: ChannelMessage) => boolean
+    readonly canDeleteMessage?: (message: ChannelMessage) => boolean
     readonly profileMenuActions?: ReadonlyArray<{ readonly label: string; readonly onSelect: () => void }>
-  }) => (
-    <section aria-label="mock workspace chat">
-      <h2>{props.model.workspace.name}</h2>
-      <p>{props.model.channelMessages[0]?.body}</p>
-      <button
-        type="button"
-        onClick={() => props.createChannelMessage({ channelId: props.model.channel.id, body: "Hello from dogfood" })}
-      >
-        Send mock message
-      </button>
-      <button type="button" onClick={() => props.profileMenuActions?.[0]?.onSelect()}>
-        Sign out
-      </button>
-    </section>
-  )) satisfies ComponentType<any>
+  }) => {
+    const firstMessage = props.model.channelMessages[0]
+    const secondMessage = props.model.channelMessages[1]
+    return (
+      <section aria-label="mock workspace chat">
+        <h2>{props.model.workspace.name}</h2>
+        <p>{firstMessage?.body}</p>
+        <button
+          type="button"
+          onClick={() => props.createChannelMessage({ channelId: props.model.channel.id, body: "Hello from dogfood" })}
+        >
+          Send mock message
+        </button>
+        {firstMessage !== undefined && props.canEditMessage?.(firstMessage)
+          ? (
+            <button
+              type="button"
+              onClick={() => props.editChannelMessage?.({
+                channelId: props.model.channel.id,
+                messageId: firstMessage.id,
+                body: "Edited dogfood"
+              })}
+            >
+              Edit first message
+            </button>
+          )
+          : null}
+        {firstMessage !== undefined && props.canDeleteMessage?.(firstMessage)
+          ? (
+            <button
+              type="button"
+              onClick={() => props.deleteChannelMessage({
+                channelId: props.model.channel.id,
+                messageId: firstMessage.id
+              })}
+            >
+              Delete first message
+            </button>
+          )
+          : null}
+        {secondMessage !== undefined && props.canEditMessage?.(secondMessage)
+          ? <button type="button">Edit second message</button>
+          : null}
+        {secondMessage !== undefined && props.canDeleteMessage?.(secondMessage)
+          ? <button type="button">Delete second message</button>
+          : null}
+        <button type="button" onClick={() => props.profileMenuActions?.[0]?.onSelect()}>
+          Sign out
+        </button>
+      </section>
+    )
+  }) satisfies ComponentType<any>
 }))
 
 afterEach(() => {
@@ -66,8 +116,12 @@ beforeEach(() => {
   mocks.auth.isLoading = false
   mocks.auth.user = null
   mocks.auth.getSignInUrl.mockResolvedValue("https://api.workos.com/user_management/authorize")
+  mocks.convexAuth.isLoading = false
+  mocks.convexAuth.isAuthenticated = false
   mocks.ensureViewer.mockResolvedValue({})
   mocks.sendMessage.mockResolvedValue({})
+  mocks.editMessage.mockResolvedValue({})
+  mocks.deleteMessage.mockResolvedValue({})
   mocks.mutationCallCount = 0
   mocks.workspace = undefined
   mocks.messages = undefined
@@ -97,6 +151,18 @@ const messages: ReadonlyArray<DogfoodChannelMessageView> = [
     authorDisplayName: "Maya Patel",
     body: "Dogfood chat is live.",
     createdAt: 42
+  }
+]
+
+const messagesWithAnotherAuthor: ReadonlyArray<DogfoodChannelMessageView> = [
+  ...messages,
+  {
+    id: "message-2" as Id<"messages">,
+    channelId: "channel-1" as Id<"channels">,
+    authorUserId: "user-2" as Id<"users">,
+    authorDisplayName: "Lee Chen",
+    body: "Another teammate is here.",
+    createdAt: 43
   }
 ]
 
@@ -144,17 +210,33 @@ describe("ConvexDogfoodApp", () => {
   it("shows access setup errors from ensureViewer", async () => {
     const { ConvexDogfoodApp } = await import("./dogfood-chat")
     mocks.auth.user = { id: "user-1" }
+    mocks.convexAuth.isAuthenticated = true
     mocks.ensureViewer.mockRejectedValue(new Error("This email is not on the Aether dogfood allowlist"))
 
     render(<ConvexDogfoodApp />)
 
     expect(await screen.findByRole("heading", { name: "Could Not Join" })).toBeTruthy()
     expect(screen.getByText("This email is not on the Aether dogfood allowlist")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy()
+  })
+
+  it("can retry viewer setup after an access setup error", async () => {
+    const { ConvexDogfoodApp } = await import("./dogfood-chat")
+    mocks.auth.user = { id: "user-1" }
+    mocks.convexAuth.isAuthenticated = true
+    mocks.ensureViewer.mockRejectedValueOnce(new Error("WorkOS user profile is missing an email address"))
+
+    render(<ConvexDogfoodApp />)
+
+    fireEvent.click(await screen.findByRole("button", { name: "Try again" }))
+
+    await waitFor(() => expect(mocks.ensureViewer).toHaveBeenCalledTimes(2))
   })
 
   it("wires the profile sign-out action through the reused chat surface", async () => {
     const { ConvexDogfoodApp } = await import("./dogfood-chat")
     mocks.auth.user = { id: "user-1" }
+    mocks.convexAuth.isAuthenticated = true
     mocks.workspace = workspace
     mocks.messages = messages
 
@@ -168,6 +250,7 @@ describe("ConvexDogfoodApp", () => {
   it("sends messages through the Convex mutation using the active channel", async () => {
     const { ConvexDogfoodApp } = await import("./dogfood-chat")
     mocks.auth.user = { id: "user-1" }
+    mocks.convexAuth.isAuthenticated = true
     mocks.workspace = workspace
     mocks.messages = messages
 
@@ -181,5 +264,48 @@ describe("ConvexDogfoodApp", () => {
         body: "Hello from dogfood"
       })
     )
+  })
+
+  it("wires edit and hard delete mutations for the current author only", async () => {
+    const { ConvexDogfoodApp } = await import("./dogfood-chat")
+    mocks.auth.user = { id: "user-1" }
+    mocks.convexAuth.isAuthenticated = true
+    mocks.workspace = workspace
+    mocks.messages = messagesWithAnotherAuthor
+
+    render(<ConvexDogfoodApp />)
+
+    expect(await screen.findByRole("button", { name: "Edit first message" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Delete first message" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Edit second message" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Delete second message" })).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit first message" }))
+    fireEvent.click(screen.getByRole("button", { name: "Delete first message" }))
+
+    await waitFor(() =>
+      expect(mocks.editMessage).toHaveBeenCalledWith({
+        channelId: workspace.channel.id,
+        messageId: messages[0]!.id,
+        body: "Edited dogfood"
+      })
+    )
+    expect(mocks.deleteMessage).toHaveBeenCalledWith({
+      channelId: workspace.channel.id,
+      messageId: messages[0]!.id
+    })
+  })
+
+  it("waits for Convex to authenticate before initializing the viewer", async () => {
+    const { ConvexDogfoodApp } = await import("./dogfood-chat")
+    mocks.auth.user = { id: "user-1" }
+    mocks.convexAuth.isLoading = true
+    mocks.convexAuth.isAuthenticated = false
+
+    render(<ConvexDogfoodApp />)
+
+    expect(screen.getByRole("heading", { name: "Checking Session" })).toBeTruthy()
+    expect(screen.getByText("Waiting for your AuthKit session to reach Convex...")).toBeTruthy()
+    expect(mocks.ensureViewer).not.toHaveBeenCalled()
   })
 })

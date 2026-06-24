@@ -1,6 +1,7 @@
 import { v } from "convex/values"
+import { internal } from "./_generated/api"
 import type { Doc, Id } from "./_generated/dataModel"
-import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server"
+import { action, internalMutation, mutation, query, type ActionCtx, type MutationCtx, type QueryCtx } from "./_generated/server"
 
 const DOGFOOD_WORKSPACE_KEY = "aether-dogfood"
 const DOGFOOD_WORKSPACE_NAME = "Aether Dogfood"
@@ -12,6 +13,13 @@ type ViewerIdentity = NonNullable<AuthIdentity>
 
 const normalizeEmail = (email: string): string => email.trim().toLowerCase()
 
+const workOsUserEndpoint = "https://api.workos.com/user_management/users"
+
+const stringClaim = (identity: ViewerIdentity, key: string): string | undefined => {
+  const value = identity[key]
+  return typeof value === "string" ? value : undefined
+}
+
 const allowedEmails = (): ReadonlySet<string> =>
   new Set(
     (process.env.AETHER_ALLOWED_EMAILS ?? "")
@@ -20,20 +28,27 @@ const allowedEmails = (): ReadonlySet<string> =>
       .filter((email) => email.length > 0)
   )
 
+const emailFromIdentity = (identity: ViewerIdentity): string | undefined =>
+  identity.email ??
+  stringClaim(identity, "properties.email") ??
+  stringClaim(identity, "email_address") ??
+  stringClaim(identity, "preferred_username")
+
+const displayNameFromEmail = (email: string): string => email.split("@")[0] ?? "Aether User"
+
 const displayNameFromIdentity = (identity: ViewerIdentity, email: string): string => {
-  const name = identity.name?.trim()
+  const name = (identity.name ?? stringClaim(identity, "properties.name"))?.trim()
   if (name !== undefined && name.length > 0) return name
-  return email.split("@")[0] ?? "Aether User"
+  return displayNameFromEmail(email)
 }
 
-const requireIdentity = async (ctx: QueryCtx | MutationCtx): Promise<ViewerIdentity> => {
+const requireIdentity = async (ctx: QueryCtx | MutationCtx | ActionCtx): Promise<ViewerIdentity> => {
   const identity = await ctx.auth.getUserIdentity()
   if (identity === null) throw new Error("Not authenticated")
   return identity
 }
 
-const requireAllowedIdentityEmail = (identity: ViewerIdentity): string => {
-  const rawEmail = identity.email
+const requireAllowedEmail = (rawEmail: string): string => {
   if (rawEmail === undefined || rawEmail.trim().length === 0) {
     throw new Error("Authenticated user is missing an email address")
   }
@@ -45,16 +60,56 @@ const requireAllowedIdentityEmail = (identity: ViewerIdentity): string => {
   return email
 }
 
+const requireAllowedIdentityEmail = (identity: ViewerIdentity): string => {
+  const rawEmail = emailFromIdentity(identity)
+  if (rawEmail === undefined) throw new Error("Authenticated user is missing an email address")
+  return requireAllowedEmail(rawEmail)
+}
+
 const getUserByTokenIdentifier = (ctx: QueryCtx | MutationCtx, tokenIdentifier: string) =>
   ctx.db.query("users").withIndex("by_token_identifier", (q) => q.eq("tokenIdentifier", tokenIdentifier)).unique()
 
+const getUserByEmail = (ctx: QueryCtx | MutationCtx, email: string) =>
+  ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", email)).unique()
+
 const requireAllowedCurrentUser = async (ctx: QueryCtx | MutationCtx): Promise<Doc<"users">> => {
   const identity = await requireIdentity(ctx)
-  requireAllowedIdentityEmail(identity)
-
   const user = await getUserByTokenIdentifier(ctx, identity.tokenIdentifier)
   if (user === null) throw new Error("Current user has not been initialized")
+  requireAllowedEmail(user.email)
   return user
+}
+
+const workOsField = (body: unknown, key: string): string | undefined => {
+  if (typeof body !== "object" || body === null || !Object.hasOwn(body, key)) return undefined
+  const value = (body as Record<string, unknown>)[key]
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined
+}
+
+const resolveWorkOsViewer = async (identity: ViewerIdentity): Promise<{ readonly email: string; readonly displayName: string }> => {
+  const identityEmail = emailFromIdentity(identity)
+  if (identityEmail !== undefined && identityEmail.trim().length > 0) {
+    const email = requireAllowedEmail(identityEmail)
+    return { email, displayName: displayNameFromIdentity(identity, email) }
+  }
+
+  const apiKey = process.env.WORKOS_API_KEY
+  if (apiKey === undefined || apiKey.trim().length === 0) {
+    throw new Error("WorkOS API key is not configured")
+  }
+
+  const response = await fetch(`${workOsUserEndpoint}/${encodeURIComponent(identity.subject)}`, {
+    headers: { Authorization: `Bearer ${apiKey}` }
+  })
+  if (!response.ok) {
+    throw new Error(`Could not load WorkOS user profile (${response.status})`)
+  }
+
+  const body = await response.json() as unknown
+  const rawEmail = workOsField(body, "email")
+  if (rawEmail === undefined) throw new Error("WorkOS user profile is missing an email address")
+  const email = requireAllowedEmail(rawEmail)
+  return { email, displayName: workOsField(body, "name") ?? displayNameFromEmail(email) }
 }
 
 const getDefaultWorkspace = (ctx: QueryCtx | MutationCtx) =>
@@ -140,31 +195,63 @@ const requireChannelMember = async (
   return membership
 }
 
-export const ensureViewer = mutation({
+export const ensureViewer = action({
   args: {},
   handler: async (ctx) => {
     const identity = await requireIdentity(ctx)
-    const email = requireAllowedIdentityEmail(identity)
-    const displayName = displayNameFromIdentity(identity, email)
-    const now = Date.now()
-    const existingUser = await getUserByTokenIdentifier(ctx, identity.tokenIdentifier)
-
-    const userId = existingUser?._id ?? (await ctx.db.insert("users", {
+    const { email, displayName } = await resolveWorkOsViewer(identity)
+    const result: {
+      readonly userId: Id<"users">
+      readonly workspaceId: Id<"workspaces">
+      readonly channelId: Id<"channels">
+      readonly displayName: string
+    } = await ctx.runMutation(internal.chat.ensureViewerForIdentity, {
       tokenIdentifier: identity.tokenIdentifier,
       email,
-      displayName,
+      displayName
+    })
+
+    return result
+  }
+})
+
+export const ensureViewerForIdentity = internalMutation({
+  args: {
+    tokenIdentifier: v.string(),
+    email: v.string(),
+    displayName: v.string()
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now()
+    const existingUser =
+      (await getUserByTokenIdentifier(ctx, args.tokenIdentifier)) ?? (await getUserByEmail(ctx, args.email))
+
+    const userId = existingUser?._id ?? (await ctx.db.insert("users", {
+      tokenIdentifier: args.tokenIdentifier,
+      email: args.email,
+      displayName: args.displayName,
       createdAt: now,
       updatedAt: now
     }))
 
-    if (existingUser !== null && (existingUser.email !== email || existingUser.displayName !== displayName)) {
-      await ctx.db.patch(existingUser._id, { email, displayName, updatedAt: now })
+    if (
+      existingUser !== null &&
+      (existingUser.tokenIdentifier !== args.tokenIdentifier ||
+        existingUser.email !== args.email ||
+        existingUser.displayName !== args.displayName)
+    ) {
+      await ctx.db.patch(existingUser._id, {
+        tokenIdentifier: args.tokenIdentifier,
+        email: args.email,
+        displayName: args.displayName,
+        updatedAt: now
+      })
     }
 
     const { workspaceId, channelId } = await ensureDefaultSpace(ctx, now)
     await ensureMemberships(ctx, { workspaceId, channelId, userId, now })
 
-    return { userId, workspaceId, channelId, displayName }
+    return { userId, workspaceId, channelId, displayName: args.displayName }
   }
 })
 
@@ -209,9 +296,10 @@ export const channelMessages = query({
     const messages = await ctx.db
       .query("messages")
       .withIndex("by_channel_created_at", (q) => q.eq("channelId", args.channelId))
-      .collect()
+      .order("desc")
+      .take(200)
 
-    return Promise.all(messages.map((message) => toMessageView(ctx, message)))
+    return Promise.all([...messages].reverse().map((message) => toMessageView(ctx, message)))
   }
 })
 
@@ -242,6 +330,48 @@ export const sendMessage = mutation({
     const message = await ctx.db.get(messageId)
     if (message === null) throw new Error("Message not found after insert")
     return toMessageView(ctx, message)
+  }
+})
+
+export const editMessage = mutation({
+  args: {
+    channelId: v.id("channels"),
+    messageId: v.id("messages"),
+    body: v.string()
+  },
+  handler: async (ctx, args) => {
+    const body = args.body.trim()
+    if (body.length === 0) throw new Error("Message body is required")
+
+    const user = await requireAllowedCurrentUser(ctx)
+    const message = await ctx.db.get(args.messageId)
+    if (message === null || message.channelId !== args.channelId) throw new Error("Message not found")
+
+    await requireChannelMember(ctx, { channelId: message.channelId, userId: user._id })
+    if (message.authorUserId !== user._id) throw new Error("Only the original author can edit this message")
+
+    await ctx.db.patch(args.messageId, { body, editedAt: Date.now() })
+    const updated = await ctx.db.get(args.messageId)
+    if (updated === null) throw new Error("Message not found after edit")
+    return toMessageView(ctx, updated)
+  }
+})
+
+export const deleteMessage = mutation({
+  args: {
+    channelId: v.id("channels"),
+    messageId: v.id("messages")
+  },
+  handler: async (ctx, args) => {
+    const user = await requireAllowedCurrentUser(ctx)
+    const message = await ctx.db.get(args.messageId)
+    if (message === null || message.channelId !== args.channelId) throw new Error("Message not found")
+
+    await requireChannelMember(ctx, { channelId: message.channelId, userId: user._id })
+    if (message.authorUserId !== user._id) throw new Error("Only the original author can delete this message")
+
+    await ctx.db.delete(args.messageId)
+    return { messageId: args.messageId }
   }
 })
 

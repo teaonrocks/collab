@@ -38,6 +38,14 @@ type DeleteChannelMessage = (input: {
   readonly messageId: ChannelMessageId
 }) => Promise<unknown>
 
+type EditChannelMessage = (input: {
+  readonly channelId: ChannelId
+  readonly messageId: ChannelMessageId
+  readonly body: string
+}) => Promise<unknown>
+
+type MessageActionGuard = (message: ChannelMessage) => boolean
+
 export type ProfileMenuAction = {
   readonly label: string
   readonly onSelect: () => void
@@ -47,6 +55,7 @@ const MESSAGE_CONTEXT_MENU_WIDTH = 170
 const MESSAGE_CONTEXT_MENU_OFFSET = 6
 const COMPOSER_MIN_HEIGHT = 22
 const COMPOSER_MAX_HEIGHT = 140
+const MESSAGE_EDIT_MAX_HEIGHT = 180
 
 export function App() {
   const snapshot = useAtomValue(atoms.snapshot)
@@ -70,27 +79,52 @@ export function WorkspaceChat(props: {
   readonly model: CollabSnapshot
   readonly createChannelMessage: CreateChannelMessage
   readonly deleteChannelMessage: DeleteChannelMessage
+  readonly editChannelMessage?: EditChannelMessage
   readonly canDeleteMessages?: boolean
+  readonly canDeleteMessage?: MessageActionGuard
+  readonly canEditMessage?: MessageActionGuard
   readonly profileMenuActions?: ReadonlyArray<ProfileMenuAction>
 }) {
   const {
     model,
     createChannelMessage,
     deleteChannelMessage,
+    editChannelMessage,
     canDeleteMessages = true,
+    canDeleteMessage,
+    canEditMessage,
     profileMenuActions = []
   } = props
   const [messageDraft, setMessageDraft] = useState("")
   const [selectedMessageIds, setSelectedMessageIds] = useState<ReadonlyArray<ChannelMessageId>>([])
+  const [editingMessage, setEditingMessage] = useState<{
+    readonly messageId: ChannelMessageId
+    readonly draft: string
+    readonly saving: boolean
+  } | null>(null)
+  const [pendingDeleteMessageId, setPendingDeleteMessageId] = useState<ChannelMessageId | null>(null)
   const [membersOpen, setMembersOpen] = useState(true)
   const [messageMenu, setMessageMenu] = useState<MessageMenuState>(null)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const view = createChannelViewModel(model, selectedMessageIds, messageMenu)
   const menuMessage = view.menuMessage
+  const pendingDeleteMessage = pendingDeleteMessageId === null
+    ? null
+    : model.channelMessages.find((message) => message.id === pendingDeleteMessageId && message.deletedAt === null) ?? null
 
   useEffect(() => {
     setSelectedMessageIds((ids) => pruneSelectedMessageIds(ids, model.channelMessages))
   }, [model.channelMessages])
+
+  useEffect(() => {
+    if (editingMessage === null) return
+    const message = model.channelMessages.find((item) => item.id === editingMessage.messageId)
+    if (message === undefined || message.deletedAt !== null) setEditingMessage(null)
+  }, [editingMessage, model.channelMessages])
+
+  useEffect(() => {
+    if (pendingDeleteMessageId !== null && pendingDeleteMessage === null) setPendingDeleteMessageId(null)
+  }, [pendingDeleteMessage, pendingDeleteMessageId])
 
   useEffect(() => {
     if (messageMenu === null) return
@@ -141,21 +175,56 @@ export function WorkspaceChat(props: {
       .catch(() => {})
   }
 
-  const deleteMessage = (messageId: ChannelMessageId) => {
+  const requestDeleteMessage = (messageId: ChannelMessageId) => {
+    setPendingDeleteMessageId(messageId)
+    setMessageMenu(null)
+  }
+
+  const confirmDeleteMessage = () => {
+    if (pendingDeleteMessage === null) return
+    const messageId = pendingDeleteMessage.id
     void deleteChannelMessage({
       channelId: model.channel.id,
       messageId
     })
       .then(() => {
         setSelectedMessageIds((ids) => ids.filter((id) => id !== messageId))
+        setEditingMessage((editing) => editing?.messageId === messageId ? null : editing)
+        setPendingDeleteMessageId(null)
         setMessageMenu(null)
       })
       .catch(() => {})
   }
 
+  const startEditingMessage = (message: ChannelMessage) => {
+    setEditingMessage({ messageId: message.id, draft: message.body, saving: false })
+    setMessageMenu(null)
+  }
+
+  const saveEditingMessage = () => {
+    if (editingMessage === null || editChannelMessage === undefined || editingMessage.saving) return
+    const body = editingMessage.draft.trim()
+    if (body.length === 0) return
+
+    setEditingMessage({ ...editingMessage, saving: true })
+    void editChannelMessage({
+      channelId: model.channel.id,
+      messageId: editingMessage.messageId,
+      body
+    })
+      .then(() => setEditingMessage(null))
+      .catch(() => setEditingMessage((editing) => editing === null ? null : { ...editing, saving: false }))
+  }
+
   const openMessageMenu = (messageId: ChannelMessageId, x: number, y: number) => {
     setMessageMenu({ messageId, x, y })
   }
+
+  const messageCanDelete = (message: ChannelMessage): boolean =>
+    canDeleteMessages && (canDeleteMessage?.(message) ?? true)
+
+  const messageCanEdit = (message: ChannelMessage): boolean =>
+    editChannelMessage !== undefined && (canEditMessage?.(message) ?? true)
 
   return (
     <main className={classNames("appShell", !membersOpen && "membersCollapsed")}>
@@ -193,8 +262,14 @@ export function WorkspaceChat(props: {
         onSendMessage={sendChannelMessage}
         onToggleMessage={toggleMessageSelection}
         onCopyMessage={copyMessage}
-        onDeleteMessage={deleteMessage}
-        canDeleteMessages={canDeleteMessages}
+        onStartEditMessage={startEditingMessage}
+        onEditDraftChange={(draft) => setEditingMessage((editing) => editing === null ? null : { ...editing, draft })}
+        onCancelEditMessage={() => setEditingMessage(null)}
+        onSaveEditMessage={saveEditingMessage}
+        onDeleteMessage={requestDeleteMessage}
+        canDeleteMessage={messageCanDelete}
+        canEditMessage={messageCanEdit}
+        editingMessage={editingMessage}
         onOpenMessageMenu={openMessageMenu}
       />
 
@@ -213,9 +288,21 @@ export function WorkspaceChat(props: {
             y={messageMenu.y}
             onToggle={() => toggleMessageSelection(menuMessage.id)}
             onCopy={() => copyMessage(menuMessage)}
-            onDelete={() => deleteMessage(menuMessage.id)}
-            canDelete={canDeleteMessages}
+            onEdit={() => startEditingMessage(menuMessage)}
+            onDelete={() => requestDeleteMessage(menuMessage.id)}
+            canEdit={messageCanEdit(menuMessage)}
+            canDelete={messageCanDelete(menuMessage)}
             onClose={() => setMessageMenu(null)}
+          />
+        )}
+
+      {pendingDeleteMessage === null
+        ? null
+        : (
+          <DeleteMessageDialog
+            authorDisplayName={pendingDeleteMessage.authorDisplayName}
+            onCancel={() => setPendingDeleteMessageId(null)}
+            onConfirm={confirmDeleteMessage}
           />
         )}
     </main>
@@ -386,8 +473,18 @@ function ChatPane(props: {
   readonly onSendMessage: () => void
   readonly onToggleMessage: (messageId: ChannelMessageId) => void
   readonly onCopyMessage: (message: ChannelMessage) => void
+  readonly onStartEditMessage: (message: ChannelMessage) => void
+  readonly onEditDraftChange: (draft: string) => void
+  readonly onCancelEditMessage: () => void
+  readonly onSaveEditMessage: () => void
   readonly onDeleteMessage: (messageId: ChannelMessageId) => void
-  readonly canDeleteMessages: boolean
+  readonly canDeleteMessage: MessageActionGuard
+  readonly canEditMessage: MessageActionGuard
+  readonly editingMessage: {
+    readonly messageId: ChannelMessageId
+    readonly draft: string
+    readonly saving: boolean
+  } | null
   readonly onOpenMessageMenu: (messageId: ChannelMessageId, x: number, y: number) => void
 }) {
   const {
@@ -401,8 +498,14 @@ function ChatPane(props: {
     onSendMessage,
     onToggleMessage,
     onCopyMessage,
+    onStartEditMessage,
+    onEditDraftChange,
+    onCancelEditMessage,
+    onSaveEditMessage,
     onDeleteMessage,
-    canDeleteMessages,
+    canDeleteMessage,
+    canEditMessage,
+    editingMessage,
     onOpenMessageMenu
   } = props
   const selectionMode = selectedMessageIds.length > 0
@@ -422,8 +525,15 @@ function ChatPane(props: {
                 actionsAvailable={!selectionMode || actionsPinned}
                 onToggle={() => onToggleMessage(message.id)}
                 onCopy={() => onCopyMessage(message)}
+                onEdit={() => onStartEditMessage(message)}
+                onEditDraftChange={onEditDraftChange}
+                onCancelEdit={onCancelEditMessage}
+                onSaveEdit={onSaveEditMessage}
                 onDelete={() => onDeleteMessage(message.id)}
-                canDelete={canDeleteMessages}
+                canEdit={canEditMessage(message)}
+                canDelete={canDeleteMessage(message)}
+                editingDraft={editingMessage?.messageId === message.id ? editingMessage.draft : null}
+                editSaving={editingMessage?.messageId === message.id && editingMessage.saving}
                 onOpenMenu={(x, y) => onOpenMessageMenu(message.id, x, y)}
               />
             </li>
@@ -449,8 +559,15 @@ function ChannelMessageRow(props: {
   readonly actionsAvailable: boolean
   readonly onToggle: () => void
   readonly onCopy: () => void
+  readonly onEdit: () => void
+  readonly onEditDraftChange: (draft: string) => void
+  readonly onCancelEdit: () => void
+  readonly onSaveEdit: () => void
   readonly onDelete: () => void
+  readonly canEdit: boolean
   readonly canDelete: boolean
+  readonly editingDraft: string | null
+  readonly editSaving: boolean
   readonly onOpenMenu: (x: number, y: number) => void
 }) {
   const {
@@ -461,14 +578,23 @@ function ChannelMessageRow(props: {
     actionsAvailable,
     onToggle,
     onCopy,
+    onEdit,
+    onEditDraftChange,
+    onCancelEdit,
+    onSaveEdit,
     onDelete,
+    canEdit,
     canDelete,
+    editingDraft,
+    editSaving,
     onOpenMenu
   } = props
   const deleted = message.deletedAt !== null
+  const editing = editingDraft !== null
   const className = classNames(
     "channelMessage",
     deleted && "deleted",
+    editing && "editing",
     selected && "selected",
     selectionMode && !deleted && "selecting"
   )
@@ -503,9 +629,20 @@ function ChannelMessageRow(props: {
           <strong>{message.authorDisplayName}</strong>
           <time dateTime={toIso(message.createdAt)}>{formatTime(message.createdAt)}</time>
         </div>
-        <p>{deleted ? "Message deleted" : message.body}</p>
+        {editing
+          ? (
+            <MessageEditForm
+              authorDisplayName={message.authorDisplayName}
+              draft={editingDraft}
+              saving={editSaving}
+              onDraftChange={onEditDraftChange}
+              onSave={onSaveEdit}
+              onCancel={onCancelEdit}
+            />
+          )
+          : <p>{deleted ? "Message deleted" : message.body}</p>}
       </div>
-      {deleted || !actionsAvailable
+      {deleted || editing || !actionsAvailable
         ? null
         : (
           <div
@@ -524,6 +661,13 @@ function ChannelMessageRow(props: {
             <button type="button" aria-label={`Copy message from ${message.authorDisplayName}`} onClick={onCopy}>
               Copy
             </button>
+            {canEdit
+              ? (
+                <button type="button" aria-label={`Edit message from ${message.authorDisplayName}`} onClick={onEdit}>
+                  Edit
+                </button>
+              )
+              : null}
             {canDelete
               ? (
                 <button type="button" aria-label={`Delete message from ${message.authorDisplayName}`} onClick={onDelete}>
@@ -548,6 +692,62 @@ function ChannelMessageRow(props: {
   )
 }
 
+function MessageEditForm(props: {
+  readonly authorDisplayName: string
+  readonly draft: string
+  readonly saving: boolean
+  readonly onDraftChange: (draft: string) => void
+  readonly onSave: () => void
+  readonly onCancel: () => void
+}) {
+  const { authorDisplayName, draft, saving, onDraftChange, onSave, onCancel } = props
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const canSave = draft.trim().length > 0 && !saving
+
+  useEffect(() => {
+    const textarea = textareaRef.current
+    if (textarea === null) return
+    resizeTextarea(textarea, COMPOSER_MIN_HEIGHT, MESSAGE_EDIT_MAX_HEIGHT)
+  }, [draft])
+
+  useEffect(() => {
+    const textarea = textareaRef.current
+    if (textarea === null) return
+    textarea.focus()
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+  }, [])
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (canSave) onSave()
+  }
+
+  return (
+    <form className="messageEditForm" aria-label={`Edit message from ${authorDisplayName}`} onSubmit={submit} onClick={(event) => event.stopPropagation()}>
+      <textarea
+        ref={textareaRef}
+        rows={2}
+        value={draft}
+        aria-label={`Edit message text from ${authorDisplayName}`}
+        onChange={(event) => onDraftChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault()
+            onCancel()
+          } else if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault()
+            if (canSave) onSave()
+          }
+        }}
+      />
+      <div className="messageEditActions">
+        <button type="button" onClick={onCancel} disabled={saving}>Cancel</button>
+        <button type="submit" disabled={!canSave}>{saving ? "Saving..." : "Save"}</button>
+      </div>
+    </form>
+  )
+}
+
 function MessageComposer(props: {
   readonly channelName: string
   readonly draft: string
@@ -558,7 +758,7 @@ function MessageComposer(props: {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
   useEffect(() => {
-    resizeComposerTextarea(textareaRef.current)
+    resizeTextarea(textareaRef.current, COMPOSER_MIN_HEIGHT, COMPOSER_MAX_HEIGHT)
   }, [draft])
 
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -622,11 +822,13 @@ function MessageContextMenu(props: {
   readonly y: number
   readonly onToggle: () => void
   readonly onCopy: () => void
+  readonly onEdit: () => void
   readonly onDelete: () => void
+  readonly canEdit: boolean
   readonly canDelete: boolean
   readonly onClose: () => void
 }) {
-  const { message, selected, x, y, onToggle, onCopy, onDelete, canDelete, onClose } = props
+  const { message, selected, x, y, onToggle, onCopy, onEdit, onDelete, canEdit, canDelete, onClose } = props
   return (
     <div
       className="messageContextMenu"
@@ -655,6 +857,20 @@ function MessageContextMenu(props: {
       >
         Copy message
       </button>
+      {canEdit
+        ? (
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              onEdit()
+              onClose()
+            }}
+          >
+            Edit message
+          </button>
+        )
+        : null}
       {canDelete
         ? (
           <button
@@ -669,6 +885,46 @@ function MessageContextMenu(props: {
           </button>
         )
         : null}
+    </div>
+  )
+}
+
+function DeleteMessageDialog(props: {
+  readonly authorDisplayName: string
+  readonly onCancel: () => void
+  readonly onConfirm: () => void
+}) {
+  const { authorDisplayName, onCancel, onConfirm } = props
+  const cancelButtonRef = useRef<HTMLButtonElement | null>(null)
+
+  useEffect(() => {
+    cancelButtonRef.current?.focus()
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onCancel()
+    }
+    window.addEventListener("keydown", closeOnEscape)
+    return () => {
+      window.removeEventListener("keydown", closeOnEscape)
+    }
+  }, [onCancel])
+
+  return (
+    <div className="dialogScrim" role="presentation" onClick={onCancel}>
+      <section
+        className="deleteMessageDialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delete-message-title"
+        aria-describedby="delete-message-description"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <h2 id="delete-message-title">Delete Message?</h2>
+        <p id="delete-message-description">Delete this message from {authorDisplayName}? This cannot be undone.</p>
+        <div className="deleteMessageActions">
+          <button ref={cancelButtonRef} type="button" onClick={onCancel}>Cancel</button>
+          <button type="button" className="danger" onClick={onConfirm}>Delete</button>
+        </div>
+      </section>
     </div>
   )
 }
@@ -749,12 +1005,12 @@ const mentionCandidates = (displayName: string): ReadonlyArray<string> => {
     .filter((value) => value.length > 1)
 }
 
-const resizeComposerTextarea = (textarea: HTMLTextAreaElement | null) => {
+const resizeTextarea = (textarea: HTMLTextAreaElement | null, minHeight: number, maxHeight: number) => {
   if (textarea === null) return
   textarea.style.height = "auto"
-  const nextHeight = Math.min(Math.max(textarea.scrollHeight, COMPOSER_MIN_HEIGHT), COMPOSER_MAX_HEIGHT)
+  const nextHeight = Math.min(Math.max(textarea.scrollHeight, minHeight), maxHeight)
   textarea.style.height = `${nextHeight}px`
-  textarea.style.overflowY = textarea.scrollHeight > COMPOSER_MAX_HEIGHT ? "auto" : "hidden"
+  textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden"
 }
 
 const formatTime = (timestamp: number): string =>

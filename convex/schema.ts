@@ -6,7 +6,8 @@ const channelRole = v.union(v.literal("admin"), v.literal("member"), v.literal("
 
 export default defineSchema({
   users: defineTable({
-    tokenIdentifier: v.string(),
+    tokenIdentifier: v.optional(v.string()),
+    authSubject: v.optional(v.string()),
     email: v.string(),
     displayName: v.string(),
     createdAt: v.number(),
@@ -52,7 +53,8 @@ export default defineSchema({
     channelId: v.id("channels"),
     authorUserId: v.id("users"),
     body: v.string(),
-    createdAt: v.number()
+    createdAt: v.number(),
+    editedAt: v.optional(v.number())
   }).index("by_channel_created_at", ["channelId", "createdAt"]).index("by_workspace_created_at", [
     "workspaceId",
     "createdAt"
