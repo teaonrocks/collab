@@ -1,0 +1,49 @@
+{
+  "name": "aether",
+  "version": "0.1.0",
+  "description": "An Electron collaboration MVP wiring @effect/rpc and effect-atom over MessagePort for workspace-local agent runs.",
+  "license": "MIT",
+  "author": "",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@effect-atom/atom": "0.5.3",
+    "@effect-atom/atom-react": "0.5.0",
+    "@effect/experimental": "0.60.0",
+    "@effect/platform": "0.96.1",
+    "@effect/platform-node": "0.107.0",
+    "@effect/rpc": "0.75.1",
+    "effect": "3.21.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@effect/vitest": "0.29.0",
+    "@testing-library/react": "^16.1.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^41.0.0",
+    "electron-vite": "^2.3.0",
+    "happy-dom": "^16.0.0",
+    "typescript": "^5.7.0",
+    "vite": "^5.4.11",
+    "vitest": "^3.2.4"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@parcel/watcher",
+      "electron",
+      "esbuild",
+      "msgpackr-extract"
+    ]
+  }
+}

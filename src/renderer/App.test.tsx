@@ -1,0 +1,304 @@
+// @vitest-environment happy-dom
+import { Atom } from "@effect-atom/atom"
+import { RegistryProvider } from "@effect-atom/atom-react"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { Effect, Layer, Stream } from "effect"
+import { afterEach, describe, expect, it } from "vitest"
+import {
+  Channel,
+  ChannelMessage,
+  type ChannelMessageId,
+  CollabSnapshot,
+  HumanAccount,
+  type HumanAccountId,
+  Workspace,
+  type WorkspaceId
+} from "../shared/collab-rpc"
+import { App } from "./App"
+import { CollabApi } from "./collab-api"
+import { runtime } from "./collab-atoms"
+
+afterEach(cleanup)
+
+const userId = "human-1" as HumanAccountId
+const workspaceId = "workspace-1" as WorkspaceId
+const channelId = "channel-1" as Channel["id"]
+const messageId = "message-1" as ChannelMessageId
+
+const makeSnapshot = (messages: ReadonlyArray<ChannelMessage> = [
+  new ChannelMessage({
+    id: messageId,
+    channelId,
+    authorType: "human",
+    authorId: userId,
+    authorDisplayName: "Maya Patel",
+    body: "The partner brief needs a concise risk summary.",
+    createdAt: 2,
+    deletedAt: null
+  })
+]) =>
+  new CollabSnapshot({
+    currentUser: new HumanAccount({
+      id: userId,
+      displayName: "Maya Patel",
+      email: "maya@example.test",
+      createdAt: 1
+    }),
+    workspace: new Workspace({
+      id: workspaceId,
+      name: "Aether Labs",
+      createdAt: 1
+    }),
+    workspaceRole: "admin",
+    channel: new Channel({
+      id: channelId,
+      workspaceId,
+      name: "origination",
+      visibility: "private",
+      createdBy: userId,
+      createdAt: 1
+    }),
+    channelRole: "admin",
+    channelMessages: messages,
+    workspaceAgents: [],
+    channelAgentEnablements: [],
+    threads: [],
+    threadMessages: [],
+    agentRuns: [],
+    auditEvents: []
+  })
+
+const renderApp = (model: CollabSnapshot) => {
+  const calls: Array<{ method: string; args: unknown }> = []
+  const layer = Layer.succeed(
+    CollabApi,
+    CollabApi.of({
+      snapshot: () => Effect.succeed(model),
+      registerAgent: () => Effect.die("not used"),
+      enableAgent: () => Effect.die("not used"),
+      createChannelMessage: (input) => {
+        calls.push({ method: "createChannelMessage", args: input })
+        return Effect.succeed(new ChannelMessage({
+          id: "message-2" as ChannelMessageId,
+          channelId: input.channelId,
+          authorType: "human",
+          authorId: userId,
+          authorDisplayName: "Maya Patel",
+          body: input.body,
+          createdAt: 12,
+          deletedAt: null
+        }))
+      },
+      deleteChannelMessage: (input) => {
+        calls.push({ method: "deleteChannelMessage", args: input.messageId })
+        return Effect.succeed(new ChannelMessage({
+          id: input.messageId,
+          channelId: input.channelId,
+          authorType: "human",
+          authorId: userId,
+          authorDisplayName: "Maya Patel",
+          body: "The partner brief needs a concise risk summary.",
+          createdAt: 2,
+          deletedAt: 13
+        }))
+      },
+      createDraftThread: () => Effect.die("not used"),
+      startRun: () => Effect.die("not used"),
+      changes: () => Stream.make(model)
+    })
+  )
+  render(
+    <RegistryProvider initialValues={[Atom.initialValue(runtime.layer, layer)]} scheduleTask={(f) => f()}>
+      <App />
+    </RegistryProvider>
+  )
+  return calls
+}
+
+describe("App", () => {
+  it("renders the chat workspace from CollabApi", async () => {
+    renderApp(makeSnapshot())
+
+    expect(await screen.findByRole("heading", { name: "Aether Labs" })).toBeTruthy()
+    expect(await screen.findByText(/partner brief/)).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Hide members" })).toBeTruthy()
+    expect(screen.getByRole("tooltip", { name: "Aether Labs" })).toBeTruthy()
+    expect(screen.getByLabelText("Channel members")).toBeTruthy()
+    expect(screen.getByText("Online -- 1")).toBeTruthy()
+  })
+
+  it("keeps direct messages in the global rail instead of channel navigation", async () => {
+    renderApp(makeSnapshot())
+
+    const globalNavigation = await screen.findByLabelText("Global navigation")
+    const workspaceNavigation = screen.getByLabelText("Workspace navigation")
+
+    expect(within(globalNavigation).getByRole("navigation", { name: "Direct messages" })).toBeTruthy()
+    expect(within(globalNavigation).getByRole("button", { name: "Maya Patel" })).toBeTruthy()
+    expect(within(globalNavigation).getByRole("tooltip", { name: "Maya Patel" })).toBeTruthy()
+    expect(within(workspaceNavigation).queryByRole("navigation", { name: "Direct messages" })).toBeNull()
+    expect(within(workspaceNavigation).queryByText("Maya Patel")).toBeNull()
+  })
+
+  it("uses a dot instead of a count for channel unread state", async () => {
+    renderApp(makeSnapshot([
+      ...makeSnapshot().channelMessages,
+      new ChannelMessage({
+        id: "message-2" as ChannelMessageId,
+        channelId,
+        authorType: "human",
+        authorId: "human-2",
+        authorDisplayName: "Lee Chen",
+        body: "I pulled the incidents into the notes.",
+        createdAt: 3,
+        deletedAt: null
+      })
+    ]))
+
+    const channels = await screen.findByRole("navigation", { name: "Channels" })
+
+    expect(within(channels).getByLabelText("Unread messages")).toBeTruthy()
+    expect(within(channels).queryByText("2")).toBeNull()
+  })
+
+  it("prioritizes mention state over unread state in the channel indicator", async () => {
+    renderApp(makeSnapshot([
+      ...makeSnapshot().channelMessages,
+      new ChannelMessage({
+        id: "message-2" as ChannelMessageId,
+        channelId,
+        authorType: "human",
+        authorId: "human-2",
+        authorDisplayName: "Lee Chen",
+        body: "@Maya can you check this?",
+        createdAt: 3,
+        deletedAt: null
+      })
+    ]))
+
+    const channels = await screen.findByRole("navigation", { name: "Channels" })
+
+    expect(within(channels).getByLabelText("Mentioned")).toBeTruthy()
+    expect(within(channels).queryByLabelText("Unread messages")).toBeNull()
+  })
+
+  it("sends a channel message from the bottom composer with Enter", async () => {
+    const calls = renderApp(makeSnapshot())
+    const input = await screen.findByPlaceholderText("Message #origination")
+
+    fireEvent.change(input, { target: { value: "I will tighten the partner brief." } })
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" })
+
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        method: "createChannelMessage",
+        args: expect.objectContaining({
+          channelId,
+          body: "I will tighten the partner brief."
+        })
+      })
+    )
+  })
+
+  it("keeps Shift+Enter inside the composer without sending", async () => {
+    const calls = renderApp(makeSnapshot())
+    const input = await screen.findByPlaceholderText("Message #origination")
+
+    fireEvent.change(input, { target: { value: "First line" } })
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter", shiftKey: true })
+
+    expect(calls.some((call) => call.method === "createChannelMessage")).toBe(false)
+    expect((input as HTMLTextAreaElement).value).toBe("First line")
+  })
+
+  it("uses row-wide checkboxes for multi-select mode", async () => {
+    renderApp(makeSnapshot([
+      ...makeSnapshot().channelMessages,
+      new ChannelMessage({
+        id: "message-2" as ChannelMessageId,
+        channelId,
+        authorType: "human",
+        authorId: "human-2",
+        authorDisplayName: "Lee Chen",
+        body: "I pulled the incidents into the notes.",
+        createdAt: 3,
+        deletedAt: null
+      })
+    ]))
+
+    fireEvent.click(await screen.findByLabelText("Select message from Maya Patel"))
+
+    expect(await screen.findByRole("checkbox", { name: "Deselect message from Maya Patel" })).toBeTruthy()
+    expect(screen.getByRole("checkbox", { name: "Select message from Lee Chen" })).toBeTruthy()
+
+    fireEvent.click(screen.getByText(/partner brief/))
+
+    await waitFor(() => expect(screen.queryByRole("checkbox", { name: "Deselect message from Maya Patel" })).toBeNull())
+  })
+
+  it("pins the selection action bar to the top-most selected message", async () => {
+    renderApp(makeSnapshot([
+      ...makeSnapshot().channelMessages,
+      new ChannelMessage({
+        id: "message-2" as ChannelMessageId,
+        channelId,
+        authorType: "human",
+        authorId: "human-2",
+        authorDisplayName: "Lee Chen",
+        body: "I pulled the incidents into the notes.",
+        createdAt: 3,
+        deletedAt: null
+      }),
+      new ChannelMessage({
+        id: "message-3" as ChannelMessageId,
+        channelId,
+        authorType: "human",
+        authorId: "human-3",
+        authorDisplayName: "Rina Shah",
+        body: "Launch blockers should stay separate.",
+        createdAt: 4,
+        deletedAt: null
+      })
+    ]))
+
+    fireEvent.click(await screen.findByLabelText("Select message from Rina Shah"))
+    expect(screen.getByLabelText("More actions for message from Rina Shah")).toBeTruthy()
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Select message from Lee Chen" }))
+
+    expect(screen.getByLabelText("More actions for message from Lee Chen")).toBeTruthy()
+    expect(screen.queryByLabelText("More actions for message from Rina Shah")).toBeNull()
+    expect(screen.queryByLabelText("More actions for message from Maya Patel")).toBeNull()
+  })
+
+  it("opens a right-click message menu for selection", async () => {
+    renderApp(makeSnapshot())
+
+    fireEvent.contextMenu(await screen.findByText(/partner brief/), { clientX: 20, clientY: 30 })
+
+    const menu = await screen.findByRole("menu", { name: /message from Maya Patel/ })
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Select" }))
+
+    expect((await screen.findAllByLabelText("Deselect message from Maya Patel")).length).toBeGreaterThan(0)
+  })
+
+  it("deletes a message from the message action menu", async () => {
+    const calls = renderApp(makeSnapshot())
+
+    fireEvent.click(await screen.findByLabelText("More actions for message from Maya Patel"))
+    const menu = await screen.findByRole("menu", { name: /message from Maya Patel/ })
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Delete message" }))
+
+    await waitFor(() => expect(calls).toContainEqual({ method: "deleteChannelMessage", args: messageId }))
+  })
+
+  it("collapses and reopens the channel members panel", async () => {
+    renderApp(makeSnapshot())
+
+    fireEvent.click(await screen.findByRole("button", { name: "Hide members" }))
+    expect(screen.getByRole("button", { name: "Show members" })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: "Show members" }))
+    expect(screen.getByRole("button", { name: "Hide members" })).toBeTruthy()
+  })
+})
