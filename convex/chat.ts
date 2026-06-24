@@ -48,8 +48,10 @@ const requireAllowedIdentityEmail = (identity: ViewerIdentity): string => {
 const getUserByTokenIdentifier = (ctx: QueryCtx | MutationCtx, tokenIdentifier: string) =>
   ctx.db.query("users").withIndex("by_token_identifier", (q) => q.eq("tokenIdentifier", tokenIdentifier)).unique()
 
-const requireCurrentUser = async (ctx: QueryCtx | MutationCtx): Promise<Doc<"users">> => {
+const requireAllowedCurrentUser = async (ctx: QueryCtx | MutationCtx): Promise<Doc<"users">> => {
   const identity = await requireIdentity(ctx)
+  requireAllowedIdentityEmail(identity)
+
   const user = await getUserByTokenIdentifier(ctx, identity.tokenIdentifier)
   if (user === null) throw new Error("Current user has not been initialized")
   return user
@@ -169,7 +171,7 @@ export const ensureViewer = mutation({
 export const viewer = query({
   args: {},
   handler: async (ctx) => {
-    const user = await requireCurrentUser(ctx)
+    const user = await requireAllowedCurrentUser(ctx)
     return { userId: user._id, displayName: user.displayName }
   }
 })
@@ -177,7 +179,7 @@ export const viewer = query({
 export const defaultWorkspace = query({
   args: {},
   handler: async (ctx) => {
-    const user = await requireCurrentUser(ctx)
+    const user = await requireAllowedCurrentUser(ctx)
     const workspace = await getDefaultWorkspace(ctx)
 
     if (workspace === null) return null
@@ -200,7 +202,7 @@ export const channelMessages = query({
     channelId: v.id("channels")
   },
   handler: async (ctx, args) => {
-    const user = await requireCurrentUser(ctx)
+    const user = await requireAllowedCurrentUser(ctx)
 
     await requireChannelMember(ctx, { channelId: args.channelId, userId: user._id })
 
@@ -222,7 +224,7 @@ export const sendMessage = mutation({
     const body = args.body.trim()
     if (body.length === 0) throw new Error("Message body is required")
 
-    const user = await requireCurrentUser(ctx)
+    const user = await requireAllowedCurrentUser(ctx)
 
     await requireChannelMember(ctx, { channelId: args.channelId, userId: user._id })
 
