@@ -2,6 +2,10 @@
 
 ## Scope
 
+Historical planning note. The active product milestone is chat-first dogfooding with Convex and
+WorkOS AuthKit; see `docs/chat-realtime-auth-plan.md`. This domain model remains useful background
+for later agent work, but it is broader than the next implementation slice.
+
 This document describes the MVP domain model for a chat collaboration platform where workspaces bring their own AI agents. It should be read with:
 
 - `docs/adr-agent-collaboration.md`

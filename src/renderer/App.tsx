@@ -230,6 +230,7 @@ function ChannelSidebar(props: {
   readonly channelIndicator: ChannelIndicator | null
 }) {
   const { workspaceName, channelName, channelIndicator } = props
+  const showAgentParkedPanel = import.meta.env.VITE_AETHER_SHOW_AGENT_UI === "true"
   return (
     <aside className="channelSidebar" aria-label="Workspace navigation">
       <header className="workspaceHeader">
@@ -254,10 +255,14 @@ function ChannelSidebar(props: {
         </button>
       </nav>
 
-      <section className="laterPanel" aria-label="Later integrations">
-        <strong>Agents later</strong>
-        <p>Chat stays first. The existing RPC agent plumbing is parked behind the product surface for the next phase.</p>
-      </section>
+      {showAgentParkedPanel
+        ? (
+          <section className="laterPanel" aria-label="Later integrations">
+            <strong>Agents later</strong>
+            <p>Chat stays first. The existing RPC agent plumbing is parked behind the product surface for the next phase.</p>
+          </section>
+        )
+        : null}
     </aside>
   )
 }

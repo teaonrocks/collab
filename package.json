@@ -1,25 +1,31 @@
 {
   "name": "aether",
   "version": "0.1.0",
-  "description": "An Electron collaboration MVP wiring @effect/rpc and effect-atom over MessagePort for workspace-local agent runs.",
+  "description": "An Electron chat-first collaboration app wiring @effect/rpc and effect-atom over MessagePort while planning Convex + WorkOS dogfooding.",
   "license": "MIT",
   "author": "",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "convex": "convex",
+    "convex:dev": "convex dev",
+    "convex:codegen": "convex codegen",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@convex-dev/workos": "^0.0.3",
     "@effect-atom/atom": "0.5.3",
     "@effect-atom/atom-react": "0.5.0",
     "@effect/experimental": "0.60.0",
     "@effect/platform": "0.96.1",
     "@effect/platform-node": "0.107.0",
     "@effect/rpc": "0.75.1",
+    "@workos-inc/authkit-react": "^0.16.1",
+    "convex": "^1.42.0",
     "effect": "3.21.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

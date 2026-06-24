@@ -1,4 +1,10 @@
-# MVP Slice
+# Historical Agent MVP Slice
+
+## Status
+
+Historical planning note. The active product milestone is chat-first dogfooding with Convex and
+WorkOS AuthKit; see `docs/chat-realtime-auth-plan.md`. Do not treat this document as the next
+implementation scope until the realtime chat slice is complete.
 
 ## Goal
 

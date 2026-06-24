@@ -8,8 +8,9 @@ the main/renderer boundary over a `MessagePort`. The active app now prioritizes 
 Slack/Discord-style channel surface: workspace navigation, a channel timeline, message composer,
 message selection, copy/delete actions, live snapshots, and a channel details panel.
 
-The earlier agent collaboration docs remain in `docs/` as historical planning material. They should
-not drive the first product milestone until the chat surface itself is solid.
+The next planning target is realtime dogfooding with Convex and WorkOS AuthKit. The earlier agent
+collaboration docs remain in `docs/` as historical planning material. They should not drive the
+first product milestone until the chat surface itself is solid.
 
 ## Product Direction
 
@@ -37,6 +38,20 @@ The first product slice is deliberately narrow:
 There are no multi-workspace controls, real channel creation, DMs, voice/video, file uploads,
 notifications, search, agent invocation, marketplace, cron/job system, durable memory, forks, or
 external integrations in this first chat milestone.
+
+## Next Dogfood Slice
+
+The next slice moves the chat source of truth from the local Electron JSON file to Convex and gates
+it with WorkOS AuthKit:
+
+- Authenticated current user.
+- One shared workspace and one shared channel.
+- Realtime message send/read across multiple users.
+- Local JSON persistence treated as a migration fallback rather than the active chat source of truth.
+
+See [`docs/chat-realtime-auth-plan.md`](docs/chat-realtime-auth-plan.md) for the architecture
+decision, data model sketch, Electron auth concerns, migration plan, risks, and acceptance criteria.
+The accepted decision record is [`docs/adr-chat-realtime-auth-dogfood.md`](docs/adr-chat-realtime-auth-dogfood.md).
 
 ## Current Implementation
 
@@ -121,10 +136,28 @@ src/
 ```sh
 pnpm install
 pnpm dev
+pnpm convex:dev
 pnpm build
 pnpm typecheck
 pnpm test
 ```
+
+## Convex And AuthKit Dogfood Setup
+
+The scaffold for the next dogfood slice is present but not yet the active chat source of truth.
+
+1. Run `pnpm convex:dev` and choose the Convex-managed WorkOS AuthKit path when prompted.
+2. Set the dogfood allowlist in Convex:
+
+   ```sh
+   pnpm convex env set AETHER_ALLOWED_EMAILS "you@example.com,friend@example.com"
+   ```
+
+3. Use the generated `.env.local` values for `VITE_CONVEX_URL`, `VITE_WORKOS_CLIENT_ID`, and
+   `VITE_WORKOS_REDIRECT_URI`.
+
+Until those values exist, the renderer falls back to the current local Electron RPC app. The first
+Convex backend functions live in `convex/chat.ts`.
 
 ## Tests
 
@@ -140,6 +173,9 @@ Tests live next to the code they cover.
 | `src/renderer/App.test.tsx` | Chat UI rendering, message send/select/delete, details panel behavior |
 | `src/renderer/App.rejection.test.tsx` | Failed chat mutations do not leak unhandled rejections |
 
+Convex codegen/typecheck requires a configured deployment. Run `pnpm convex:dev` before expecting
+`convex/_generated/` to exist.
+
 The transport, repo, and handler tests do not need an Electron runtime. The renderer port is modelled
 with a Node `MessageChannel`, and the file store uses a real temporary directory.
 
@@ -151,6 +187,10 @@ and `@effect-atom/atom-react` 0.5.0. Built with Electron 41 and electron-vite 2.
 
 ## References
 
+- [`docs/chat-realtime-auth-plan.md`](docs/chat-realtime-auth-plan.md) is the active plan for the
+  Convex + WorkOS chat dogfooding slice.
+- [`docs/adr-chat-realtime-auth-dogfood.md`](docs/adr-chat-realtime-auth-dogfood.md) records the
+  accepted decisions for that slice.
 - [`docs/mvp-slice.md`](docs/mvp-slice.md), [`docs/agent-collab-domain-model.md`](docs/agent-collab-domain-model.md), and
   [`docs/adr-agent-collaboration.md`](docs/adr-agent-collaboration.md) are historical agent-collaboration planning notes.
 - [`package.json`](package.json) contains the pinned runtime dependencies and scripts.

@@ -2,7 +2,11 @@
 
 ## Status
 
-Draft
+Historical draft.
+
+The active product milestone is chat-first dogfooding with Convex and WorkOS AuthKit; see
+`docs/chat-realtime-auth-plan.md`. This ADR remains useful background for later agent work, but it
+does not define the next implementation slice.
 
 ## Context
 

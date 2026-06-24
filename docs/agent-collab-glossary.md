@@ -1,5 +1,11 @@
 # Agent Collaboration Glossary
 
+## Status
+
+Historical planning note. The active product milestone is chat-first dogfooding with Convex and
+WorkOS AuthKit; see `docs/chat-realtime-auth-plan.md`. Keep these terms as later agent-work
+background, not as the current MVP checklist.
+
 ## Core Collaboration
 
 Workspace: A bounded collaboration environment containing human users, workspace agents, channels, messages, policies, integrations, schedules, memories, and artifacts.

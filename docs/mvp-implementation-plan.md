@@ -1,4 +1,10 @@
-# Agent Collaboration MVP Implementation Plan
+# Historical Agent Collaboration MVP Implementation Plan
+
+## Status
+
+Historical planning note. The active product milestone is chat-first dogfooding with Convex and
+WorkOS AuthKit; see `docs/chat-realtime-auth-plan.md`. This document describes the older
+agent-first vertical slice and should not drive the next implementation phase.
 
 ## Current App Fit
 
