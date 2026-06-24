@@ -6,12 +6,12 @@ const channelRole = v.union(v.literal("admin"), v.literal("member"), v.literal("
 
 export default defineSchema({
   users: defineTable({
-    authSubject: v.string(),
+    tokenIdentifier: v.string(),
     email: v.string(),
     displayName: v.string(),
     createdAt: v.number(),
     updatedAt: v.number()
-  }).index("by_auth_subject", ["authSubject"]).index("by_email", ["email"]),
+  }).index("by_token_identifier", ["tokenIdentifier"]).index("by_email", ["email"]),
 
   workspaces: defineTable({
     key: v.string(),

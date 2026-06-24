@@ -14,7 +14,7 @@ import {
   Workspace,
   type WorkspaceId
 } from "../shared/collab-rpc"
-import { App } from "./App"
+import { App, WorkspaceChat } from "./App"
 import { CollabApi } from "./collab-api"
 import { runtime } from "./collab-atoms"
 
@@ -132,12 +132,34 @@ describe("App", () => {
 
     const globalNavigation = await screen.findByLabelText("Global navigation")
     const workspaceNavigation = screen.getByLabelText("Workspace navigation")
+    const directMessages = within(globalNavigation).getByRole("navigation", { name: "Direct messages" })
 
-    expect(within(globalNavigation).getByRole("navigation", { name: "Direct messages" })).toBeTruthy()
-    expect(within(globalNavigation).getByRole("button", { name: "Maya Patel" })).toBeTruthy()
-    expect(within(globalNavigation).getByRole("tooltip", { name: "Maya Patel" })).toBeTruthy()
+    expect(directMessages).toBeTruthy()
+    expect(within(directMessages).getByRole("button", { name: "Maya Patel" })).toBeTruthy()
+    expect(within(directMessages).getByRole("tooltip", { name: "Maya Patel" })).toBeTruthy()
     expect(within(workspaceNavigation).queryByRole("navigation", { name: "Direct messages" })).toBeNull()
     expect(within(workspaceNavigation).queryByText("Maya Patel")).toBeNull()
+  })
+
+  it("opens profile settings from the rail avatar", async () => {
+    let signOuts = 0
+    render(
+      <WorkspaceChat
+        model={makeSnapshot()}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+        profileMenuActions={[{ label: "Sign out", onSelect: () => signOuts++ }]}
+      />
+    )
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open profile menu for Maya Patel" }))
+
+    const menu = await screen.findByRole("menu", { name: "Profile settings" })
+    expect(within(menu).getByText("Maya Patel")).toBeTruthy()
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Sign out" }))
+
+    expect(signOuts).toBe(1)
+    expect(screen.queryByRole("menu", { name: "Profile settings" })).toBeNull()
   })
 
   it("uses a dot instead of a count for channel unread state", async () => {

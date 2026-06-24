@@ -38,6 +38,11 @@ type DeleteChannelMessage = (input: {
   readonly messageId: ChannelMessageId
 }) => Promise<unknown>
 
+export type ProfileMenuAction = {
+  readonly label: string
+  readonly onSelect: () => void
+}
+
 const MESSAGE_CONTEXT_MENU_WIDTH = 170
 const MESSAGE_CONTEXT_MENU_OFFSET = 6
 const COMPOSER_MIN_HEIGHT = 22
@@ -61,16 +66,25 @@ export function App() {
     .orNull()
 }
 
-function WorkspaceChat(props: {
+export function WorkspaceChat(props: {
   readonly model: CollabSnapshot
   readonly createChannelMessage: CreateChannelMessage
   readonly deleteChannelMessage: DeleteChannelMessage
+  readonly canDeleteMessages?: boolean
+  readonly profileMenuActions?: ReadonlyArray<ProfileMenuAction>
 }) {
-  const { model, createChannelMessage, deleteChannelMessage } = props
+  const {
+    model,
+    createChannelMessage,
+    deleteChannelMessage,
+    canDeleteMessages = true,
+    profileMenuActions = []
+  } = props
   const [messageDraft, setMessageDraft] = useState("")
   const [selectedMessageIds, setSelectedMessageIds] = useState<ReadonlyArray<ChannelMessageId>>([])
   const [membersOpen, setMembersOpen] = useState(true)
   const [messageMenu, setMessageMenu] = useState<MessageMenuState>(null)
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const view = createChannelViewModel(model, selectedMessageIds, messageMenu)
   const menuMessage = view.menuMessage
 
@@ -91,6 +105,20 @@ function WorkspaceChat(props: {
       window.removeEventListener("keydown", closeMenuOnEscape)
     }
   }, [messageMenu])
+
+  useEffect(() => {
+    if (!profileMenuOpen) return
+    const closeMenu = () => setProfileMenuOpen(false)
+    const closeMenuOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeMenu()
+    }
+    window.addEventListener("click", closeMenu)
+    window.addEventListener("keydown", closeMenuOnEscape)
+    return () => {
+      window.removeEventListener("click", closeMenu)
+      window.removeEventListener("keydown", closeMenuOnEscape)
+    }
+  }, [profileMenuOpen])
 
   const toggleMessageSelection = (messageId: ChannelMessageId) => {
     setSelectedMessageIds((ids) => toggleMessageId(ids, messageId))
@@ -135,6 +163,10 @@ function WorkspaceChat(props: {
         workspaceName={model.workspace.name}
         currentUserName={model.currentUser.displayName}
         members={view.members}
+        profileMenuOpen={profileMenuOpen}
+        profileMenuActions={profileMenuActions}
+        onToggleProfileMenu={() => setProfileMenuOpen((open) => !open)}
+        onCloseProfileMenu={() => setProfileMenuOpen(false)}
       />
 
       <ChannelSidebar
@@ -162,6 +194,7 @@ function WorkspaceChat(props: {
         onToggleMessage={toggleMessageSelection}
         onCopyMessage={copyMessage}
         onDeleteMessage={deleteMessage}
+        canDeleteMessages={canDeleteMessages}
         onOpenMessageMenu={openMessageMenu}
       />
 
@@ -181,6 +214,7 @@ function WorkspaceChat(props: {
             onToggle={() => toggleMessageSelection(menuMessage.id)}
             onCopy={() => copyMessage(menuMessage)}
             onDelete={() => deleteMessage(menuMessage.id)}
+            canDelete={canDeleteMessages}
             onClose={() => setMessageMenu(null)}
           />
         )}
@@ -192,8 +226,21 @@ function WorkspaceRail(props: {
   readonly workspaceName: string
   readonly currentUserName: string
   readonly members: ReadonlyArray<ChannelMember>
+  readonly profileMenuOpen: boolean
+  readonly profileMenuActions: ReadonlyArray<ProfileMenuAction>
+  readonly onToggleProfileMenu: () => void
+  readonly onCloseProfileMenu: () => void
 }) {
-  const { workspaceName, currentUserName, members } = props
+  const {
+    workspaceName,
+    currentUserName,
+    members,
+    profileMenuOpen,
+    profileMenuActions,
+    onToggleProfileMenu,
+    onCloseProfileMenu
+  } = props
+  const hasProfileActions = profileMenuActions.length > 0
   return (
     <aside className="workspaceRail" aria-label="Global navigation">
       <nav className="railGroup" aria-label="Workspaces">
@@ -217,8 +264,44 @@ function WorkspaceRail(props: {
         ))}
       </nav>
       <div className="railSpacer" />
-      <div className="railUser" title={currentUserName} aria-label={currentUserName}>
-        {initials(currentUserName)}
+      <div className="railProfile">
+        <button
+          type="button"
+          className="railUser"
+          title={currentUserName}
+          aria-label={hasProfileActions ? `Open profile menu for ${currentUserName}` : currentUserName}
+          aria-haspopup={hasProfileActions ? "menu" : undefined}
+          aria-expanded={hasProfileActions ? profileMenuOpen : undefined}
+          disabled={!hasProfileActions}
+          onClick={(event) => {
+            event.stopPropagation()
+            if (hasProfileActions) onToggleProfileMenu()
+          }}
+        >
+          {initials(currentUserName)}
+        </button>
+        {profileMenuOpen && hasProfileActions
+          ? (
+            <div className="profileMenu" role="menu" aria-label="Profile settings" onClick={(event) => event.stopPropagation()}>
+              <div className="profileMenuHeader">
+                <strong>{currentUserName}</strong>
+              </div>
+              {profileMenuActions.map((action) => (
+                <button
+                  key={action.label}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    onCloseProfileMenu()
+                    action.onSelect()
+                  }}
+                >
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          )
+          : null}
       </div>
     </aside>
   )
@@ -304,6 +387,7 @@ function ChatPane(props: {
   readonly onToggleMessage: (messageId: ChannelMessageId) => void
   readonly onCopyMessage: (message: ChannelMessage) => void
   readonly onDeleteMessage: (messageId: ChannelMessageId) => void
+  readonly canDeleteMessages: boolean
   readonly onOpenMessageMenu: (messageId: ChannelMessageId, x: number, y: number) => void
 }) {
   const {
@@ -318,6 +402,7 @@ function ChatPane(props: {
     onToggleMessage,
     onCopyMessage,
     onDeleteMessage,
+    canDeleteMessages,
     onOpenMessageMenu
   } = props
   const selectionMode = selectedMessageIds.length > 0
@@ -338,6 +423,7 @@ function ChatPane(props: {
                 onToggle={() => onToggleMessage(message.id)}
                 onCopy={() => onCopyMessage(message)}
                 onDelete={() => onDeleteMessage(message.id)}
+                canDelete={canDeleteMessages}
                 onOpenMenu={(x, y) => onOpenMessageMenu(message.id, x, y)}
               />
             </li>
@@ -364,9 +450,21 @@ function ChannelMessageRow(props: {
   readonly onToggle: () => void
   readonly onCopy: () => void
   readonly onDelete: () => void
+  readonly canDelete: boolean
   readonly onOpenMenu: (x: number, y: number) => void
 }) {
-  const { message, selected, selectionMode, actionsPinned, actionsAvailable, onToggle, onCopy, onDelete, onOpenMenu } = props
+  const {
+    message,
+    selected,
+    selectionMode,
+    actionsPinned,
+    actionsAvailable,
+    onToggle,
+    onCopy,
+    onDelete,
+    canDelete,
+    onOpenMenu
+  } = props
   const deleted = message.deletedAt !== null
   const className = classNames(
     "channelMessage",
@@ -426,9 +524,13 @@ function ChannelMessageRow(props: {
             <button type="button" aria-label={`Copy message from ${message.authorDisplayName}`} onClick={onCopy}>
               Copy
             </button>
-            <button type="button" aria-label={`Delete message from ${message.authorDisplayName}`} onClick={onDelete}>
-              Delete
-            </button>
+            {canDelete
+              ? (
+                <button type="button" aria-label={`Delete message from ${message.authorDisplayName}`} onClick={onDelete}>
+                  Delete
+                </button>
+              )
+              : null}
             <button
               type="button"
               aria-label={`More actions for message from ${message.authorDisplayName}`}
@@ -521,9 +623,10 @@ function MessageContextMenu(props: {
   readonly onToggle: () => void
   readonly onCopy: () => void
   readonly onDelete: () => void
+  readonly canDelete: boolean
   readonly onClose: () => void
 }) {
-  const { message, selected, x, y, onToggle, onCopy, onDelete, onClose } = props
+  const { message, selected, x, y, onToggle, onCopy, onDelete, canDelete, onClose } = props
   return (
     <div
       className="messageContextMenu"
@@ -552,16 +655,20 @@ function MessageContextMenu(props: {
       >
         Copy message
       </button>
-      <button
-        type="button"
-        role="menuitem"
-        onClick={() => {
-          onDelete()
-          onClose()
-        }}
-      >
-        Delete message
-      </button>
+      {canDelete
+        ? (
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              onDelete()
+              onClose()
+            }}
+          >
+            Delete message
+          </button>
+        )
+        : null}
     </div>
   )
 }

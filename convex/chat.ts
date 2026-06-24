@@ -26,14 +26,13 @@ const displayNameFromIdentity = (identity: ViewerIdentity, email: string): strin
   return email.split("@")[0] ?? "Aether User"
 }
 
-const requireIdentity = async (ctx: QueryCtx | MutationCtx): Promise<{
-  readonly identity: ViewerIdentity
-  readonly email: string
-  readonly displayName: string
-}> => {
+const requireIdentity = async (ctx: QueryCtx | MutationCtx): Promise<ViewerIdentity> => {
   const identity = await ctx.auth.getUserIdentity()
   if (identity === null) throw new Error("Not authenticated")
+  return identity
+}
 
+const requireAllowedIdentityEmail = (identity: ViewerIdentity): string => {
   const rawEmail = identity.email
   if (rawEmail === undefined || rawEmail.trim().length === 0) {
     throw new Error("Authenticated user is missing an email address")
@@ -43,12 +42,18 @@ const requireIdentity = async (ctx: QueryCtx | MutationCtx): Promise<{
   if (!allowedEmails().has(email)) {
     throw new Error("This email is not on the Aether dogfood allowlist")
   }
-
-  return { identity, email, displayName: displayNameFromIdentity(identity, email) }
+  return email
 }
 
-const getUserBySubject = (ctx: QueryCtx | MutationCtx, authSubject: string) =>
-  ctx.db.query("users").withIndex("by_auth_subject", (q) => q.eq("authSubject", authSubject)).unique()
+const getUserByTokenIdentifier = (ctx: QueryCtx | MutationCtx, tokenIdentifier: string) =>
+  ctx.db.query("users").withIndex("by_token_identifier", (q) => q.eq("tokenIdentifier", tokenIdentifier)).unique()
+
+const requireCurrentUser = async (ctx: QueryCtx | MutationCtx): Promise<Doc<"users">> => {
+  const identity = await requireIdentity(ctx)
+  const user = await getUserByTokenIdentifier(ctx, identity.tokenIdentifier)
+  if (user === null) throw new Error("Current user has not been initialized")
+  return user
+}
 
 const getDefaultWorkspace = (ctx: QueryCtx | MutationCtx) =>
   ctx.db.query("workspaces").withIndex("by_key", (q) => q.eq("key", DOGFOOD_WORKSPACE_KEY)).unique()
@@ -136,12 +141,14 @@ const requireChannelMember = async (
 export const ensureViewer = mutation({
   args: {},
   handler: async (ctx) => {
-    const { identity, email, displayName } = await requireIdentity(ctx)
+    const identity = await requireIdentity(ctx)
+    const email = requireAllowedIdentityEmail(identity)
+    const displayName = displayNameFromIdentity(identity, email)
     const now = Date.now()
-    const existingUser = await getUserBySubject(ctx, identity.subject)
+    const existingUser = await getUserByTokenIdentifier(ctx, identity.tokenIdentifier)
 
     const userId = existingUser?._id ?? (await ctx.db.insert("users", {
-      authSubject: identity.subject,
+      tokenIdentifier: identity.tokenIdentifier,
       email,
       displayName,
       createdAt: now,
@@ -162,20 +169,18 @@ export const ensureViewer = mutation({
 export const viewer = query({
   args: {},
   handler: async (ctx) => {
-    const { identity } = await requireIdentity(ctx)
-    const user = await getUserBySubject(ctx, identity.subject)
-    return user === null ? null : { userId: user._id, displayName: user.displayName }
+    const user = await requireCurrentUser(ctx)
+    return { userId: user._id, displayName: user.displayName }
   }
 })
 
 export const defaultWorkspace = query({
   args: {},
   handler: async (ctx) => {
-    const { identity } = await requireIdentity(ctx)
-    const user = await getUserBySubject(ctx, identity.subject)
+    const user = await requireCurrentUser(ctx)
     const workspace = await getDefaultWorkspace(ctx)
 
-    if (user === null || workspace === null) return null
+    if (workspace === null) return null
 
     const channel = await getDefaultChannel(ctx, workspace._id)
     if (channel === null) return null
@@ -195,9 +200,7 @@ export const channelMessages = query({
     channelId: v.id("channels")
   },
   handler: async (ctx, args) => {
-    const { identity } = await requireIdentity(ctx)
-    const user = await getUserBySubject(ctx, identity.subject)
-    if (user === null) throw new Error("Current user has not been initialized")
+    const user = await requireCurrentUser(ctx)
 
     await requireChannelMember(ctx, { channelId: args.channelId, userId: user._id })
 
@@ -219,9 +222,7 @@ export const sendMessage = mutation({
     const body = args.body.trim()
     if (body.length === 0) throw new Error("Message body is required")
 
-    const { identity } = await requireIdentity(ctx)
-    const user = await getUserBySubject(ctx, identity.subject)
-    if (user === null) throw new Error("Current user has not been initialized")
+    const user = await requireCurrentUser(ctx)
 
     await requireChannelMember(ctx, { channelId: args.channelId, userId: user._id })
 

@@ -153,8 +153,9 @@ The scaffold for the next dogfood slice is present but not yet the active chat s
    pnpm convex env set AETHER_ALLOWED_EMAILS "you@example.com,friend@example.com"
    ```
 
-3. Use the generated `.env.local` values for `VITE_CONVEX_URL`, `VITE_WORKOS_CLIENT_ID`, and
-   `VITE_WORKOS_REDIRECT_URI`.
+3. Use the generated `.env.local` values for `VITE_CONVEX_URL` and `VITE_WORKOS_CLIENT_ID`.
+   `VITE_WORKOS_REDIRECT_URI` should be `aether://auth/callback` so AuthKit opens in the user's
+   default browser and returns to Electron.
 
 Until those values exist, the renderer falls back to the current local Electron RPC app. The first
 Convex backend functions live in `convex/chat.ts`.

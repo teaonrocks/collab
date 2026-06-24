@@ -93,7 +93,8 @@ body,
 }
 
 .workspaceRailItem,
-.dmRailItem {
+.dmRailItem,
+.railUser {
   position: relative;
   cursor: pointer;
 }
@@ -164,8 +165,65 @@ body,
 .railUser {
   width: 32px;
   height: 32px;
+  padding: 0;
   border-radius: 50%;
   font-size: 11px;
+}
+
+.railUser:disabled {
+  cursor: default;
+}
+
+.railProfile {
+  position: relative;
+}
+
+.profileMenu {
+  position: absolute;
+  z-index: 40;
+  bottom: 0;
+  left: calc(100% + 10px);
+  width: 180px;
+  overflow: hidden;
+  border: 1px solid #c7ccd1;
+  border-radius: 6px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(32, 33, 36, 0.18);
+}
+
+.profileMenuHeader {
+  padding: 10px;
+  border-bottom: 1px solid #e3e5e8;
+}
+
+.profileMenuHeader strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: #313338;
+  font-size: 13px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profileMenu button {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 0;
+  background: #ffffff;
+  color: #313338;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.profileMenu button:hover,
+.profileMenu button:focus-visible {
+  background: #f2f3f5;
 }
 
 .channelSidebar {
@@ -685,9 +743,88 @@ body,
   min-height: 100vh;
   display: grid;
   place-items: center;
+  padding: 24px;
   background: #ffffff;
   color: #313338;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.dogfoodAuthPanel {
+  width: min(420px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 20px;
+  border: 1px solid #d4d7dc;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 12px 32px rgba(32, 33, 36, 0.08);
+}
+
+.dogfoodAuthBare {
+  width: min(420px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  align-items: center;
+}
+
+.dogfoodAuthPanel h1 {
+  margin: 0;
+  color: #313338;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.dogfoodAuthBare h1 {
+  margin: 0;
+  color: #111111;
+  font-size: 32px;
+  font-weight: 800;
+  line-height: 1.1;
+  text-align: center;
+}
+
+.dogfoodAuthPanel div,
+.dogfoodAuthPanel p {
+  margin: 0;
+  color: #4e5058;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.dogfoodAuthBare div {
+  display: flex;
+  justify-content: center;
+}
+
+.dogfoodPrimaryButton,
+.dogfoodSecondaryButton {
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 6px;
+  font: inherit;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.dogfoodPrimaryButton {
+  border: 1px solid #111111;
+  background: #111111;
+  color: #ffffff;
+}
+
+.dogfoodPrimaryButton:disabled {
+  border-color: #6d6f78;
+  background: #6d6f78;
+  cursor: default;
+}
+
+.dogfoodSecondaryButton {
+  border: 1px solid #c7ccd1;
+  background: #ffffff;
+  color: #313338;
 }
 
 .errorText {
