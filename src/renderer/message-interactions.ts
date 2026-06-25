@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import type { ChannelId, ChannelMessage, ChannelMessageId } from "../shared/collab-rpc"
 
 export type MessageMenuState = {
@@ -65,7 +65,10 @@ export function useMessageInteractions(input: {
   const [editingMessage, setEditingMessage] = useState<EditingMessageState>(null)
   const [pendingDeleteMessageId, setPendingDeleteMessageId] = useState<ChannelMessageId | null>(null)
   const [messageMenu, setMessageMenu] = useState<MessageMenuState>(null)
-  const view = createMessageInteractionView(messages, selectedMessageIds, editingMessage, pendingDeleteMessageId, messageMenu)
+  const view = useMemo(
+    () => createMessageInteractionView(messages, selectedMessageIds, editingMessage, pendingDeleteMessageId, messageMenu),
+    [messages, selectedMessageIds, editingMessage, pendingDeleteMessageId, messageMenu]
+  )
 
   useEffect(() => {
     setSelectedMessageIds([])

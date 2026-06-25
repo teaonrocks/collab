@@ -35,6 +35,46 @@ import {
 
 const CollabFromJson = Schema.parseJson(CollabSnapshot)
 
+const MAX_CHANNEL_MESSAGES = 500
+const MAX_AUDIT_EVENTS = 200
+
+const trimSnapshot = (snapshot: CollabSnapshot): CollabSnapshot => {
+  const channelMessages = snapshot.channelMessages.length > MAX_CHANNEL_MESSAGES
+    ? snapshot.channelMessages.slice(snapshot.channelMessages.length - MAX_CHANNEL_MESSAGES)
+    : snapshot.channelMessages
+  const auditEvents = snapshot.auditEvents.length > MAX_AUDIT_EVENTS
+    ? snapshot.auditEvents.slice(snapshot.auditEvents.length - MAX_AUDIT_EVENTS)
+    : snapshot.auditEvents
+  if (channelMessages === snapshot.channelMessages && auditEvents === snapshot.auditEvents) {
+    return snapshot
+  }
+  return new CollabSnapshot({ ...snapshot, channelMessages, auditEvents })
+}
+
+const appendChannelMessage = (
+  messages: ReadonlyArray<ChannelMessage>,
+  message: ChannelMessage
+): ReadonlyArray<ChannelMessage> => {
+  const next = [...messages, message]
+  return next.length > MAX_CHANNEL_MESSAGES ? next.slice(next.length - MAX_CHANNEL_MESSAGES) : next
+}
+
+const appendAuditEvent = (
+  events: ReadonlyArray<AuditEvent>,
+  event: AuditEvent
+): ReadonlyArray<AuditEvent> => {
+  const next = [...events, event]
+  return next.length > MAX_AUDIT_EVENTS ? next.slice(next.length - MAX_AUDIT_EVENTS) : next
+}
+
+const appendAuditEvents = (
+  events: ReadonlyArray<AuditEvent>,
+  appended: ReadonlyArray<AuditEvent>
+): ReadonlyArray<AuditEvent> => {
+  const next = [...events, ...appended]
+  return next.length > MAX_AUDIT_EVENTS ? next.slice(next.length - MAX_AUDIT_EVENTS) : next
+}
+
 const toCollabError = (writeReason: "ReadFailed" | "WriteFailed", error: PlatformError | ParseError): CollabError =>
   error._tag === "ParseError"
     ? new CollabError({ reason: "Corrupted", detail: "The stored collaboration file could not be parsed." })
@@ -188,7 +228,7 @@ export class CollabRepo extends Effect.Service<CollabRepo>()("main/CollabRepo", 
 
     const persist = (snapshot: CollabSnapshot) =>
       Effect.gen(function*() {
-        const json = yield* encodeSnapshot(snapshot)
+        const json = yield* encodeSnapshot(trimSnapshot(snapshot))
         yield* fs.makeDirectory(directory, { recursive: true })
         yield* fs.writeFileString(filePath, json)
       }).pipe(
@@ -223,9 +263,9 @@ export class CollabRepo extends Effect.Service<CollabRepo>()("main/CollabRepo", 
             })
             const next = new CollabSnapshot({
               ...state,
-              channelMessages: [...state.channelMessages, message],
-              auditEvents: [
-                ...state.auditEvents,
+              channelMessages: appendChannelMessage(state.channelMessages, message),
+              auditEvents: appendAuditEvent(
+                state.auditEvents,
                 audit(state, {
                   actorType: "human",
                   actorId: state.currentUser.id,
@@ -237,7 +277,7 @@ export class CollabRepo extends Effect.Service<CollabRepo>()("main/CollabRepo", 
                   detail: `Message posted in #${state.channel.name}.`,
                   createdAt
                 })
-              ]
+              )
             })
             yield* persist(next)
             return [message, next] as const
@@ -267,8 +307,8 @@ export class CollabRepo extends Effect.Service<CollabRepo>()("main/CollabRepo", 
             const next = new CollabSnapshot({
               ...state,
               channelMessages: state.channelMessages.map((item) => item.id === input.messageId ? deletedMessage : item),
-              auditEvents: [
-                ...state.auditEvents,
+              auditEvents: appendAuditEvent(
+                state.auditEvents,
                 audit(state, {
                   actorType: "human",
                   actorId: state.currentUser.id,
@@ -280,7 +320,7 @@ export class CollabRepo extends Effect.Service<CollabRepo>()("main/CollabRepo", 
                   detail: `Message deleted in #${state.channel.name}.`,
                   createdAt: deletedAt
                 })
-              ]
+              )
             })
             yield* persist(next)
             return [deletedMessage, next] as const
@@ -320,8 +360,8 @@ export class CollabRepo extends Effect.Service<CollabRepo>()("main/CollabRepo", 
             const next = new CollabSnapshot({
               ...state,
               workspaceAgents: [...state.workspaceAgents, agent],
-              auditEvents: [
-                ...state.auditEvents,
+              auditEvents: appendAuditEvent(
+                state.auditEvents,
                 audit(state, {
                   actorType: "human",
                   actorId: state.currentUser.id,
@@ -332,7 +372,7 @@ export class CollabRepo extends Effect.Service<CollabRepo>()("main/CollabRepo", 
                   detail: `${agent.displayName} registered for ${agent.providerName}.`,
                   createdAt
                 })
-              ]
+              )
             })
             yield* persist(next)
             return [agent, next] as const
@@ -369,8 +409,8 @@ export class CollabRepo extends Effect.Service<CollabRepo>()("main/CollabRepo", 
             const next = new CollabSnapshot({
               ...state,
               channelAgentEnablements: upsertEnablement(state.channelAgentEnablements, enablement),
-              auditEvents: [
-                ...state.auditEvents,
+              auditEvents: appendAuditEvent(
+                state.auditEvents,
                 audit(state, {
                   actorType: "human",
                   actorId: state.currentUser.id,
@@ -382,7 +422,7 @@ export class CollabRepo extends Effect.Service<CollabRepo>()("main/CollabRepo", 
                   detail: `${agent.displayName} enabled in #${state.channel.name}.`,
                   createdAt: enabledAt
                 })
-              ]
+              )
             })
             yield* persist(next)
             return [enablement, next] as const
@@ -484,8 +524,7 @@ export class CollabRepo extends Effect.Service<CollabRepo>()("main/CollabRepo", 
               ...state,
               threads: [...state.threads, thread],
               threadMessages: [...state.threadMessages, ...contextMessages, promptMessage],
-              auditEvents: [
-                ...state.auditEvents,
+              auditEvents: appendAuditEvents(state.auditEvents, [
                 audit(state, {
                   actorType: "human",
                   actorId: state.currentUser.id,
@@ -510,7 +549,7 @@ export class CollabRepo extends Effect.Service<CollabRepo>()("main/CollabRepo", 
                   detail: "Selected context captured in the draft thread before review.",
                   createdAt: createdAt + 1
                 })
-              ]
+              ])
             })
             yield* persist(next)
             return [thread, next] as const
@@ -603,8 +642,7 @@ export class CollabRepo extends Effect.Service<CollabRepo>()("main/CollabRepo", 
             threads: state.threads.map((item) => item.id === thread.id ? completedThread : item),
             threadMessages: [...state.threadMessages, responseMessage],
             agentRuns: [...state.agentRuns, run],
-            auditEvents: [
-              ...state.auditEvents,
+            auditEvents: appendAuditEvents(state.auditEvents, [
               audit(state, {
                 actorType: "human",
                 actorId: state.currentUser.id,
@@ -657,7 +695,7 @@ export class CollabRepo extends Effect.Service<CollabRepo>()("main/CollabRepo", 
                 detail: "Run marked completed.",
                 createdAt: completedAt + 1
               })
-            ]
+            ])
           })
           yield* persist(next)
           return [new AgentRunStartResult({ thread: completedThread, run, responseMessage }), next] as const

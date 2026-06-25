@@ -52,6 +52,7 @@ export default defineSchema({
     workspaceId: v.id("workspaces"),
     channelId: v.id("channels"),
     authorUserId: v.id("users"),
+    authorDisplayName: v.optional(v.string()),
     body: v.string(),
     createdAt: v.number(),
     editedAt: v.optional(v.number())

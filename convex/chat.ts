@@ -390,7 +390,7 @@ export const channelMessages = query({
       .order("desc")
       .take(200)
 
-    return Promise.all([...messages].reverse().map((message) => toMessageView(ctx, message)))
+    return toMessageViews(ctx, [...messages].reverse())
   }
 })
 
@@ -411,6 +411,7 @@ export const sendMessage = mutation({
       workspaceId: channel.workspaceId,
       channelId: args.channelId,
       authorUserId: user._id,
+      authorDisplayName: user.displayName,
       body,
       createdAt: Date.now()
     })
@@ -463,17 +464,43 @@ export const deleteMessage = mutation({
   }
 })
 
-const toMessageView = async (ctx: QueryCtx | MutationCtx, message: Doc<"messages">) => {
-  const author = await ctx.db.get(message.authorUserId)
-  return {
+type MessageView = {
+  readonly id: Doc<"messages">["_id"]
+  readonly channelId: Doc<"messages">["channelId"]
+  readonly authorUserId: Doc<"messages">["authorUserId"]
+  readonly authorDisplayName: string
+  readonly body: string
+  readonly createdAt: number
+  readonly editedAt: number | null
+}
+
+const toMessageViews = async (
+  ctx: QueryCtx | MutationCtx,
+  messages: ReadonlyArray<Doc<"messages">>
+): Promise<ReadonlyArray<MessageView>> => {
+  const authorNamesById = new Map<Id<"users">, string>()
+
+  for (const message of messages) {
+    if (message.authorDisplayName !== undefined) continue
+    if (authorNamesById.has(message.authorUserId)) continue
+    const author = await ctx.db.get(message.authorUserId)
+    authorNamesById.set(message.authorUserId, author?.displayName ?? "Unknown")
+  }
+
+  return messages.map((message) => ({
     id: message._id,
     channelId: message.channelId,
     authorUserId: message.authorUserId,
-    authorDisplayName: author?.displayName ?? "Unknown",
+    authorDisplayName: message.authorDisplayName ?? authorNamesById.get(message.authorUserId) ?? "Unknown",
     body: message.body,
     createdAt: message.createdAt,
     editedAt: message.editedAt ?? null
-  }
+  }))
+}
+
+const toMessageView = async (ctx: QueryCtx | MutationCtx, message: Doc<"messages">): Promise<MessageView> => {
+  const [view] = await toMessageViews(ctx, [message])
+  return view!
 }
 
 const toChannelView = (channel: Doc<"channels">) => ({

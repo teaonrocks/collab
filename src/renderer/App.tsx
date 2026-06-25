@@ -14,7 +14,7 @@ import {
   Trash2,
   Users
 } from "lucide-react"
-import { type FormEvent, useEffect, useRef, useState } from "react"
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react"
 import type { Channel, ChannelId, ChannelMessage, ChannelMessageId } from "../shared/collab-rpc"
 import "./App.css"
 import type {
@@ -110,7 +110,11 @@ export function WorkspaceChat(props: {
   const [channelOperationError, setChannelOperationError] = useState<string | null>(null)
   const [membersOpen, setMembersOpen] = useState(true)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
-  const view = createChannelViewModel(model)
+  const view = useMemo(() => createChannelViewModel(model), [model])
+  const messageGroups = useMemo(
+    () => groupConsecutiveMessages(model.channelMessages),
+    [model.channelMessages]
+  )
   const channelMessagesLoading = model.channelMessagesLoading === true
   const [directMessageMembers, setDirectMessageMembers] = useState<ReadonlyArray<ChannelMember>>([])
   const messageInteractions = useMessageInteractions({
@@ -211,7 +215,7 @@ export function WorkspaceChat(props: {
 
       <ChatPane
         channelName={model.channel.name}
-        messages={model.channelMessages}
+        messageGroups={messageGroups}
         loading={channelMessagesLoading}
         messageDraft={messageDraft}
         operationError={operationError}
@@ -596,7 +600,7 @@ function ChannelHeader(props: {
 
 function ChatPane(props: {
   readonly channelName: string
-  readonly messages: ReadonlyArray<ChannelMessage>
+  readonly messageGroups: ReadonlyArray<ChannelMessageGroup>
   readonly loading: boolean
   readonly messageDraft: string
   readonly operationError: string | null
@@ -616,7 +620,7 @@ function ChatPane(props: {
 }) {
   const {
     channelName,
-    messages,
+    messageGroups,
     loading,
     messageDraft,
     operationError,
@@ -635,15 +639,13 @@ function ChatPane(props: {
     onOpenMessageMenu
   } = props
 
-  const messageGroups = groupConsecutiveMessages(messages)
-
   return (
     <section className="chatPane" aria-label={`${channelName} chat`}>
       <ol className="chatTimeline" aria-label="Channel messages" aria-busy={loading}>
         {loading
           ? <ChannelMessagesSkeleton />
           : null}
-        {!loading && messages.length === 0
+        {!loading && messageGroups.length === 0
           ? (
             <li className="chatEmptyState">
               <strong>No messages yet</strong>
@@ -1169,8 +1171,10 @@ const resizeTextarea = (textarea: HTMLTextAreaElement | null, minHeight: number,
   textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden"
 }
 
+const messageTimeFormatter = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" })
+
 const formatTime = (timestamp: number): string =>
-  new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(new Date(timestamp))
+  messageTimeFormatter.format(new Date(timestamp))
 
 const toIso = (timestamp: number): string => new Date(timestamp).toISOString()
 
