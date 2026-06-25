@@ -204,6 +204,24 @@ describe("App", () => {
     expect(within(channels).queryByLabelText("Unread messages")).toBeNull()
   })
 
+  it("shows an edited marker when a channel message has an edited timestamp", async () => {
+    renderApp(makeSnapshot([
+      new ChannelMessage({
+        id: messageId,
+        channelId,
+        authorType: "human",
+        authorId: userId,
+        authorDisplayName: "Maya Patel",
+        body: "The partner brief is ready.",
+        createdAt: 2,
+        editedAt: 4,
+        deletedAt: null
+      })
+    ]))
+
+    expect(await screen.findByText("edited")).toBeTruthy()
+  })
+
   it("sends a channel message from the bottom composer with Enter", async () => {
     const calls = renderApp(makeSnapshot())
     const input = await screen.findByPlaceholderText("Message #origination")
@@ -231,6 +249,31 @@ describe("App", () => {
 
     expect(calls.some((call) => call.method === "createChannelMessage")).toBe(false)
     expect((input as HTMLTextAreaElement).value).toBe("First line")
+  })
+
+  it("shows an empty chat state before the first channel message", async () => {
+    renderApp(makeSnapshot([]))
+
+    expect(await screen.findByText("No messages yet")).toBeTruthy()
+    expect(screen.getByText("Start the conversation in #origination.")).toBeTruthy()
+  })
+
+  it("shows a compact send failure when an operation formatter is provided", async () => {
+    render(
+      <WorkspaceChat
+        model={makeSnapshot()}
+        createChannelMessage={() => Promise.reject(new Error("backend token details"))}
+        deleteChannelMessage={() => Promise.resolve()}
+        operationErrorMessage={() => "Could not send message. Check your connection and try again."}
+      />
+    )
+
+    const input = await screen.findByPlaceholderText("Message #origination")
+    fireEvent.change(input, { target: { value: "I will tighten the partner brief." } })
+    fireEvent.submit(input.closest("form")!)
+
+    expect((await screen.findByRole("status")).textContent).toBe("Could not send message. Check your connection and try again.")
+    expect(screen.queryByText(/backend token details/)).toBeNull()
   })
 
   it("uses row-wide checkboxes for multi-select mode", async () => {
@@ -408,6 +451,48 @@ describe("App", () => {
         }
       })
     )
+  })
+
+  it("shows a compact edit failure and keeps the editor open", async () => {
+    render(
+      <WorkspaceChat
+        model={makeSnapshot()}
+        createChannelMessage={() => Promise.resolve()}
+        editChannelMessage={() => Promise.reject(new Error("raw mutation stack"))}
+        deleteChannelMessage={() => Promise.resolve()}
+        operationErrorMessage={() => "Could not save edit. Check your connection and try again."}
+      />
+    )
+
+    fireEvent.click(await screen.findByLabelText("Edit message from Maya Patel"))
+    const editor = await screen.findByLabelText("Edit message text from Maya Patel")
+    fireEvent.change(editor, { target: { value: "The partner brief is ready for review." } })
+    fireEvent.keyDown(editor, { key: "Enter", code: "Enter" })
+
+    expect((await screen.findByRole("status")).textContent).toBe("Could not save edit. Check your connection and try again.")
+    expect(screen.getByLabelText("Edit message text from Maya Patel")).toBeTruthy()
+    expect(screen.queryByText(/raw mutation stack/)).toBeNull()
+  })
+
+  it("shows a compact delete failure and keeps the confirmation open", async () => {
+    render(
+      <WorkspaceChat
+        model={makeSnapshot()}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.reject(new Error("raw delete failure"))}
+        operationErrorMessage={() => "Could not delete message. Check your connection and try again."}
+      />
+    )
+
+    fireEvent.click(await screen.findByLabelText("More actions for message from Maya Patel"))
+    const menu = await screen.findByRole("menu", { name: /message from Maya Patel/ })
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Delete message" }))
+    const dialog = await screen.findByRole("dialog", { name: "Delete Message?" })
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }))
+
+    expect((await screen.findByRole("status")).textContent).toBe("Could not delete message. Check your connection and try again.")
+    expect(screen.getByRole("dialog", { name: "Delete Message?" })).toBeTruthy()
+    expect(screen.queryByText(/raw delete failure/)).toBeNull()
   })
 
   it("keeps Shift+Enter in an inline message edit without saving", async () => {

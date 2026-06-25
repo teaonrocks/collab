@@ -540,6 +540,12 @@ body,
   white-space: nowrap;
 }
 
+.messageEdited {
+  color: #6d6f78;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .messageContent p {
   margin: 3px 0 0;
   color: #313338;
@@ -656,6 +662,34 @@ body,
   padding: 10px 16px 12px;
   border-top: 1px solid #d4d7dc;
   background: #ffffff;
+}
+
+.chatEmptyState {
+  max-width: 820px;
+  min-height: 120px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 5px;
+  padding: 20px;
+  color: #6d6f78;
+  text-align: center;
+}
+
+.chatEmptyState strong {
+  color: #313338;
+  font-size: 15px;
+}
+
+.chatEmptyState span {
+  font-size: 13px;
+}
+
+.composerError {
+  margin: 0 0 8px;
+  color: #a12828;
+  font-size: 13px;
+  line-height: 1.35;
 }
 
 .composer {

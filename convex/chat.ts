@@ -383,6 +383,7 @@ const toMessageView = async (ctx: QueryCtx | MutationCtx, message: Doc<"messages
     authorUserId: message.authorUserId,
     authorDisplayName: author?.displayName ?? "Unknown",
     body: message.body,
-    createdAt: message.createdAt
+    createdAt: message.createdAt,
+    editedAt: message.editedAt ?? null
   }
 }

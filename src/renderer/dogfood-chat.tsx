@@ -21,6 +21,8 @@ type ConvexDogfoodError = {
   readonly message: string
 }
 
+type DogfoodOperation = "send" | "edit" | "delete"
+
 export type DogfoodWorkspaceView = {
   readonly currentUser: {
     readonly id: Id<"users">
@@ -44,6 +46,7 @@ export type DogfoodChannelMessageView = {
   readonly authorDisplayName: string
   readonly body: string
   readonly createdAt: number
+  readonly editedAt?: number | null
 }
 
 export function ConvexDogfoodApp() {
@@ -89,7 +92,7 @@ function ConvexDogfoodChat() {
         }
       })
       .catch((cause: unknown) => {
-        if (!cancelled) setError({ message: errorMessage(cause) })
+        if (!cancelled) setError({ message: dogfoodAccessErrorMessage(cause) })
       })
 
     return () => {
@@ -152,7 +155,9 @@ function ConvexDogfoodChat() {
   if (!viewerReady) {
     return (
       <DogfoodShell title="Preparing Workspace">
-        Checking your dogfood access and setting up the shared channel...
+        {ensureAttempt > 0
+          ? "Retrying dogfood access and reconnecting to the shared channel..."
+          : "Checking your dogfood access and setting up the shared channel..."}
       </DogfoodShell>
     )
   }
@@ -174,6 +179,7 @@ function ConvexDogfoodChat() {
         editMessage({ channelId: toConvexChannelId(channelId), messageId: toConvexMessageId(messageId), body })}
       deleteChannelMessage={({ channelId, messageId }) =>
         deleteMessage({ channelId: toConvexChannelId(channelId), messageId: toConvexMessageId(messageId) })}
+      operationErrorMessage={(operation) => dogfoodOperationErrorMessage(operation)}
       canEditMessage={(message) => message.authorId === model.currentUser.id}
       canDeleteMessage={(message) => message.authorId === model.currentUser.id}
     />
@@ -191,7 +197,7 @@ const signInInDefaultBrowser = async (
     const url = await auth.getSignInUrl()
     await openExternalUrl(url)
   } catch (cause) {
-    setError({ message: errorMessage(cause) })
+    setError({ message: signInErrorMessage(cause) })
   } finally {
     setSignInOpening(false)
   }
@@ -291,6 +297,7 @@ const toLegacyChannelMessage = (message: DogfoodChannelMessageView): ChannelMess
     authorDisplayName: message.authorDisplayName,
     body: message.body,
     createdAt: message.createdAt,
+    editedAt: message.editedAt ?? null,
     deletedAt: null
   })
 
@@ -308,3 +315,29 @@ const toConvexMessageId = (id: ChannelMessageId): Id<"messages"> => String(id) a
 
 const errorMessage = (cause: unknown): string =>
   cause instanceof Error ? cause.message : "Something went wrong."
+
+const dogfoodAccessErrorMessage = (cause: unknown): string => {
+  const message = errorMessage(cause)
+  if (
+    message === "Not authenticated" ||
+    message === "Authenticated user is missing an email address" ||
+    message === "This email is not on the Aether dogfood allowlist" ||
+    message === "WorkOS user profile is missing an email address"
+  ) {
+    return message
+  }
+  return "Could not join the dogfood chat. Check your connection and try again."
+}
+
+const signInErrorMessage = (_cause: unknown): string => "Could not open sign-in. Try again."
+
+const dogfoodOperationErrorMessage = (operation: DogfoodOperation): string => {
+  switch (operation) {
+    case "send":
+      return "Could not send message. Check your connection and try again."
+    case "edit":
+      return "Could not save edit. Check your connection and try again."
+    case "delete":
+      return "Could not delete message. Check your connection and try again."
+  }
+}

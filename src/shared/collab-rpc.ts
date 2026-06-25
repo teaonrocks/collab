@@ -91,6 +91,7 @@ export class ChannelMessage extends Schema.Class<ChannelMessage>("ChannelMessage
   authorDisplayName: NonEmptyText,
   body: NonEmptyText,
   createdAt: Schema.Number,
+  editedAt: Schema.optionalWith(Schema.NullOr(Schema.Number), { default: () => null }),
   deletedAt: Schema.NullOr(Schema.Number)
 }) {}
 

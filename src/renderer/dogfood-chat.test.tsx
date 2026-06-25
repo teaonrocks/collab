@@ -47,19 +47,21 @@ vi.mock("convex/react", () => ({
 vi.mock("./App", () => ({
   WorkspaceChat: ((props: {
     readonly model: CollabSnapshot
-    readonly createChannelMessage: (input: { readonly channelId: string; readonly body: string }) => Promise<unknown>
-    readonly editChannelMessage?: (input: { readonly channelId: string; readonly messageId: string; readonly body: string }) => Promise<unknown>
-    readonly deleteChannelMessage: (input: { readonly channelId: string; readonly messageId: string }) => Promise<unknown>
-    readonly canEditMessage?: (message: ChannelMessage) => boolean
-    readonly canDeleteMessage?: (message: ChannelMessage) => boolean
-    readonly profileMenuActions?: ReadonlyArray<{ readonly label: string; readonly onSelect: () => void }>
-  }) => {
+  readonly createChannelMessage: (input: { readonly channelId: string; readonly body: string }) => Promise<unknown>
+  readonly editChannelMessage?: (input: { readonly channelId: string; readonly messageId: string; readonly body: string }) => Promise<unknown>
+  readonly deleteChannelMessage: (input: { readonly channelId: string; readonly messageId: string }) => Promise<unknown>
+  readonly operationErrorMessage?: (operation: "send" | "edit" | "delete", cause: unknown) => string
+  readonly canEditMessage?: (message: ChannelMessage) => boolean
+  readonly canDeleteMessage?: (message: ChannelMessage) => boolean
+  readonly profileMenuActions?: ReadonlyArray<{ readonly label: string; readonly onSelect: () => void }>
+}) => {
     const firstMessage = props.model.channelMessages[0]
     const secondMessage = props.model.channelMessages[1]
     return (
       <section aria-label="mock workspace chat">
         <h2>{props.model.workspace.name}</h2>
         <p>{firstMessage?.body}</p>
+        {firstMessage?.editedAt === null ? null : <span>edited</span>}
         <button
           type="button"
           onClick={() => props.createChannelMessage({ channelId: props.model.channel.id, body: "Hello from dogfood" })}
@@ -102,6 +104,7 @@ vi.mock("./App", () => ({
         <button type="button" onClick={() => props.profileMenuActions?.[0]?.onSelect()}>
           Sign out
         </button>
+        <p>{props.operationErrorMessage?.("send", new Error("secret mutation details"))}</p>
       </section>
     )
   }) satisfies ComponentType<any>
@@ -181,8 +184,18 @@ describe("dogfoodChatToCollabSnapshot", () => {
       authorType: "human",
       authorDisplayName: "Maya Patel",
       body: "Dogfood chat is live.",
+      editedAt: null,
       deletedAt: null
     })
+  })
+
+  it("preserves Convex editedAt in the legacy WorkspaceChat bridge", () => {
+    const snapshot = dogfoodChatToCollabSnapshot({
+      workspace,
+      messages: [{ ...messages[0]!, editedAt: 45 }]
+    })
+
+    expect(snapshot.channelMessages[0]?.editedAt).toBe(45)
   })
 
   it("keeps agent-era snapshot fields empty while the dogfood path is chat-only", () => {
@@ -294,6 +307,19 @@ describe("ConvexDogfoodApp", () => {
       channelId: workspace.channel.id,
       messageId: messages[0]!.id
     })
+  })
+
+  it("passes compact dogfood mutation errors into the reused chat surface", async () => {
+    const { ConvexDogfoodApp } = await import("./dogfood-chat")
+    mocks.auth.user = { id: "user-1" }
+    mocks.convexAuth.isAuthenticated = true
+    mocks.workspace = workspace
+    mocks.messages = messages
+
+    render(<ConvexDogfoodApp />)
+
+    expect(await screen.findByText("Could not send message. Check your connection and try again.")).toBeTruthy()
+    expect(screen.queryByText(/secret mutation details/)).toBeNull()
   })
 
   it("waits for Convex to authenticate before initializing the viewer", async () => {

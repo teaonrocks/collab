@@ -45,6 +45,8 @@ type EditChannelMessage = (input: {
 }) => Promise<unknown>
 
 type MessageActionGuard = (message: ChannelMessage) => boolean
+type ChannelOperation = "send" | "edit" | "delete"
+type OperationErrorMessage = (operation: ChannelOperation, cause: unknown) => string
 
 export type ProfileMenuAction = {
   readonly label: string
@@ -83,6 +85,7 @@ export function WorkspaceChat(props: {
   readonly canDeleteMessages?: boolean
   readonly canDeleteMessage?: MessageActionGuard
   readonly canEditMessage?: MessageActionGuard
+  readonly operationErrorMessage?: OperationErrorMessage
   readonly profileMenuActions?: ReadonlyArray<ProfileMenuAction>
 }) {
   const {
@@ -93,9 +96,11 @@ export function WorkspaceChat(props: {
     canDeleteMessages = true,
     canDeleteMessage,
     canEditMessage,
+    operationErrorMessage,
     profileMenuActions = []
   } = props
   const [messageDraft, setMessageDraft] = useState("")
+  const [operationError, setOperationError] = useState<string | null>(null)
   const [selectedMessageIds, setSelectedMessageIds] = useState<ReadonlyArray<ChannelMessageId>>([])
   const [editingMessage, setEditingMessage] = useState<{
     readonly messageId: ChannelMessageId
@@ -167,12 +172,15 @@ export function WorkspaceChat(props: {
   const sendChannelMessage = () => {
     const body = messageDraft.trim()
     if (body.length === 0) return
+    setOperationError(null)
     void createChannelMessage({
       channelId: model.channel.id,
       body
     })
       .then(() => setMessageDraft(""))
-      .catch(() => {})
+      .catch((cause) => {
+        if (operationErrorMessage !== undefined) setOperationError(operationErrorMessage("send", cause))
+      })
   }
 
   const requestDeleteMessage = (messageId: ChannelMessageId) => {
@@ -183,6 +191,7 @@ export function WorkspaceChat(props: {
   const confirmDeleteMessage = () => {
     if (pendingDeleteMessage === null) return
     const messageId = pendingDeleteMessage.id
+    setOperationError(null)
     void deleteChannelMessage({
       channelId: model.channel.id,
       messageId
@@ -193,7 +202,9 @@ export function WorkspaceChat(props: {
         setPendingDeleteMessageId(null)
         setMessageMenu(null)
       })
-      .catch(() => {})
+      .catch((cause) => {
+        if (operationErrorMessage !== undefined) setOperationError(operationErrorMessage("delete", cause))
+      })
   }
 
   const startEditingMessage = (message: ChannelMessage) => {
@@ -206,6 +217,7 @@ export function WorkspaceChat(props: {
     const body = editingMessage.draft.trim()
     if (body.length === 0) return
 
+    setOperationError(null)
     setEditingMessage({ ...editingMessage, saving: true })
     void editChannelMessage({
       channelId: model.channel.id,
@@ -213,7 +225,10 @@ export function WorkspaceChat(props: {
       body
     })
       .then(() => setEditingMessage(null))
-      .catch(() => setEditingMessage((editing) => editing === null ? null : { ...editing, saving: false }))
+      .catch((cause) => {
+        if (operationErrorMessage !== undefined) setOperationError(operationErrorMessage("edit", cause))
+        setEditingMessage((editing) => editing === null ? null : { ...editing, saving: false })
+      })
   }
 
   const openMessageMenu = (messageId: ChannelMessageId, x: number, y: number) => {
@@ -258,6 +273,7 @@ export function WorkspaceChat(props: {
         selectedMessageIdSet={view.selectedMessageIdSet}
         topSelectedMessageId={view.topSelectedMessageId}
         messageDraft={messageDraft}
+        operationError={operationError}
         onMessageDraftChange={setMessageDraft}
         onSendMessage={sendChannelMessage}
         onToggleMessage={toggleMessageSelection}
@@ -469,6 +485,7 @@ function ChatPane(props: {
   readonly selectedMessageIdSet: ReadonlySet<ChannelMessageId>
   readonly topSelectedMessageId: ChannelMessageId | null
   readonly messageDraft: string
+  readonly operationError: string | null
   readonly onMessageDraftChange: (draft: string) => void
   readonly onSendMessage: () => void
   readonly onToggleMessage: (messageId: ChannelMessageId) => void
@@ -494,6 +511,7 @@ function ChatPane(props: {
     selectedMessageIdSet,
     topSelectedMessageId,
     messageDraft,
+    operationError,
     onMessageDraftChange,
     onSendMessage,
     onToggleMessage,
@@ -513,6 +531,14 @@ function ChatPane(props: {
   return (
     <section className="chatPane" aria-label={`#${channelName} chat`}>
       <ol className="chatTimeline" aria-label="Channel messages">
+        {messages.length === 0
+          ? (
+            <li className="chatEmptyState">
+              <strong>No messages yet</strong>
+              <span>Start the conversation in #{channelName}.</span>
+            </li>
+          )
+          : null}
         {messages.map((message) => {
           const actionsPinned = selectionMode && message.id === topSelectedMessageId
           return (
@@ -544,6 +570,7 @@ function ChatPane(props: {
       <MessageComposer
         channelName={channelName}
         draft={messageDraft}
+        operationError={operationError}
         onDraftChange={onMessageDraftChange}
         onSend={onSendMessage}
       />
@@ -628,6 +655,9 @@ function ChannelMessageRow(props: {
         <div className="messageMeta">
           <strong>{message.authorDisplayName}</strong>
           <time dateTime={toIso(message.createdAt)}>{formatTime(message.createdAt)}</time>
+          {message.editedAt === null
+            ? null
+            : <span className="messageEdited" title={`Edited ${formatTime(message.editedAt)}`}>edited</span>}
         </div>
         {editing
           ? (
@@ -751,10 +781,11 @@ function MessageEditForm(props: {
 function MessageComposer(props: {
   readonly channelName: string
   readonly draft: string
+  readonly operationError: string | null
   readonly onDraftChange: (draft: string) => void
   readonly onSend: () => void
 }) {
-  const { channelName, draft, onDraftChange, onSend } = props
+  const { channelName, draft, operationError, onDraftChange, onSend } = props
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
   useEffect(() => {
@@ -768,6 +799,9 @@ function MessageComposer(props: {
 
   return (
     <div className="composerDock">
+      {operationError === null
+        ? null
+        : <p className="composerError" role="status">{operationError}</p>}
       <form className="composer" onSubmit={onSubmit} aria-label="Channel message composer">
         <button type="button" className="composerAddButton" aria-label="Add attachment">+</button>
         <label className="srOnly" htmlFor="channel-message">Message</label>
