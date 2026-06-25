@@ -23,6 +23,17 @@ type ConvexDogfoodError = {
 
 type DogfoodOperation = "send" | "edit" | "delete"
 
+const dogfoodShellClassName =
+  "loadingShell grid min-h-screen w-full place-items-center overflow-hidden bg-surface-canvas p-6 font-sans text-foreground"
+const dogfoodAuthPanelClassName =
+  "dogfoodAuthPanel flex w-[min(420px,100%)] flex-col items-start gap-3.5 rounded-card border border-border bg-surface-canvas p-5 shadow-panel [&_div]:m-0 [&_div]:text-sm [&_div]:leading-[1.45] [&_div]:text-foreground-muted [&_h1]:m-0 [&_h1]:text-lg [&_h1]:leading-tight [&_h1]:text-foreground [&_p]:m-0 [&_p]:text-sm [&_p]:leading-[1.45] [&_p]:text-foreground-muted"
+const dogfoodAuthBareClassName =
+  "dogfoodAuthBare flex w-[min(420px,100%)] flex-col items-center gap-[18px] [&_div]:flex [&_div]:justify-center [&_h1]:m-0 [&_h1]:text-center [&_h1]:text-[32px] [&_h1]:font-extrabold [&_h1]:leading-[1.1] [&_h1]:text-foreground-strong"
+const dogfoodPrimaryButtonClassName =
+  "dogfoodPrimaryButton min-h-9 cursor-pointer rounded-panel border border-foreground-strong bg-foreground-strong px-3.5 font-[inherit] font-bold text-foreground-inverse disabled:cursor-default disabled:border-foreground-subtle disabled:bg-foreground-subtle"
+const dogfoodSecondaryButtonClassName =
+  "dogfoodSecondaryButton min-h-9 cursor-pointer rounded-panel border border-border-strong bg-surface-canvas px-3.5 font-[inherit] font-bold text-foreground"
+
 export type DogfoodChannelView = {
   readonly id: Id<"channels">
   readonly key: string
@@ -159,7 +170,7 @@ function ConvexDogfoodChat() {
       <DogfoodShell title="Aether Dogfood" variant="bare">
         <button
           type="button"
-          className="dogfoodPrimaryButton"
+          className={dogfoodPrimaryButtonClassName}
           disabled={signInOpening}
           onClick={() => void signInInDefaultBrowser(auth, setSignInOpening, setError)}
         >
@@ -176,10 +187,10 @@ function ConvexDogfoodChat() {
   if (error !== null) {
     return (
       <DogfoodShell title="Could Not Join">
-        <p className="errorText">{error.message}</p>
+        <p className="errorText max-w-[min(720px,calc(100vw-48px))] [overflow-wrap:anywhere] text-destructive-text">{error.message}</p>
         <button
           type="button"
-          className="dogfoodPrimaryButton"
+          className={dogfoodPrimaryButtonClassName}
           onClick={() => {
             setError(null)
             setEnsuredUserId(null)
@@ -188,7 +199,7 @@ function ConvexDogfoodChat() {
         >
           Try again
         </button>
-        <button type="button" className="dogfoodSecondaryButton" onClick={() => auth.signOut()}>
+        <button type="button" className={dogfoodSecondaryButtonClassName} onClick={() => auth.signOut()}>
           Sign out
         </button>
       </DogfoodShell>
@@ -245,8 +256,8 @@ function DogfoodShell(props: {
 }) {
   const variant = props.variant ?? "panel"
   return (
-    <main className={`loadingShell ${variant === "bare" ? "bare" : ""}`}>
-      <section className={variant === "bare" ? "dogfoodAuthBare" : "dogfoodAuthPanel"} aria-live="polite">
+    <main className={dogfoodShellClassName}>
+      <section className={variant === "bare" ? dogfoodAuthBareClassName : dogfoodAuthPanelClassName} aria-live="polite">
         <h1>{props.title}</h1>
         <div>{props.children}</div>
       </section>
@@ -272,7 +283,7 @@ class DogfoodErrorBoundary extends Component<
     if (this.state.message !== null) {
       return (
         <DogfoodShell title="Chat Failed">
-          <p className="errorText">{this.state.message}</p>
+          <p className="errorText max-w-[min(720px,calc(100vw-48px))] [overflow-wrap:anywhere] text-destructive-text">{this.state.message}</p>
         </DogfoodShell>
       )
     }

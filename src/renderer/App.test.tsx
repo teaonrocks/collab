@@ -139,8 +139,11 @@ describe("App", () => {
     expect(await screen.findByText(/partner brief/)).toBeTruthy()
     expect(screen.getByRole("button", { name: "Hide members" })).toBeTruthy()
     expect(screen.getByRole("tooltip", { name: "Aether Labs" })).toBeTruthy()
-    expect(screen.getByLabelText("Channel members")).toBeTruthy()
+    const members = screen.getByLabelText("Channel members")
+    expect(members).toBeTruthy()
     expect(screen.getByText("Online -- 1")).toBeTruthy()
+    expect(within(members).getByText("MP").className).toContain("bg-surface-rail")
+    expect(within(members).getByText("Maya Patel").className).toContain("text-foreground")
   })
 
   it("keeps direct messages in the global rail instead of channel navigation", async () => {
@@ -197,6 +200,8 @@ describe("App", () => {
 
     expect(within(directMessages).getByRole("button", { name: "Maya Patel" })).toBeTruthy()
     expect(within(directMessages).getByRole("tooltip", { name: "Maya Patel" })).toBeTruthy()
+    expect(screen.getByLabelText("Channel members").querySelector("[aria-busy='true']")).toBeTruthy()
+    expect(document.querySelector("[class*='skeletonPulse']")).toBeTruthy()
   })
 
   it("renders and switches channels from the model channel list", async () => {
@@ -221,10 +226,13 @@ describe("App", () => {
     )
 
     const channels = await screen.findByRole("navigation", { name: "Channels" })
-    expect(within(channels).getByRole("button", { name: "origination" })).toBeTruthy()
-    expect(within(channels).getByRole("button", { name: "design" })).toBeTruthy()
+    const originationChannel = within(channels).getByRole("button", { name: "origination" })
+    const designChannel = within(channels).getByRole("button", { name: "design" })
+    expect(originationChannel.getAttribute("aria-current")).toBe("page")
+    expect(originationChannel.className).toContain("bg-surface-rail")
+    expect(designChannel.getAttribute("aria-current")).toBeNull()
 
-    fireEvent.click(within(channels).getByRole("button", { name: "design" }))
+    fireEvent.click(designChannel)
 
     expect(selections).toEqual([secondChannelId])
   })
@@ -269,10 +277,35 @@ describe("App", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Add channel" }))
     expect(await screen.findByRole("dialog", { name: "Create Channel" })).toBeTruthy()
     const form = await screen.findByRole("form", { name: "Create channel" })
+    expect(within(form).getByRole("status").className).toContain("min-h-[17px]")
     fireEvent.change(within(form).getByLabelText("Channel name"), { target: { value: "product" } })
     fireEvent.submit(form)
 
     await waitFor(() => expect(calls).toEqual([{ name: "product" }]))
+  })
+
+  it("shows channel creation backend errors without collapsing reserved error space", async () => {
+    render(
+      <WorkspaceChat
+        model={makeChatModel()}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+        createChannel={() => Promise.reject(new Error("raw backend details"))}
+      />
+    )
+
+    fireEvent.click(await screen.findByRole("button", { name: "Add channel" }))
+    const form = await screen.findByRole("form", { name: "Create channel" })
+    const status = within(form).getByRole("status")
+    expect(status.className).toContain("min-h-[17px]")
+    expect(status.className).toContain("invisible")
+
+    fireEvent.change(within(form).getByLabelText("Channel name"), { target: { value: "ops" } })
+    fireEvent.submit(form)
+
+    expect(await within(form).findByText("Could not create channel. Check your connection and try again.")).toBeTruthy()
+    expect(status.className).not.toContain("invisible")
+    expect(screen.queryByText(/raw backend details/)).toBeNull()
   })
 
   it("opens profile settings from the rail avatar", async () => {
@@ -374,6 +407,24 @@ describe("App", () => {
     )
   })
 
+  it("sends a channel message from the composer send button", async () => {
+    const calls = renderApp(makeSnapshot())
+    const input = await screen.findByPlaceholderText("Message origination")
+
+    fireEvent.change(input, { target: { value: "Button send keeps mouse users covered." } })
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }))
+
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        method: "createChannelMessage",
+        args: expect.objectContaining({
+          channelId,
+          body: "Button send keeps mouse users covered."
+        })
+      })
+    )
+  })
+
   it("keeps Shift+Enter inside the composer without sending", async () => {
     const calls = renderApp(makeSnapshot())
     const input = await screen.findByPlaceholderText("Message origination")
@@ -466,7 +517,7 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: "Aether Labs" })).toBeTruthy()
     expect(screen.queryByText("No messages yet")).toBeNull()
     expect(container.querySelectorAll(".channelMessageSkeleton")).toHaveLength(7)
-    expect(container.querySelectorAll(".memberSkeleton")).toHaveLength(4)
+    expect(screen.getByLabelText("Channel members").querySelectorAll("[class*='skeletonPulse']")).toHaveLength(12)
     expect((screen.getByPlaceholderText("Message origination") as HTMLTextAreaElement).disabled).toBe(true)
   })
 

@@ -9,6 +9,7 @@ import {
   Paperclip,
   Pencil,
   Plus,
+  SendHorizontal,
   Square,
   SquareCheck,
   Trash2,
@@ -29,6 +30,18 @@ import {
   type MessageRowState,
   useMessageInteractions
 } from "./message-interactions"
+import { cn } from "./lib/cn"
+import {
+  Avatar,
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogTitle,
+  Input,
+  Textarea
+} from "./ui"
 
 type ChannelIndicator = "unread" | "mentioned"
 
@@ -60,6 +73,40 @@ const MESSAGE_CONTEXT_MENU_OFFSET = 6
 const COMPOSER_MIN_HEIGHT = 22
 const COMPOSER_MAX_HEIGHT = 140
 const MESSAGE_EDIT_MAX_HEIGHT = 180
+const chatTimelineClassName =
+  "chatTimeline flex min-h-0 list-none flex-col gap-0.5 overflow-auto px-4 pb-[18px] pt-3.5 [--chat-timeline-x:16px] [--message-avatar-column:40px] [--message-column-gap:10px] [--message-group-x:10px] [--message-row-left-bleed:calc(var(--chat-timeline-x)+var(--message-group-x)+var(--message-avatar-column)+var(--message-column-gap))] [--message-row-right-bleed:calc(var(--chat-timeline-x)+var(--message-group-x))]"
+const channelMessageGroupClassName =
+  "channelMessageGroup grid min-w-0 grid-cols-[var(--message-avatar-column)_minmax(0,1fr)] items-start justify-start gap-[var(--message-column-gap)] px-[var(--message-group-x)]"
+const channelMessageClassName =
+  "channelMessage group/message relative grid min-w-0 w-[calc(100%+var(--message-row-left-bleed)+var(--message-row-right-bleed))] -ml-[var(--message-row-left-bleed)] grid-cols-[minmax(0,1fr)] items-start justify-start gap-2.5 border border-transparent bg-transparent py-2 pl-[var(--message-row-left-bleed)] pr-[var(--message-row-right-bleed)] hover:bg-surface-muted focus-within:bg-surface-muted"
+const messageContentClassName =
+  "messageContent min-w-0 max-w-[820px]"
+const messageBodyClassName =
+  "mb-0 mt-[3px] text-sm leading-[1.42] text-foreground [overflow-wrap:anywhere]"
+const messageActionButtonClassName =
+  "size-[34px] min-h-[30px] rounded-none border-0 border-l border-surface-rail bg-surface-raised text-foreground-muted first:border-l-0 hover:bg-surface-muted hover:text-foreground"
+const loadingShellClassName =
+  "loadingShell grid min-h-screen w-full place-items-center overflow-hidden bg-surface-canvas p-6 font-sans text-foreground"
+const appShellClassName =
+  "appShell grid h-full min-h-0 w-full overflow-hidden bg-surface-canvas font-sans text-foreground [grid-template-areas:'rail_sidebar_header_header'_'rail_sidebar_chat_members'] [grid-template-columns:56px_minmax(200px,236px)_minmax(360px,1fr)_minmax(280px,320px)] [grid-template-rows:56px_minmax(0,1fr)] [&_*]:box-border max-[920px]:[grid-template-areas:'rail_header'_'rail_chat'] max-[920px]:[grid-template-columns:56px_minmax(0,1fr)]"
+const appShellMembersCollapsedClassName =
+  "membersCollapsed [grid-template-areas:'rail_sidebar_header'_'rail_sidebar_chat'] [grid-template-columns:56px_minmax(200px,236px)_minmax(360px,1fr)] max-[920px]:[grid-template-areas:'rail_header'_'rail_chat'] max-[920px]:[grid-template-columns:56px_minmax(0,1fr)]"
+const railItemClassName =
+  "group/rail relative grid size-9 cursor-pointer place-items-center rounded-card border-0 bg-surface-muted text-[13px] font-extrabold text-foreground"
+const railTooltipClassName =
+  "pointer-events-none absolute left-[calc(100%+10px)] top-1/2 z-30 flex min-h-7 max-w-[180px] -translate-y-1/2 -translate-x-1 items-center whitespace-nowrap rounded-control bg-foreground px-[9px] text-xs font-bold leading-none text-foreground-inverse opacity-0 transition-[opacity,transform] duration-150 before:absolute before:right-full before:top-1/2 before:size-0 before:-translate-y-1/2 before:border-y-[5px] before:border-r-[5px] before:border-y-transparent before:border-r-foreground group-hover/rail:translate-x-0 group-hover/rail:opacity-100 group-focus-visible/rail:translate-x-0 group-focus-visible/rail:opacity-100"
+const channelNavItemClassName =
+  "channelNavItem group/channel flex min-h-[34px] w-full items-center justify-between gap-2 rounded-none border-0 bg-transparent px-5 py-[7px] text-left font-[inherit] text-foreground-muted hover:bg-surface-muted-hover"
+const memberListClassName =
+  "memberList m-0 flex list-none flex-col gap-2 p-0"
+const memberItemClassName =
+  "grid min-w-0 grid-cols-[36px_minmax(0,1fr)] items-center gap-2.5"
+const memberNameClassName =
+  "block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-sm font-bold text-foreground"
+const memberRoleClassName =
+  "mt-0.5 block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-foreground-subtle"
+const skeletonBlockClassName =
+  "block overflow-hidden rounded-panel bg-[linear-gradient(90deg,var(--aether-color-surface-muted-hover)_0%,var(--aether-color-surface-shimmer)_48%,var(--aether-color-surface-muted-hover)_100%)] bg-[length:220%_100%] motion-safe:animate-[skeletonPulse_1.15s_ease-in-out_infinite]"
 
 export function App() {
   const snapshot = useAtomValue(atoms.snapshot)
@@ -67,8 +114,14 @@ export function App() {
   const deleteChannelMessage = useAtomSet(atoms.deleteChannelMessage, { mode: "promise" })
 
   return Result.builder(snapshot)
-    .onInitial(() => <main className="loadingShell"><p>Loading...</p></main>)
-    .onFailure((cause) => <main className="loadingShell"><p className="errorText">{Cause.pretty(cause)}</p></main>)
+    .onInitial(() => <main className={loadingShellClassName}><p>Loading...</p></main>)
+    .onFailure((cause) => (
+      <main className={loadingShellClassName}>
+        <p className="errorText max-w-[min(720px,calc(100vw-48px))] [overflow-wrap:anywhere] text-destructive-text">
+          {Cause.pretty(cause)}
+        </p>
+      </main>
+    ))
     .onSuccess((model) => (
       <WorkspaceChat
         model={model}
@@ -183,7 +236,7 @@ export function WorkspaceChat(props: {
   const pendingDeleteMessage = messageInteractions.pendingDeleteMessage
 
   return (
-    <main className={classNames("appShell", !membersOpen && "membersCollapsed")}>
+    <main className={classNames(appShellClassName, !membersOpen && appShellMembersCollapsedClassName)}>
       <WorkspaceRail
         workspaceName={model.workspace.name}
         currentUserName={model.currentUser.displayName}
@@ -238,6 +291,7 @@ export function WorkspaceChat(props: {
         members={view.members}
         currentUserId={model.currentUser.id}
         loading={channelMessagesLoading}
+        open={membersOpen}
       />
 
       {menuMessage === null || messageMenu === null
@@ -263,6 +317,7 @@ export function WorkspaceChat(props: {
         : (
           <DeleteMessageDialog
             authorDisplayName={pendingDeleteMessage.authorDisplayName}
+            operationError={operationError}
             onCancel={messageInteractions.cancelDeleteMessage}
             onConfirm={messageInteractions.confirmDeleteMessage}
           />
@@ -291,32 +346,39 @@ function WorkspaceRail(props: {
   } = props
   const hasProfileActions = profileMenuActions.length > 0
   return (
-    <aside className="workspaceRail" aria-label="Global navigation">
-      <nav className="railGroup" aria-label="Workspaces">
-        <button type="button" className="workspaceRailItem active" aria-label={workspaceName}>
+    <aside className="workspaceRail flex h-full min-h-0 min-w-0 flex-col items-center gap-3 border-r border-border bg-surface-rail px-2 py-3 [grid-area:rail]" aria-label="Global navigation">
+      <nav className="railGroup flex w-full flex-col items-center gap-2" aria-label="Workspaces">
+        <button
+          type="button"
+          className={classNames(
+            railItemClassName,
+            "active bg-surface-canvas outline-2 outline-border before:absolute before:-left-2 before:h-6 before:w-[3px] before:rounded-r-[3px] before:bg-foreground"
+          )}
+          aria-label={workspaceName}
+        >
           {initials(workspaceName)}
-          <span className="railTooltip" role="tooltip">{workspaceName}</span>
+          <span className={railTooltipClassName} role="tooltip">{workspaceName}</span>
         </button>
       </nav>
-      <div className="railDivider" role="separator" aria-label="Direct messages" />
-      <nav className="railGroup" aria-label="Direct messages">
+      <div className="railDivider h-px w-8 shrink-0 bg-border-strong" role="separator" aria-label="Direct messages" />
+      <nav className="railGroup flex w-full flex-col items-center gap-2" aria-label="Direct messages">
         {members.map((member) => (
           <button
             key={member.id}
             type="button"
-            className="dmRailItem"
+            className={classNames(railItemClassName, "dmRailItem rounded-full hover:bg-surface-canvas hover:outline-2 hover:outline-border focus-visible:bg-surface-canvas focus-visible:outline-2 focus-visible:outline-border")}
             aria-label={member.displayName}
           >
             {initials(member.displayName)}
-            <span className="railTooltip" role="tooltip">{member.displayName}</span>
+            <span className={railTooltipClassName} role="tooltip">{member.displayName}</span>
           </button>
         ))}
       </nav>
-      <div className="railSpacer" />
-      <div className="railProfile">
+      <div className="railSpacer flex-1" />
+      <div className="railProfile relative">
         <button
           type="button"
-          className="railUser"
+          className="railUser grid size-8 cursor-pointer place-items-center rounded-full border-0 bg-surface-muted p-0 text-[11px] font-extrabold text-foreground disabled:cursor-default"
           title={currentUserName}
           aria-label={hasProfileActions ? `Open profile menu for ${currentUserName}` : currentUserName}
           aria-haspopup={hasProfileActions ? "menu" : undefined}
@@ -331,15 +393,16 @@ function WorkspaceRail(props: {
         </button>
         {profileMenuOpen && hasProfileActions
           ? (
-            <div className="profileMenu" role="menu" aria-label="Profile settings" onClick={(event) => event.stopPropagation()}>
-              <div className="profileMenuHeader">
-                <strong>{currentUserName}</strong>
+            <div className="profileMenu absolute bottom-0 left-[calc(100%+10px)] z-40 w-[180px] overflow-hidden rounded-panel border border-border-strong bg-surface-canvas shadow-popover" role="menu" aria-label="Profile settings" onClick={(event) => event.stopPropagation()}>
+              <div className="profileMenuHeader border-b border-surface-rail p-2.5">
+                <strong className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[13px] leading-tight text-foreground">{currentUserName}</strong>
               </div>
               {profileMenuActions.map((action) => (
                 <button
                   key={action.label}
                   type="button"
                   role="menuitem"
+                  className="min-h-9 w-full border-0 bg-surface-canvas px-2.5 text-left font-[inherit] text-[13px] font-bold text-foreground hover:bg-surface-muted focus-visible:bg-surface-muted"
                   onClick={() => {
                     onCloseProfileMenu()
                     action.onSelect()
@@ -408,16 +471,17 @@ function ChannelSidebar(props: {
 
   return (
     <>
-      <aside className="channelSidebar" aria-label="Workspace navigation">
-        <header className="workspaceHeader">
-          <h1>{workspaceName}</h1>
+      <aside className="channelSidebar flex h-full min-h-0 min-w-0 flex-col gap-[18px] overflow-hidden border-r border-border bg-surface-muted pb-3 [grid-area:sidebar] max-[920px]:hidden" aria-label="Workspace navigation">
+        <header className="workspaceHeader flex min-h-14 items-center border-b border-border px-4">
+          <h1 className="m-0 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-base leading-tight tracking-normal text-foreground">{workspaceName}</h1>
         </header>
 
-        <nav className="sidebarSection" aria-label="Channels">
-          <div className="sidebarHeaderRow">
+        <nav className="sidebarSection flex min-w-0 flex-col p-0" aria-label="Channels">
+          <div className="sidebarHeaderRow flex min-h-6 items-center justify-between gap-2 px-4 text-xs font-bold uppercase text-foreground-subtle">
             <span>Channels</span>
             <button
               type="button"
+              className="grid size-6 cursor-pointer place-items-center rounded-[4px] border-0 bg-transparent font-[inherit] text-foreground-subtle disabled:cursor-not-allowed disabled:opacity-50 enabled:hover:bg-surface-muted-hover enabled:hover:text-foreground enabled:focus-visible:bg-surface-muted-hover enabled:focus-visible:text-foreground"
               aria-label="Add channel"
               aria-haspopup="dialog"
               aria-expanded={creating}
@@ -436,22 +500,25 @@ function ChannelSidebar(props: {
               <button
                 key={channel.id}
                 type="button"
-                className={classNames("channelNavItem", active && "active")}
+                className={classNames(channelNavItemClassName, active && "active bg-surface-rail")}
                 aria-current={active ? "page" : undefined}
                 onClick={() => {
                   if (!active) onSelectChannel?.(channel.id)
                 }}
               >
-                <span className="channelNavMain">
-                  <span className="channelNavName">
+                <span className="channelNavMain min-w-0 flex flex-col gap-[3px]">
+                  <span className="channelNavName flex min-w-0 items-center gap-1 overflow-hidden text-ellipsis whitespace-nowrap font-bold">
                     <ChannelGlyph visibility={channel.visibility} />
-                    <span className="channelNavText">{channel.name}</span>
+                    <span className="channelNavText min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{channel.name}</span>
                   </span>
                 </span>
                 {active && channelIndicator !== null
                   ? (
                     <span
-                      className={`channelIndicator ${channelIndicator}`}
+                      className={classNames(
+                        "channelIndicator size-2 shrink-0 rounded-full",
+                        channelIndicator === "mentioned" ? "mentioned bg-signal-mentioned" : "unread bg-signal-unread"
+                      )}
                       aria-label={channelIndicator === "mentioned" ? "Mentioned" : "Unread messages"}
                     />
                   )
@@ -461,11 +528,11 @@ function ChannelSidebar(props: {
           })}
           {channels.length === 0
             ? (
-              <button type="button" className="channelNavItem active" aria-current="page">
-                <span className="channelNavMain">
-                  <span className="channelNavName">
+              <button type="button" className={classNames(channelNavItemClassName, "active bg-surface-rail")} aria-current="page">
+                <span className="channelNavMain min-w-0 flex flex-col gap-[3px]">
+                  <span className="channelNavName flex min-w-0 items-center gap-1 overflow-hidden text-ellipsis whitespace-nowrap font-bold">
                     <ChannelGlyph visibility={channelVisibility} />
-                    <span className="channelNavText">{channelName}</span>
+                    <span className="channelNavText min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{channelName}</span>
                   </span>
                 </span>
               </button>
@@ -475,9 +542,9 @@ function ChannelSidebar(props: {
 
         {showAgentParkedPanel
           ? (
-            <section className="laterPanel" aria-label="Later integrations">
-              <strong>Agents later</strong>
-              <p>Chat stays first. The existing RPC agent plumbing is parked behind the product surface for the next phase.</p>
+            <section className="laterPanel mx-3 mt-auto rounded-panel border border-border bg-surface-canvas p-3" aria-label="Later integrations">
+              <strong className="mb-[5px] block text-[13px] text-foreground">Agents later</strong>
+              <p className="m-0 text-xs leading-[1.4] text-foreground-subtle">Chat stays first. The existing RPC agent plumbing is parked behind the product surface for the next phase.</p>
             </section>
           )
           : null}
@@ -508,62 +575,68 @@ function CreateChannelDialog(props: {
   readonly onCancel: () => void
 }) {
   const { draft, saving, error, onDraftChange, onSubmit, onCancel } = props
-  const inputRef = useRef<HTMLInputElement | null>(null)
 
-  useEffect(() => {
-    inputRef.current?.focus()
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onCancel()
-    }
-    window.addEventListener("keydown", closeOnEscape)
-    return () => {
-      window.removeEventListener("keydown", closeOnEscape)
-    }
-  }, [onCancel])
+  const handleOpenChange = (open: boolean) => {
+    if (!open) onCancel()
+  }
 
   return (
-    <div className="dialogScrim" role="presentation" onClick={onCancel}>
-      <section
-        className="channelCreateDialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="create-channel-title"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <h2 id="create-channel-title">Create Channel</h2>
-        <form className="channelCreateForm" aria-label="Create channel" onSubmit={onSubmit}>
-          <label htmlFor="new-channel-name">Channel name</label>
-          <input
-            ref={inputRef}
+    <Dialog open onOpenChange={handleOpenChange}>
+      <DialogContent className="channelCreateDialog max-w-[380px]">
+        <DialogTitle id="create-channel-title">Create Channel</DialogTitle>
+        <DialogDescription id="create-channel-description" className="srOnly">
+          Name the channel to add it to this workspace.
+        </DialogDescription>
+        <form className="mt-3 flex flex-col gap-2.5" aria-label="Create channel" onSubmit={onSubmit}>
+          <label className="text-[13px] font-bold text-foreground-muted" htmlFor="new-channel-name">
+            Channel name
+          </label>
+          <Input
             id="new-channel-name"
             value={draft}
             placeholder="new-channel"
             disabled={saving}
+            autoFocus
+            aria-describedby="create-channel-error"
+            aria-invalid={error !== null}
             onChange={(event) => onDraftChange(event.target.value)}
           />
-          {error === null
-            ? null
-            : <p className="channelCreateError" role="status">{error}</p>}
-          <div className="channelCreateActions">
-            <button type="button" disabled={saving} onClick={onCancel}>
+          <p
+            id="create-channel-error"
+            className={classNames(
+              "m-0 min-h-[17px] text-xs leading-[1.35] text-destructive-text",
+              error === null && "invisible"
+            )}
+            role="status"
+          >
+            {error ?? ""}
+          </p>
+          <DialogFooter className="mt-0">
+            <Button type="button" variant="secondary" size="sm" disabled={saving} onClick={onCancel}>
               Cancel
-            </button>
-            <button type="submit" disabled={draft.trim().length === 0 || saving}>
+            </Button>
+            <Button type="submit" size="sm" disabled={draft.trim().length === 0 || saving}>
               {saving ? "Creating..." : "Create"}
-            </button>
-          </div>
+            </Button>
+          </DialogFooter>
         </form>
-      </section>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 
 function ChannelGlyph(props: { readonly visibility?: Channel["visibility"] }) {
   return (
-    <span className={classNames("channelGlyph", props.visibility === "private" && "private")} aria-hidden="true">
-      <Hash className="channelHashIcon buttonIcon" />
+    <span
+      className={classNames(
+        "channelGlyph relative inline-flex size-[18px] shrink-0 items-center justify-center text-foreground-subtle",
+        props.visibility === "private" && "private w-[21px]"
+      )}
+      aria-hidden="true"
+    >
+      <Hash className="channelHashIcon size-[18px]" />
       {props.visibility === "private"
-        ? <Lock className="channelLockBadge" />
+        ? <Lock className="channelLockBadge absolute -right-px -top-px size-[9px] rounded-[2px] bg-surface-muted p-px text-foreground-subtle [stroke-width:4] group-hover/channel:bg-surface-muted-hover group-[.active]/channel:bg-surface-rail" />
         : null}
     </span>
   )
@@ -577,15 +650,18 @@ function ChannelHeader(props: {
   const { channelName, membersOpen, onToggleMembers } = props
   const membersToggleLabel = membersOpen ? "Hide members" : "Show members"
   return (
-    <header className="chatHeader">
-      <div className="channelTitle">
-        <Hash className="channelHashIcon buttonIcon" aria-hidden="true" />
-        <h2>{channelName}</h2>
+    <header className="chatHeader flex min-h-0 min-w-0 items-center justify-between gap-3 border-b border-border bg-surface-canvas px-4 py-2 [grid-area:header]">
+      <div className="channelTitle flex min-w-0 items-center gap-2">
+        <Hash className="channelHashIcon buttonIcon shrink-0 text-foreground-subtle" aria-hidden="true" />
+        <h2 className="m-0 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-lg leading-tight tracking-normal text-foreground">{channelName}</h2>
       </div>
-      <div className="chatHeaderActions" aria-label="Channel actions">
+      <div className="chatHeaderActions flex items-center justify-end gap-2 text-xs text-foreground-subtle" aria-label="Channel actions">
         <button
           type="button"
-          className={classNames("membersToggle", membersOpen && "active")}
+          className={classNames(
+            "membersToggle grid min-h-[30px] w-8 cursor-pointer place-items-center rounded-control border border-border-strong bg-surface-canvas p-0 font-[inherit] text-ring hover:border-ring hover:bg-surface-muted hover:text-foreground-subtle focus-visible:border-ring focus-visible:bg-surface-muted focus-visible:text-foreground-subtle",
+            membersOpen && "active text-foreground hover:text-foreground focus-visible:text-foreground"
+          )}
           aria-label={membersToggleLabel}
           aria-pressed={membersOpen}
           title={membersToggleLabel}
@@ -640,16 +716,16 @@ function ChatPane(props: {
   } = props
 
   return (
-    <section className="chatPane" aria-label={`${channelName} chat`}>
-      <ol className="chatTimeline" aria-label="Channel messages" aria-busy={loading}>
+    <section className="chatPane grid h-full min-h-0 min-w-0 grid-rows-[minmax(0,1fr)_auto] bg-surface-canvas [grid-area:chat]" aria-label={`${channelName} chat`}>
+      <ol className={chatTimelineClassName} aria-label="Channel messages" aria-busy={loading}>
         {loading
           ? <ChannelMessagesSkeleton />
           : null}
         {!loading && messageGroups.length === 0
           ? (
-            <li className="chatEmptyState">
-              <strong>No messages yet</strong>
-              <span className="chatEmptyChannel">
+            <li className="chatEmptyState grid flex-1 place-content-center justify-items-center gap-1.5 px-5 py-8 text-center text-sm text-foreground-subtle">
+              <strong className="text-[15px] text-foreground">No messages yet</strong>
+              <span className="chatEmptyChannel inline-flex items-center justify-center gap-1">
                 Start the conversation in
                 <Hash className="channelHashIcon buttonIcon" aria-hidden="true" />
                 <span>{channelName}.</span>
@@ -658,9 +734,13 @@ function ChatPane(props: {
           )
           : null}
         {!loading && messageGroups.map((group) => (
-          <li key={group.id} className="channelMessageGroup">
-            <div className="messageAvatar messageRunAvatar" aria-hidden="true">{initials(group.authorDisplayName)}</div>
-            <div className="messageRun">
+          <li key={group.id} className={channelMessageGroupClassName}>
+            <Avatar
+              name={group.authorDisplayName}
+              className="messageAvatar messageRunAvatar sticky top-3.5 z-10 mt-2"
+              aria-hidden="true"
+            />
+            <div className="messageRun flex min-w-0 flex-col gap-0.5">
               {group.messages.map((message, index) => {
                 const rowState = getMessageRowState(message)
                 return (
@@ -703,11 +783,21 @@ function ChannelMessagesSkeleton() {
   return (
     <>
       {Array.from({ length: 7 }, (_, index) => (
-        <li key={index} className="channelMessageSkeleton" aria-hidden="true">
+        <li
+          key={index}
+          className="channelMessageSkeleton grid min-w-0 grid-cols-[40px_minmax(0,760px)] items-start gap-2.5 px-2.5 py-2"
+          aria-hidden="true"
+        >
           <span className="skeletonAvatar" />
-          <span className="skeletonMessageContent">
-            <span className="skeletonLine meta" />
-            <span className={classNames("skeletonLine body", index % 3 === 0 && "short", index % 3 === 1 && "medium")} />
+          <span className="skeletonMessageContent flex min-w-0 flex-col gap-2 pt-[3px]">
+            <span className="skeletonLine meta h-3 w-[min(220px,45%)]" />
+            <span
+              className={classNames(
+                "skeletonLine body h-3.5 w-[min(680px,88%)]",
+                index % 3 === 0 && "short w-[min(420px,58%)]",
+                index % 3 === 1 && "medium w-[min(560px,72%)]"
+              )}
+            />
           </span>
         </li>
       ))}
@@ -748,12 +838,12 @@ function ChannelMessageRow(props: {
   const deleted = message.deletedAt !== null
   const editing = editingDraft !== null
   const className = classNames(
-    "channelMessage",
+    channelMessageClassName,
     !startsAuthorRun && "compact",
-    deleted && "deleted",
-    editing && "editing",
-    selected && "selected",
-    selectionMode && !deleted && "selecting"
+    deleted && "deleted text-foreground-placeholder",
+    editing && "editing bg-surface-muted",
+    selected && "selected border-border bg-surface-muted",
+    selectionMode && !deleted && "selecting grid-cols-[20px_minmax(0,1fr)] cursor-pointer"
   )
 
   return (
@@ -771,7 +861,7 @@ function ChannelMessageRow(props: {
       {selectionMode && !deleted
         ? (
           <input
-            className="messageCheckbox"
+            className="messageCheckbox mt-2.5 size-4 cursor-pointer accent-foreground-subtle"
             type="checkbox"
             checked={selected}
             aria-label={`${selected ? "Deselect" : "Select"} message from ${message.authorDisplayName}`}
@@ -780,20 +870,28 @@ function ChannelMessageRow(props: {
           />
         )
         : null}
-      <div className="messageContent">
-        <div className="messageMeta">
+      <div className={messageContentClassName}>
+        <div
+          className={classNames(
+            "messageMeta flex min-w-0 items-baseline gap-2",
+            !startsAuthorRun && "pointer-events-none absolute left-[calc(var(--chat-timeline-x)+var(--message-group-x))] top-2.5 w-[var(--message-avatar-column)] justify-center"
+          )}
+        >
           {startsAuthorRun
-            ? <strong>{message.authorDisplayName}</strong>
+            ? <strong className="min-w-0 text-sm font-bold text-foreground [overflow-wrap:anywhere]">{message.authorDisplayName}</strong>
             : null}
           <time
-            className={classNames("messageTimestamp", !startsAuthorRun && "hidden")}
+            className={classNames(
+              "messageTimestamp whitespace-nowrap text-xs text-foreground-subtle",
+              !startsAuthorRun && "hidden [display:inline] opacity-0 group-hover/message:opacity-100 group-focus-within/message:opacity-100"
+            )}
             dateTime={toIso(message.createdAt)}
           >
             {formatTime(message.createdAt)}
           </time>
           {message.editedAt === null || !startsAuthorRun
             ? null
-            : <span className="messageEdited" title={`Edited ${formatTime(message.editedAt)}`}>edited</span>}
+            : <span className="messageEdited whitespace-nowrap text-xs text-foreground-subtle" title={`Edited ${formatTime(message.editedAt)}`}>edited</span>}
         </div>
         {editing
           ? (
@@ -806,21 +904,34 @@ function ChannelMessageRow(props: {
               onCancel={onCancelEdit}
             />
           )
-          : <p>{deleted ? "Message deleted" : message.body}</p>}
+          : <p className={classNames(messageBodyClassName, deleted && "text-foreground-placeholder italic")}>{deleted ? "Message deleted" : message.body}</p>}
       </div>
       {message.editedAt === null || startsAuthorRun
         ? null
-        : <span className="messageEdited compactEdited" title={`Edited ${formatTime(message.editedAt)}`}>edited</span>}
+        : (
+          <span
+            className="messageEdited compactEdited absolute right-[var(--message-row-right-bleed)] top-2.5 whitespace-nowrap text-xs text-foreground-subtle"
+            title={`Edited ${formatTime(message.editedAt)}`}
+          >
+            edited
+          </span>
+        )}
       {deleted || editing || !actionsAvailable
         ? null
         : (
           <div
-            className={classNames("messageActions", actionsPinned && "visible")}
+            className={classNames(
+              "messageActions pointer-events-none absolute right-3 top-[-14px] z-10 flex overflow-hidden rounded-panel border border-border-strong bg-surface-raised opacity-0 shadow-floating group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100",
+              actionsPinned && "visible pointer-events-auto opacity-100"
+            )}
             aria-label={`Message actions for ${message.authorDisplayName}`}
             onClick={(event) => event.stopPropagation()}
           >
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon"
+              className={messageActionButtonClassName}
               aria-label={`More actions for message from ${message.authorDisplayName}`}
               onClick={(event) => {
                 const rect = event.currentTarget.getBoundingClientRect()
@@ -829,7 +940,7 @@ function ChannelMessageRow(props: {
               }}
             >
               <Ellipsis className="buttonIcon" aria-hidden="true" />
-            </button>
+            </Button>
           </div>
         )}
     </article>
@@ -867,11 +978,17 @@ function MessageEditForm(props: {
   }
 
   return (
-    <form className="messageEditForm" aria-label={`Edit message from ${authorDisplayName}`} onSubmit={submit} onClick={(event) => event.stopPropagation()}>
-      <textarea
+    <form
+      className="messageEditForm mt-1.5 flex min-w-0 flex-col gap-2"
+      aria-label={`Edit message from ${authorDisplayName}`}
+      onSubmit={submit}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <Textarea
         ref={textareaRef}
         rows={2}
         value={draft}
+        className="min-h-12 max-h-[180px] resize-none overflow-hidden bg-surface-canvas px-2.5 py-2 text-sm leading-[1.42]"
         aria-label={`Edit message text from ${authorDisplayName}`}
         onChange={(event) => onDraftChange(event.target.value)}
         onKeyDown={(event) => {
@@ -884,9 +1001,9 @@ function MessageEditForm(props: {
           }
         }}
       />
-      <div className="messageEditActions">
-        <button type="button" onClick={onCancel} disabled={saving}>Cancel</button>
-        <button type="submit" disabled={!canSave}>{saving ? "Saving..." : "Save"}</button>
+      <div className="messageEditActions flex items-center justify-end gap-1.5">
+        <Button type="button" variant="secondary" size="sm" onClick={onCancel} disabled={saving}>Cancel</Button>
+        <Button type="submit" size="sm" disabled={!canSave}>{saving ? "Saving..." : "Save"}</Button>
       </div>
     </form>
   )
@@ -902,6 +1019,7 @@ function MessageComposer(props: {
 }) {
   const { channelName, draft, operationError, disabled, onDraftChange, onSend } = props
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const canSend = draft.trim().length > 0 && !disabled
 
   useEffect(() => {
     resizeTextarea(textareaRef.current, COMPOSER_MIN_HEIGHT, COMPOSER_MAX_HEIGHT)
@@ -914,21 +1032,36 @@ function MessageComposer(props: {
   }
 
   return (
-    <div className="composerDock">
+    <div className="composerDock border-t border-border bg-surface-canvas px-4 pb-3 pt-2.5">
       {operationError === null
         ? null
-        : <p className="composerError" role="status">{operationError}</p>}
-      <form className={classNames("composer", disabled && "disabled")} onSubmit={onSubmit} aria-label="Channel message composer">
-        <button type="button" className="composerAddButton" aria-label="Add attachment" disabled={disabled}>
+        : <p className="composerError mb-2 mt-0 text-[13px] leading-[1.35] text-destructive-text" role="status">{operationError}</p>}
+      <form
+        className={classNames(
+          "composer grid min-h-11 grid-cols-[48px_minmax(0,1fr)_44px] items-center overflow-hidden rounded-panel border border-border bg-surface-canvas",
+          disabled && "disabled bg-surface-sunken"
+        )}
+        onSubmit={onSubmit}
+        aria-label="Channel message composer"
+      >
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="composerAddButton h-full min-h-11 w-12 rounded-none border-0 border-r border-border bg-surface-canvas text-foreground-subtle hover:bg-surface-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
+          aria-label="Add attachment"
+          disabled={disabled}
+        >
           <Paperclip className="buttonIcon" aria-hidden="true" />
-        </button>
+        </Button>
         <label className="srOnly" htmlFor="channel-message">Message</label>
-        <textarea
+        <Textarea
           ref={textareaRef}
           id="channel-message"
           rows={1}
           value={draft}
           disabled={disabled}
+          className="h-[22px] min-h-[22px] max-h-[140px] resize-none overflow-hidden rounded-none border-0 bg-surface-canvas px-3 py-0 text-sm leading-[1.42] focus-visible:border-transparent focus-visible:ring-0 focus-visible:ring-offset-0 disabled:bg-surface-sunken"
           placeholder={`Message ${channelName}`}
           onChange={(event) => onDraftChange(event.target.value)}
           onKeyDown={(event) => {
@@ -938,6 +1071,16 @@ function MessageComposer(props: {
             }
           }}
         />
+        <Button
+          type="submit"
+          variant="ghost"
+          size="icon"
+          className="h-full min-h-11 w-11 rounded-none border-0 border-l border-border text-foreground-muted hover:bg-surface-muted hover:text-foreground"
+          aria-label="Send message"
+          disabled={!canSend}
+        >
+          <SendHorizontal className="buttonIcon" aria-hidden="true" />
+        </Button>
       </form>
     </div>
   )
@@ -947,24 +1090,25 @@ function MembersPanel(props: {
   readonly members: ReadonlyArray<ChannelMember>
   readonly currentUserId: string
   readonly loading: boolean
+  readonly open: boolean
 }) {
-  const { members, currentUserId, loading } = props
+  const { members, currentUserId, loading, open } = props
   return (
-    <aside className="membersPanel" aria-label="Channel members">
-      <div className="membersContent" aria-busy={loading}>
-        <p className="memberGroupLabel">Online -- {loading ? "" : members.length}</p>
+    <aside className={classNames("membersPanel h-full min-h-0 min-w-0 overflow-hidden border-l border-border bg-surface-canvas [grid-area:members] max-[920px]:hidden", !open && "hidden")} aria-label="Channel members">
+      <div className="membersContent flex h-full min-h-0 flex-col gap-2.5 overflow-auto p-3.5" aria-busy={loading}>
+        <p className="m-0 text-xs font-bold leading-tight text-foreground-subtle">Online -- {loading ? "" : members.length}</p>
         {loading
           ? <MembersSkeleton />
           : (
-            <ol className="memberList">
+            <ol className={memberListClassName}>
               {members.map((member) => (
-            <li key={member.id}>
-              <span className="memberAvatar" aria-hidden="true">{initials(member.displayName)}</span>
-              <div>
-                <strong>{member.displayName}</strong>
-                <span>{member.id === currentUserId ? "You" : "Member"}</span>
-              </div>
-            </li>
+                <li key={member.id} className={memberItemClassName}>
+                  <Avatar name={member.displayName} aria-hidden="true" />
+                  <div className="min-w-0">
+                    <strong className={memberNameClassName}>{member.displayName}</strong>
+                    <span className={memberRoleClassName}>{member.id === currentUserId ? "You" : "Member"}</span>
+                  </div>
+                </li>
               ))}
             </ol>
           )}
@@ -975,13 +1119,13 @@ function MembersPanel(props: {
 
 function MembersSkeleton() {
   return (
-    <ol className="memberList" aria-hidden="true">
+    <ol className={memberListClassName} aria-hidden="true">
       {Array.from({ length: 4 }, (_, index) => (
-        <li key={index} className="memberSkeleton">
-          <span className="skeletonAvatar small" />
-          <span>
-            <span className="skeletonLine memberName" />
-            <span className="skeletonLine memberRole" />
+        <li key={index} className={memberItemClassName}>
+          <span className={classNames(skeletonBlockClassName, "size-9 rounded-card")} />
+          <span className="flex min-w-0 flex-col gap-1.5">
+            <span className={classNames(skeletonBlockClassName, "h-[13px] w-[min(130px,80%)]")} />
+            <span className={classNames(skeletonBlockClassName, "h-[11px] w-[min(74px,55%)]")} />
           </span>
         </li>
       ))}
@@ -1004,16 +1148,20 @@ function MessageContextMenu(props: {
 }) {
   const { message, selected, x, y, onToggle, onCopy, onEdit, onDelete, canEdit, canDelete, onClose } = props
   const SelectIcon = selected ? Square : SquareCheck
+  const itemClassName =
+    "min-h-[34px] w-full justify-start rounded-none border-0 border-b border-surface-rail bg-surface-raised px-2.5 text-left text-foreground last:border-b-0 hover:bg-surface-muted"
   return (
     <div
-      className="messageContextMenu"
+      className="messageContextMenu fixed z-20 flex min-w-[170px] flex-col overflow-hidden rounded-panel border border-border-strong bg-surface-raised shadow-popover"
       role="menu"
       aria-label={`Context menu for message from ${message.authorDisplayName}`}
       style={{ left: x, top: y }}
       onClick={(event) => event.stopPropagation()}
     >
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        className={itemClassName}
         role="menuitem"
         onClick={() => {
           onToggle()
@@ -1022,9 +1170,11 @@ function MessageContextMenu(props: {
       >
         <SelectIcon className="buttonIcon" aria-hidden="true" />
         <span>{selected ? "Deselect" : "Select"}</span>
-      </button>
-      <button
+      </Button>
+      <Button
         type="button"
+        variant="ghost"
+        className={itemClassName}
         role="menuitem"
         onClick={() => {
           onCopy()
@@ -1033,11 +1183,13 @@ function MessageContextMenu(props: {
       >
         <Copy className="buttonIcon" aria-hidden="true" />
         <span>Copy message</span>
-      </button>
+      </Button>
       {canEdit
         ? (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            className={itemClassName}
             role="menuitem"
             onClick={() => {
               onEdit()
@@ -1046,13 +1198,15 @@ function MessageContextMenu(props: {
           >
             <Pencil className="buttonIcon" aria-hidden="true" />
             <span>Edit message</span>
-          </button>
+          </Button>
         )
         : null}
       {canDelete
         ? (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            className={itemClassName}
             role="menuitem"
             onClick={() => {
               onDelete()
@@ -1061,7 +1215,7 @@ function MessageContextMenu(props: {
           >
             <Trash2 className="buttonIcon" aria-hidden="true" />
             <span>Delete message</span>
-          </button>
+          </Button>
         )
         : null}
     </div>
@@ -1070,41 +1224,30 @@ function MessageContextMenu(props: {
 
 function DeleteMessageDialog(props: {
   readonly authorDisplayName: string
+  readonly operationError: string | null
   readonly onCancel: () => void
   readonly onConfirm: () => void
 }) {
-  const { authorDisplayName, onCancel, onConfirm } = props
-  const cancelButtonRef = useRef<HTMLButtonElement | null>(null)
-
-  useEffect(() => {
-    cancelButtonRef.current?.focus()
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onCancel()
-    }
-    window.addEventListener("keydown", closeOnEscape)
-    return () => {
-      window.removeEventListener("keydown", closeOnEscape)
-    }
-  }, [onCancel])
+  const { authorDisplayName, operationError, onCancel, onConfirm } = props
 
   return (
-    <div className="dialogScrim" role="presentation" onClick={onCancel}>
-      <section
-        className="deleteMessageDialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="delete-message-title"
-        aria-describedby="delete-message-description"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <h2 id="delete-message-title">Delete Message?</h2>
-        <p id="delete-message-description">Delete this message from {authorDisplayName}? This cannot be undone.</p>
-        <div className="deleteMessageActions">
-          <button ref={cancelButtonRef} type="button" onClick={onCancel}>Cancel</button>
-          <button type="button" className="danger" onClick={onConfirm}>Delete</button>
-        </div>
-      </section>
-    </div>
+    <Dialog open onOpenChange={(open) => {
+      if (!open) onCancel()
+    }}>
+      <DialogContent className="deleteMessageDialog max-w-[360px]">
+        <DialogTitle id="delete-message-title">Delete Message?</DialogTitle>
+        <DialogDescription id="delete-message-description" className="mt-2 text-[13px] leading-[1.45] text-foreground-muted">
+          Delete this message from {authorDisplayName}? This cannot be undone.
+        </DialogDescription>
+        {operationError === null
+          ? null
+          : <p className="mb-0 mt-3 text-[13px] leading-[1.35] text-destructive-text" role="status">{operationError}</p>}
+        <DialogFooter className="deleteMessageActions">
+          <Button type="button" variant="secondary" onClick={onCancel} autoFocus>Cancel</Button>
+          <Button type="button" variant="danger" onClick={onConfirm}>Delete</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -1208,5 +1351,4 @@ const initials = (value: string): string =>
     .slice(0, 2)
     .toUpperCase()
 
-const classNames = (...names: ReadonlyArray<string | false | null | undefined>): string =>
-  names.filter((name): name is string => typeof name === "string" && name.length > 0).join(" ")
+const classNames = cn
