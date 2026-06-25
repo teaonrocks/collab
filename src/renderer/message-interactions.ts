@@ -68,6 +68,13 @@ export function useMessageInteractions(input: {
   const view = createMessageInteractionView(messages, selectedMessageIds, editingMessage, pendingDeleteMessageId, messageMenu)
 
   useEffect(() => {
+    setSelectedMessageIds([])
+    setEditingMessage(null)
+    setPendingDeleteMessageId(null)
+    setMessageMenu(null)
+  }, [channelId])
+
+  useEffect(() => {
     setSelectedMessageIds((ids) => pruneSelectedMessageIds(ids, messages))
   }, [messages])
 

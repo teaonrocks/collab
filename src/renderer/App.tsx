@@ -2,13 +2,14 @@ import { Result } from "@effect-atom/atom"
 import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
 import { Cause } from "effect"
 import { type FormEvent, useEffect, useRef, useState } from "react"
-import type { ChannelMessage, ChannelMessageId } from "../shared/collab-rpc"
+import type { Channel, ChannelId, ChannelMessage, ChannelMessageId } from "../shared/collab-rpc"
 import "./App.css"
 import type {
   ChatDataModel,
   ChatDataView,
   ChatMessageGuard,
-  ChatOperationErrorMessage
+  ChatOperationErrorMessage,
+  SelectChatChannel
 } from "./chat-data"
 import * as atoms from "./collab-atoms"
 import {
@@ -26,6 +27,14 @@ type ChannelMember = {
 type ChannelViewModel = {
   readonly members: ReadonlyArray<ChannelMember>
   readonly channelIndicator: ChannelIndicator | null
+}
+
+type ChannelMessageGroup = {
+  readonly id: ChannelMessageId
+  readonly authorType: ChannelMessage["authorType"]
+  readonly authorId: string
+  readonly authorDisplayName: string
+  readonly messages: ReadonlyArray<ChannelMessage>
 }
 
 export type ProfileMenuAction = {
@@ -61,6 +70,8 @@ export function WorkspaceChat(props: {
   readonly model: ChatDataModel
   readonly createChannelMessage: ChatDataView["createChannelMessage"]
   readonly deleteChannelMessage: ChatDataView["deleteChannelMessage"]
+  readonly createChannel?: ChatDataView["createChannel"]
+  readonly selectChannel?: SelectChatChannel
   readonly editChannelMessage?: ChatDataView["editChannelMessage"]
   readonly canDeleteMessages?: boolean
   readonly canDeleteMessage?: ChatMessageGuard
@@ -70,6 +81,8 @@ export function WorkspaceChat(props: {
 }) {
   const {
     model,
+    createChannel,
+    selectChannel,
     createChannelMessage,
     deleteChannelMessage,
     editChannelMessage,
@@ -81,9 +94,12 @@ export function WorkspaceChat(props: {
   } = props
   const [messageDraft, setMessageDraft] = useState("")
   const [operationError, setOperationError] = useState<string | null>(null)
+  const [channelOperationError, setChannelOperationError] = useState<string | null>(null)
   const [membersOpen, setMembersOpen] = useState(true)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const view = createChannelViewModel(model)
+  const channelMessagesLoading = model.channelMessagesLoading === true
+  const [directMessageMembers, setDirectMessageMembers] = useState<ReadonlyArray<ChannelMember>>([])
   const messageInteractions = useMessageInteractions({
     channelId: model.channel.id,
     messages: model.channelMessages,
@@ -92,6 +108,17 @@ export function WorkspaceChat(props: {
     operationErrorMessage,
     setOperationError
   })
+
+  useEffect(() => {
+    setMessageDraft("")
+    setOperationError(null)
+    setChannelOperationError(null)
+  }, [model.channel.id])
+
+  useEffect(() => {
+    if (channelMessagesLoading) return
+    setDirectMessageMembers((members) => mergeChannelMembers(members, view.members))
+  }, [channelMessagesLoading, view.members])
 
   useEffect(() => {
     if (!profileMenuOpen) return
@@ -114,6 +141,7 @@ export function WorkspaceChat(props: {
   }
 
   const sendChannelMessage = () => {
+    if (channelMessagesLoading) return
     const body = messageDraft.trim()
     if (body.length === 0) return
     setOperationError(null)
@@ -142,7 +170,7 @@ export function WorkspaceChat(props: {
       <WorkspaceRail
         workspaceName={model.workspace.name}
         currentUserName={model.currentUser.displayName}
-        members={view.members}
+        members={directMessageMembers}
         profileMenuOpen={profileMenuOpen}
         profileMenuActions={profileMenuActions}
         onToggleProfileMenu={() => setProfileMenuOpen((open) => !open)}
@@ -151,8 +179,14 @@ export function WorkspaceChat(props: {
 
       <ChannelSidebar
         workspaceName={model.workspace.name}
+        channels={model.channels}
+        activeChannelId={model.channel.id}
         channelName={model.channel.name}
         channelIndicator={view.channelIndicator}
+        channelOperationError={channelOperationError}
+        createChannel={createChannel}
+        onSelectChannel={selectChannel}
+        onChannelOperationError={setChannelOperationError}
       />
 
       <ChannelHeader
@@ -165,6 +199,7 @@ export function WorkspaceChat(props: {
       <ChatPane
         channelName={model.channel.name}
         messages={model.channelMessages}
+        loading={channelMessagesLoading}
         messageDraft={messageDraft}
         operationError={operationError}
         onMessageDraftChange={setMessageDraft}
@@ -185,6 +220,7 @@ export function WorkspaceChat(props: {
       <MembersPanel
         members={view.members}
         currentUserId={model.currentUser.id}
+        loading={channelMessagesLoading}
       />
 
       {menuMessage === null || messageMenu === null
@@ -305,11 +341,46 @@ function WorkspaceRail(props: {
 
 function ChannelSidebar(props: {
   readonly workspaceName: string
+  readonly channels: ReadonlyArray<Channel>
+  readonly activeChannelId: ChannelId
   readonly channelName: string
   readonly channelIndicator: ChannelIndicator | null
+  readonly channelOperationError: string | null
+  readonly createChannel?: ChatDataView["createChannel"]
+  readonly onSelectChannel?: SelectChatChannel
+  readonly onChannelOperationError: (message: string | null) => void
 }) {
-  const { workspaceName, channelName, channelIndicator } = props
+  const {
+    workspaceName,
+    channels,
+    activeChannelId,
+    channelName,
+    channelIndicator,
+    channelOperationError,
+    createChannel,
+    onSelectChannel,
+    onChannelOperationError
+  } = props
+  const [creating, setCreating] = useState(false)
+  const [draft, setDraft] = useState("")
+  const [saving, setSaving] = useState(false)
   const showAgentParkedPanel = import.meta.env.VITE_AETHER_SHOW_AGENT_UI === "true"
+  const canCreate = createChannel !== undefined
+  const submitChannel = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const name = draft.trim()
+    if (createChannel === undefined || name.length === 0 || saving) return
+    setSaving(true)
+    onChannelOperationError(null)
+    void createChannel({ name })
+      .then(() => {
+        setDraft("")
+        setCreating(false)
+      })
+      .catch(() => onChannelOperationError("Could not create channel. Check your connection and try again."))
+      .finally(() => setSaving(false))
+  }
+
   return (
     <aside className="channelSidebar" aria-label="Workspace navigation">
       <header className="workspaceHeader">
@@ -319,19 +390,88 @@ function ChannelSidebar(props: {
       <nav className="sidebarSection" aria-label="Channels">
         <div className="sidebarHeaderRow">
           <span>Channels</span>
-          <button type="button" aria-label="Add channel" disabled>+</button>
+          <button
+            type="button"
+            aria-label="Add channel"
+            aria-expanded={creating}
+            disabled={!canCreate}
+            onClick={() => {
+              setCreating((open) => !open)
+              onChannelOperationError(null)
+            }}
+          >
+            +
+          </button>
         </div>
-        <button type="button" className="channelNavItem active" aria-current="page">
-          <span>#{channelName}</span>
-          {channelIndicator === null
-            ? null
-            : (
-              <span
-                className={`channelIndicator ${channelIndicator}`}
-                aria-label={channelIndicator === "mentioned" ? "Mentioned" : "Unread messages"}
+        {creating
+          ? (
+            <form className="channelCreateForm" aria-label="Create channel" onSubmit={submitChannel}>
+              <label className="srOnly" htmlFor="new-channel-name">Channel name</label>
+              <input
+                id="new-channel-name"
+                value={draft}
+                placeholder="new-channel"
+                autoFocus
+                disabled={saving}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    event.preventDefault()
+                    setCreating(false)
+                    setDraft("")
+                    onChannelOperationError(null)
+                  }
+                }}
               />
-            )}
-        </button>
+              <div className="channelCreateActions">
+                <button type="button" disabled={saving} onClick={() => {
+                  setCreating(false)
+                  setDraft("")
+                  onChannelOperationError(null)
+                }}>
+                  Cancel
+                </button>
+                <button type="submit" disabled={draft.trim().length === 0 || saving}>
+                  {saving ? "Creating..." : "Create"}
+                </button>
+              </div>
+            </form>
+          )
+          : null}
+        {channelOperationError === null
+          ? null
+          : <p className="channelCreateError" role="status">{channelOperationError}</p>}
+        {channels.map((channel) => {
+          const active = channel.id === activeChannelId
+          return (
+            <button
+              key={channel.id}
+              type="button"
+              className={classNames("channelNavItem", active && "active")}
+              aria-current={active ? "page" : undefined}
+              onClick={() => {
+                if (!active) onSelectChannel?.(channel.id)
+              }}
+            >
+              <span>#{channel.name}</span>
+              {active && channelIndicator !== null
+                ? (
+                  <span
+                    className={`channelIndicator ${channelIndicator}`}
+                    aria-label={channelIndicator === "mentioned" ? "Mentioned" : "Unread messages"}
+                  />
+                )
+                : null}
+            </button>
+          )
+        })}
+        {channels.length === 0
+          ? (
+            <button type="button" className="channelNavItem active" aria-current="page">
+              <span>#{channelName}</span>
+            </button>
+          )
+          : null}
       </nav>
 
       {showAgentParkedPanel
@@ -374,6 +514,7 @@ function ChannelHeader(props: {
 function ChatPane(props: {
   readonly channelName: string
   readonly messages: ReadonlyArray<ChannelMessage>
+  readonly loading: boolean
   readonly messageDraft: string
   readonly operationError: string | null
   readonly onMessageDraftChange: (draft: string) => void
@@ -393,6 +534,7 @@ function ChatPane(props: {
   const {
     channelName,
     messages,
+    loading,
     messageDraft,
     operationError,
     onMessageDraftChange,
@@ -410,10 +552,15 @@ function ChatPane(props: {
     onOpenMessageMenu
   } = props
 
+  const messageGroups = groupConsecutiveMessages(messages)
+
   return (
     <section className="chatPane" aria-label={`#${channelName} chat`}>
-      <ol className="chatTimeline" aria-label="Channel messages">
-        {messages.length === 0
+      <ol className="chatTimeline" aria-label="Channel messages" aria-busy={loading}>
+        {loading
+          ? <ChannelMessagesSkeleton />
+          : null}
+        {!loading && messages.length === 0
           ? (
             <li className="chatEmptyState">
               <strong>No messages yet</strong>
@@ -421,38 +568,41 @@ function ChatPane(props: {
             </li>
           )
           : null}
-        {messages.map((message) => {
-          const rowState = getMessageRowState(message)
-          return (
-            <li key={message.id}>
-              <ChannelMessageRow
-                message={message}
-                selected={rowState.selected}
-                selectionMode={rowState.selectionMode}
-                actionsPinned={rowState.actionsPinned}
-                actionsAvailable={rowState.actionsAvailable}
-                onToggle={() => onToggleMessage(message.id)}
-                onCopy={() => onCopyMessage(message)}
-                onEdit={() => onStartEditMessage(message)}
-                onEditDraftChange={onEditDraftChange}
-                onCancelEdit={onCancelEditMessage}
-                onSaveEdit={onSaveEditMessage}
-                onDelete={() => onDeleteMessage(message.id)}
-                canEdit={canEditMessage(message)}
-                canDelete={canDeleteMessage(message)}
-                editingDraft={rowState.editingDraft}
-                editSaving={rowState.editSaving}
-                onOpenMenu={(x, y) => onOpenMessageMenu(message.id, x, y)}
-              />
-            </li>
-          )
-        })}
+        {!loading && messageGroups.map((group) => (
+          <li key={group.id} className="channelMessageGroup">
+            <div className="messageAvatar messageRunAvatar" aria-hidden="true">{initials(group.authorDisplayName)}</div>
+            <div className="messageRun">
+              {group.messages.map((message, index) => {
+                const rowState = getMessageRowState(message)
+                return (
+                  <ChannelMessageRow
+                    key={message.id}
+                    message={message}
+                    startsAuthorRun={index === 0}
+                    selected={rowState.selected}
+                    selectionMode={rowState.selectionMode}
+                    actionsPinned={rowState.actionsPinned}
+                    actionsAvailable={rowState.actionsAvailable}
+                    onToggle={() => onToggleMessage(message.id)}
+                    onEditDraftChange={onEditDraftChange}
+                    onCancelEdit={onCancelEditMessage}
+                    onSaveEdit={onSaveEditMessage}
+                    editingDraft={rowState.editingDraft}
+                    editSaving={rowState.editSaving}
+                    onOpenMenu={(x, y) => onOpenMessageMenu(message.id, x, y)}
+                  />
+                )
+              })}
+            </div>
+          </li>
+        ))}
       </ol>
 
       <MessageComposer
         channelName={channelName}
         draft={messageDraft}
         operationError={operationError}
+        disabled={loading}
         onDraftChange={onMessageDraftChange}
         onSend={onSendMessage}
       />
@@ -460,40 +610,48 @@ function ChatPane(props: {
   )
 }
 
+function ChannelMessagesSkeleton() {
+  return (
+    <>
+      {Array.from({ length: 7 }, (_, index) => (
+        <li key={index} className="channelMessageSkeleton" aria-hidden="true">
+          <span className="skeletonAvatar" />
+          <span className="skeletonMessageContent">
+            <span className="skeletonLine meta" />
+            <span className={classNames("skeletonLine body", index % 3 === 0 && "short", index % 3 === 1 && "medium")} />
+          </span>
+        </li>
+      ))}
+    </>
+  )
+}
+
 function ChannelMessageRow(props: {
   readonly message: ChannelMessage
+  readonly startsAuthorRun: boolean
   readonly selected: boolean
   readonly selectionMode: boolean
   readonly actionsPinned: boolean
   readonly actionsAvailable: boolean
   readonly onToggle: () => void
-  readonly onCopy: () => void
-  readonly onEdit: () => void
   readonly onEditDraftChange: (draft: string) => void
   readonly onCancelEdit: () => void
   readonly onSaveEdit: () => void
-  readonly onDelete: () => void
-  readonly canEdit: boolean
-  readonly canDelete: boolean
   readonly editingDraft: string | null
   readonly editSaving: boolean
   readonly onOpenMenu: (x: number, y: number) => void
 }) {
   const {
     message,
+    startsAuthorRun,
     selected,
     selectionMode,
     actionsPinned,
     actionsAvailable,
     onToggle,
-    onCopy,
-    onEdit,
     onEditDraftChange,
     onCancelEdit,
     onSaveEdit,
-    onDelete,
-    canEdit,
-    canDelete,
     editingDraft,
     editSaving,
     onOpenMenu
@@ -502,6 +660,7 @@ function ChannelMessageRow(props: {
   const editing = editingDraft !== null
   const className = classNames(
     "channelMessage",
+    !startsAuthorRun && "compact",
     deleted && "deleted",
     editing && "editing",
     selected && "selected",
@@ -532,12 +691,18 @@ function ChannelMessageRow(props: {
           />
         )
         : null}
-      <div className="messageAvatar" aria-hidden="true">{initials(message.authorDisplayName)}</div>
       <div className="messageContent">
         <div className="messageMeta">
-          <strong>{message.authorDisplayName}</strong>
-          <time dateTime={toIso(message.createdAt)}>{formatTime(message.createdAt)}</time>
-          {message.editedAt === null
+          {startsAuthorRun
+            ? <strong>{message.authorDisplayName}</strong>
+            : null}
+          <time
+            className={classNames("messageTimestamp", !startsAuthorRun && "hidden")}
+            dateTime={toIso(message.createdAt)}
+          >
+            {formatTime(message.createdAt)}
+          </time>
+          {message.editedAt === null || !startsAuthorRun
             ? null
             : <span className="messageEdited" title={`Edited ${formatTime(message.editedAt)}`}>edited</span>}
         </div>
@@ -554,6 +719,9 @@ function ChannelMessageRow(props: {
           )
           : <p>{deleted ? "Message deleted" : message.body}</p>}
       </div>
+      {message.editedAt === null || startsAuthorRun
+        ? null
+        : <span className="messageEdited compactEdited" title={`Edited ${formatTime(message.editedAt)}`}>edited</span>}
       {deleted || editing || !actionsAvailable
         ? null
         : (
@@ -562,31 +730,6 @@ function ChannelMessageRow(props: {
             aria-label={`Message actions for ${message.authorDisplayName}`}
             onClick={(event) => event.stopPropagation()}
           >
-            <button
-              type="button"
-              aria-pressed={selected}
-              aria-label={`${selected ? "Deselect" : "Select"} message from ${message.authorDisplayName}`}
-              onClick={onToggle}
-            >
-              Select
-            </button>
-            <button type="button" aria-label={`Copy message from ${message.authorDisplayName}`} onClick={onCopy}>
-              Copy
-            </button>
-            {canEdit
-              ? (
-                <button type="button" aria-label={`Edit message from ${message.authorDisplayName}`} onClick={onEdit}>
-                  Edit
-                </button>
-              )
-              : null}
-            {canDelete
-              ? (
-                <button type="button" aria-label={`Delete message from ${message.authorDisplayName}`} onClick={onDelete}>
-                  Delete
-                </button>
-              )
-              : null}
             <button
               type="button"
               aria-label={`More actions for message from ${message.authorDisplayName}`}
@@ -664,10 +807,11 @@ function MessageComposer(props: {
   readonly channelName: string
   readonly draft: string
   readonly operationError: string | null
+  readonly disabled: boolean
   readonly onDraftChange: (draft: string) => void
   readonly onSend: () => void
 }) {
-  const { channelName, draft, operationError, onDraftChange, onSend } = props
+  const { channelName, draft, operationError, disabled, onDraftChange, onSend } = props
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
   useEffect(() => {
@@ -676,6 +820,7 @@ function MessageComposer(props: {
 
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (disabled) return
     onSend()
   }
 
@@ -684,20 +829,21 @@ function MessageComposer(props: {
       {operationError === null
         ? null
         : <p className="composerError" role="status">{operationError}</p>}
-      <form className="composer" onSubmit={onSubmit} aria-label="Channel message composer">
-        <button type="button" className="composerAddButton" aria-label="Add attachment">+</button>
+      <form className={classNames("composer", disabled && "disabled")} onSubmit={onSubmit} aria-label="Channel message composer">
+        <button type="button" className="composerAddButton" aria-label="Add attachment" disabled={disabled}>+</button>
         <label className="srOnly" htmlFor="channel-message">Message</label>
         <textarea
           ref={textareaRef}
           id="channel-message"
           rows={1}
           value={draft}
+          disabled={disabled}
           placeholder={`Message #${channelName}`}
           onChange={(event) => onDraftChange(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault()
-              onSend()
+              if (!disabled) onSend()
             }
           }}
         />
@@ -709,14 +855,18 @@ function MessageComposer(props: {
 function MembersPanel(props: {
   readonly members: ReadonlyArray<ChannelMember>
   readonly currentUserId: string
+  readonly loading: boolean
 }) {
-  const { members, currentUserId } = props
+  const { members, currentUserId, loading } = props
   return (
     <aside className="membersPanel" aria-label="Channel members">
-      <div className="membersContent">
-        <p className="memberGroupLabel">Online -- {members.length}</p>
-        <ol className="memberList">
-          {members.map((member) => (
+      <div className="membersContent" aria-busy={loading}>
+        <p className="memberGroupLabel">Online -- {loading ? "" : members.length}</p>
+        {loading
+          ? <MembersSkeleton />
+          : (
+            <ol className="memberList">
+              {members.map((member) => (
             <li key={member.id}>
               <span className="memberAvatar" aria-hidden="true">{initials(member.displayName)}</span>
               <div>
@@ -724,10 +874,27 @@ function MembersPanel(props: {
                 <span>{member.id === currentUserId ? "You" : "Member"}</span>
               </div>
             </li>
-          ))}
-        </ol>
+              ))}
+            </ol>
+          )}
       </div>
     </aside>
+  )
+}
+
+function MembersSkeleton() {
+  return (
+    <ol className="memberList" aria-hidden="true">
+      {Array.from({ length: 4 }, (_, index) => (
+        <li key={index} className="memberSkeleton">
+          <span className="skeletonAvatar small" />
+          <span>
+            <span className="skeletonLine memberName" />
+            <span className="skeletonLine memberRole" />
+          </span>
+        </li>
+      ))}
+    </ol>
   )
 }
 
@@ -861,6 +1028,22 @@ const uniqueMembers = (messages: ReadonlyArray<ChannelMessage>): ReadonlyArray<C
   return Array.from(members.values())
 }
 
+const mergeChannelMembers = (
+  members: ReadonlyArray<ChannelMember>,
+  nextMembers: ReadonlyArray<ChannelMember>
+): ReadonlyArray<ChannelMember> => {
+  if (nextMembers.length === 0) return members
+  const byId = new Map(members.map((member) => [member.id, member]))
+  let changed = false
+  nextMembers.forEach((member) => {
+    if (!byId.has(member.id)) {
+      changed = true
+      byId.set(member.id, member)
+    }
+  })
+  return changed ? Array.from(byId.values()) : members
+}
+
 const getChannelIndicator = (
   messages: ReadonlyArray<ChannelMessage>,
   currentUserId: string,
@@ -896,6 +1079,27 @@ const formatTime = (timestamp: number): string =>
   new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(new Date(timestamp))
 
 const toIso = (timestamp: number): string => new Date(timestamp).toISOString()
+
+const groupConsecutiveMessages = (messages: ReadonlyArray<ChannelMessage>): ReadonlyArray<ChannelMessageGroup> => {
+  const groups: Array<ChannelMessageGroup> = []
+
+  for (const message of messages) {
+    const current = groups.at(-1)
+    if (current !== undefined && current.authorType === message.authorType && current.authorId === message.authorId) {
+      groups[groups.length - 1] = { ...current, messages: [...current.messages, message] }
+    } else {
+      groups.push({
+        id: message.id,
+        authorType: message.authorType,
+        authorId: message.authorId,
+        authorDisplayName: message.authorDisplayName,
+        messages: [message]
+      })
+    }
+  }
+
+  return groups
+}
 
 const initials = (value: string): string =>
   value

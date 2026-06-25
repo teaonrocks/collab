@@ -1,6 +1,7 @@
 import type { RpcClientError } from "@effect/rpc/RpcClientError"
 import { Context, Effect, Layer, Stream } from "effect"
 import type {
+  Channel,
   ChannelId,
   ChannelMessage,
   ChannelMessageId,
@@ -11,7 +12,16 @@ import type {
 } from "../shared/collab-rpc"
 import { CollabApi } from "./collab-api"
 
-export type ChatDataModel = Pick<CollabSnapshot, "currentUser" | "workspace" | "channel" | "channelMessages">
+export type ChatDataModel = Pick<CollabSnapshot, "currentUser" | "workspace" | "channel" | "channelMessages"> & {
+  readonly channels: ReadonlyArray<Channel>
+  readonly channelMessagesLoading?: boolean
+}
+
+export type CreateChatChannel = (input: {
+  readonly name: string
+}) => Promise<Channel>
+
+export type SelectChatChannel = (channelId: ChannelId) => void
 
 export type CreateChatMessage = (input: {
   readonly channelId: ChannelId
@@ -35,6 +45,8 @@ export type ChatOperationErrorMessage = (operation: ChatOperation, cause: unknow
 
 export type ChatDataView = {
   readonly model: ChatDataModel
+  readonly createChannel?: CreateChatChannel
+  readonly selectChannel?: SelectChatChannel
   readonly createChannelMessage: CreateChatMessage
   readonly deleteChannelMessage: DeleteChatMessage
   readonly editChannelMessage?: EditChatMessage
@@ -76,5 +88,7 @@ export const toChatDataModel = (snapshot: CollabSnapshot): ChatDataModel => ({
   currentUser: snapshot.currentUser,
   workspace: snapshot.workspace,
   channel: snapshot.channel,
-  channelMessages: snapshot.channelMessages
+  channels: [snapshot.channel],
+  channelMessages: snapshot.channelMessages,
+  channelMessagesLoading: false
 })

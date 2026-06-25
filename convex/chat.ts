@@ -7,6 +7,7 @@ const DOGFOOD_WORKSPACE_KEY = "aether-dogfood"
 const DOGFOOD_WORKSPACE_NAME = "Aether Dogfood"
 const DOGFOOD_CHANNEL_KEY = "general"
 const DOGFOOD_CHANNEL_NAME = "general"
+const MAX_CHANNELS = 100
 
 type AuthIdentity = Awaited<ReturnType<QueryCtx["auth"]["getUserIdentity"]>>
 type ViewerIdentity = NonNullable<AuthIdentity>
@@ -35,6 +36,11 @@ const emailFromIdentity = (identity: ViewerIdentity): string | undefined =>
   stringClaim(identity, "preferred_username")
 
 const displayNameFromEmail = (email: string): string => email.split("@")[0] ?? "Aether User"
+
+const normalizeChannelName = (name: string): string =>
+  name.trim().replace(/^#+/, "").replace(/\s+/g, "-").replace(/[^a-zA-Z0-9_-]/g, "").toLowerCase()
+
+const channelKeyFromName = (name: string): string => normalizeChannelName(name)
 
 const displayNameFromIdentity = (identity: ViewerIdentity, email: string): string => {
   const name = (identity.name ?? stringClaim(identity, "properties.name"))?.trim()
@@ -121,6 +127,21 @@ const getDefaultChannel = (ctx: QueryCtx | MutationCtx, workspaceId: Id<"workspa
     .withIndex("by_workspace_key", (q) => q.eq("workspaceId", workspaceId).eq("key", DOGFOOD_CHANNEL_KEY))
     .unique()
 
+const listWorkspaceChannels = async (ctx: QueryCtx | MutationCtx, workspaceId: Id<"workspaces">) => {
+  const channels = await ctx.db
+    .query("channels")
+    .withIndex("by_workspace", (q) => q.eq("workspaceId", workspaceId))
+    .take(MAX_CHANNELS)
+
+  return channels
+    .map(toChannelView)
+    .sort((left, right) => {
+      if (left.key === DOGFOOD_CHANNEL_KEY) return -1
+      if (right.key === DOGFOOD_CHANNEL_KEY) return 1
+      return left.name.localeCompare(right.name)
+    })
+}
+
 const ensureDefaultSpace = async (ctx: MutationCtx, now: number) => {
   const workspace = await getDefaultWorkspace(ctx)
   const workspaceId = workspace?._id ?? (await ctx.db.insert("workspaces", {
@@ -179,6 +200,22 @@ const ensureMemberships = async (
   }
 }
 
+const requireWorkspaceMember = async (
+  ctx: QueryCtx | MutationCtx,
+  input: {
+    readonly workspaceId: Id<"workspaces">
+    readonly userId: Id<"users">
+  }
+) => {
+  const membership = await ctx.db
+    .query("workspaceMemberships")
+    .withIndex("by_workspace_user", (q) => q.eq("workspaceId", input.workspaceId).eq("userId", input.userId))
+    .unique()
+
+  if (membership === null) throw new Error("Current user is not a member of this workspace")
+  return membership
+}
+
 const requireChannelMember = async (
   ctx: QueryCtx | MutationCtx,
   input: {
@@ -186,13 +223,10 @@ const requireChannelMember = async (
     readonly userId: Id<"users">
   }
 ) => {
-  const membership = await ctx.db
-    .query("channelMemberships")
-    .withIndex("by_channel_user", (q) => q.eq("channelId", input.channelId).eq("userId", input.userId))
-    .unique()
-
-  if (membership === null) throw new Error("Current user is not a member of this channel")
-  return membership
+  const channel = await ctx.db.get(input.channelId)
+  if (channel === null) throw new Error("Channel not found")
+  await requireWorkspaceMember(ctx, { workspaceId: channel.workspaceId, userId: input.userId })
+  return channel
 }
 
 export const ensureViewer = action({
@@ -284,6 +318,63 @@ export const defaultWorkspace = query({
   }
 })
 
+export const channels = query({
+  args: {
+    workspaceId: v.id("workspaces")
+  },
+  handler: async (ctx, args) => {
+    const user = await requireAllowedCurrentUser(ctx)
+    const workspace = await ctx.db.get(args.workspaceId)
+    if (workspace === null) return []
+
+    await requireWorkspaceMember(ctx, { workspaceId: workspace._id, userId: user._id })
+    return listWorkspaceChannels(ctx, workspace._id)
+  }
+})
+
+export const createChannel = mutation({
+  args: {
+    name: v.string()
+  },
+  handler: async (ctx, args) => {
+    const user = await requireAllowedCurrentUser(ctx)
+    const workspace = await getDefaultWorkspace(ctx)
+    if (workspace === null) throw new Error("Workspace not found")
+
+    await requireWorkspaceMember(ctx, { workspaceId: workspace._id, userId: user._id })
+
+    const name = normalizeChannelName(args.name)
+    if (name.length === 0) throw new Error("Channel name is required")
+
+    const key = channelKeyFromName(name)
+    const existing = await ctx.db
+      .query("channels")
+      .withIndex("by_workspace_key", (q) => q.eq("workspaceId", workspace._id).eq("key", key))
+      .unique()
+    if (existing !== null) throw new Error("Channel already exists")
+
+    const now = Date.now()
+    const channelId = await ctx.db.insert("channels", {
+      workspaceId: workspace._id,
+      key,
+      name,
+      visibility: "public",
+      createdAt: now
+    })
+
+    await ctx.db.insert("channelMemberships", {
+      channelId,
+      userId: user._id,
+      role: "member",
+      createdAt: now
+    })
+
+    const channel = await ctx.db.get(channelId)
+    if (channel === null) throw new Error("Channel not found after insert")
+    return toChannelView(channel)
+  }
+})
+
 export const channelMessages = query({
   args: {
     channelId: v.id("channels")
@@ -314,10 +405,7 @@ export const sendMessage = mutation({
 
     const user = await requireAllowedCurrentUser(ctx)
 
-    await requireChannelMember(ctx, { channelId: args.channelId, userId: user._id })
-
-    const channel = await ctx.db.get(args.channelId)
-    if (channel === null) throw new Error("Channel not found")
+    const channel = await requireChannelMember(ctx, { channelId: args.channelId, userId: user._id })
 
     const messageId = await ctx.db.insert("messages", {
       workspaceId: channel.workspaceId,
@@ -387,3 +475,11 @@ const toMessageView = async (ctx: QueryCtx | MutationCtx, message: Doc<"messages
     editedAt: message.editedAt ?? null
   }
 }
+
+const toChannelView = (channel: Doc<"channels">) => ({
+  id: channel._id,
+  key: channel.key,
+  name: channel.name,
+  visibility: channel.visibility,
+  createdAt: channel.createdAt
+})

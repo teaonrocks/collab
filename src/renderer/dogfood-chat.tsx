@@ -23,6 +23,14 @@ type ConvexDogfoodError = {
 
 type DogfoodOperation = "send" | "edit" | "delete"
 
+export type DogfoodChannelView = {
+  readonly id: Id<"channels">
+  readonly key: string
+  readonly name: string
+  readonly visibility: "public" | "private"
+  readonly createdAt: number
+}
+
 export type DogfoodWorkspaceView = {
   readonly currentUser: {
     readonly id: Id<"users">
@@ -64,7 +72,10 @@ function ConvexDogfoodChat() {
   const sendMessage = useMutation(api.chat.sendMessage)
   const editMessage = useMutation(api.chat.editMessage)
   const deleteMessage = useMutation(api.chat.deleteMessage)
+  const createChannel = useMutation(api.chat.createChannel)
   const [ensuredUserId, setEnsuredUserId] = useState<string | null>(null)
+  const [selectedChannelId, setSelectedChannelId] = useState<Id<"channels"> | null>(null)
+  const [createdChannels, setCreatedChannels] = useState<ReadonlyArray<DogfoodChannelView>>([])
   const [error, setError] = useState<ConvexDogfoodError | null>(null)
   const [signInOpening, setSignInOpening] = useState(false)
   const [ensureAttempt, setEnsureAttempt] = useState(0)
@@ -72,10 +83,26 @@ function ConvexDogfoodChat() {
   const sessionReady = authUserId !== null && convexAuth.isAuthenticated
   const viewerReady = sessionReady && ensuredUserId === authUserId && error === null
   const workspace = useQuery(api.chat.defaultWorkspace, viewerReady ? {} : "skip")
+  const channels = useQuery(
+    api.chat.channels,
+    workspace === undefined || workspace === null ? "skip" : { workspaceId: workspace.workspace.id }
+  )
+  const channelList = useMemo(
+    () => channels === undefined ? undefined : mergeDogfoodChannels(channels, createdChannels),
+    [channels, createdChannels]
+  )
+  const activeChannelId = selectedChannelId ?? workspace?.channel.id
   const messages = useQuery(
     api.chat.channelMessages,
-    workspace?.channel === undefined ? "skip" : { channelId: workspace.channel.id }
+    activeChannelId === undefined ? "skip" : { channelId: activeChannelId }
   )
+
+  useEffect(() => {
+    if (workspace === undefined || workspace === null || channelList === undefined) return
+    if (selectedChannelId === null) return
+    if (channelList.some((channel) => channel.id === selectedChannelId)) return
+    setSelectedChannelId(workspace.channel.id)
+  }, [channelList, selectedChannelId, workspace])
 
   useEffect(() => {
     const user = auth.user
@@ -101,16 +128,26 @@ function ConvexDogfoodChat() {
   }, [auth.isLoading, auth.user, convexAuth.isAuthenticated, convexAuth.isLoading, ensureAttempt, ensureViewer, ensuredUserId])
 
   const model = useMemo(
-    () => workspace === undefined || workspace === null || messages === undefined
+    () => workspace === undefined || workspace === null || channelList === undefined || activeChannelId === undefined
       ? null
       : dogfoodChatToChatData({
         workspace,
-        messages,
+        channels: channelList,
+        selectedChannelId: activeChannelId,
+        messages: messages ?? [],
+        messagesLoading: messages === undefined,
+        createChannel: async (input) => {
+          const channel = await createChannel(input)
+          setCreatedChannels((existing) => mergeDogfoodChannels(existing, [channel]))
+          setSelectedChannelId(channel.id)
+          return channel
+        },
+        selectChannel: (channelId) => setSelectedChannelId(channelId),
         sendMessage,
         editMessage,
         deleteMessage
       }),
-    [deleteMessage, editMessage, messages, sendMessage, workspace]
+    [activeChannelId, channelList, createChannel, deleteMessage, editMessage, messages, sendMessage, workspace]
   )
 
   if (auth.isLoading) {
@@ -246,7 +283,12 @@ class DogfoodErrorBoundary extends Component<
 
 export const dogfoodChatToChatData = (input: {
   readonly workspace: DogfoodWorkspaceView
+  readonly channels: ReadonlyArray<DogfoodChannelView>
+  readonly selectedChannelId: Id<"channels">
   readonly messages: ReadonlyArray<DogfoodChannelMessageView>
+  readonly messagesLoading?: boolean
+  readonly createChannel?: (input: { readonly name: string }) => Promise<DogfoodChannelView>
+  readonly selectChannel?: (channelId: Id<"channels">) => void
   readonly sendMessage: (input: { readonly channelId: Id<"channels">; readonly body: string }) => Promise<unknown>
   readonly editMessage: (input: {
     readonly channelId: Id<"channels">
@@ -260,7 +302,16 @@ export const dogfoodChatToChatData = (input: {
 }): ChatDataView => {
   const currentUserId = toHumanAccountId(input.workspace.currentUser.id)
   const workspaceId = toWorkspaceId(input.workspace.workspace.id)
-  const channelId = toChannelId(input.workspace.channel.id)
+  const selectedChannel =
+    input.channels.find((channel) => channel.id === input.selectedChannelId) ??
+    input.channels.find((channel) => channel.id === input.workspace.channel.id) ?? {
+      id: input.workspace.channel.id,
+      key: "general",
+      name: input.workspace.channel.name,
+      visibility: input.workspace.channel.visibility,
+      createdAt: 0
+    }
+  const channelId = toChannelId(selectedChannel.id)
 
   return {
     model: {
@@ -278,13 +329,38 @@ export const dogfoodChatToChatData = (input: {
       channel: new Channel({
         id: channelId,
         workspaceId,
-        name: input.workspace.channel.name,
-        visibility: input.workspace.channel.visibility,
+        name: selectedChannel.name,
+        visibility: selectedChannel.visibility,
         createdBy: currentUserId,
-        createdAt: 0
+        createdAt: selectedChannel.createdAt
       }),
-      channelMessages: input.messages.map(toLegacyChannelMessage)
+      channels: input.channels.map((channel) => new Channel({
+        id: toChannelId(channel.id),
+        workspaceId,
+        name: channel.name,
+        visibility: channel.visibility,
+        createdBy: currentUserId,
+        createdAt: channel.createdAt
+      })),
+      channelMessages: input.messages.map(toLegacyChannelMessage),
+      channelMessagesLoading: input.messagesLoading ?? false
     },
+    createChannel: input.createChannel === undefined
+      ? undefined
+      : async ({ name }) => {
+        const channel = await input.createChannel!({ name })
+        return new Channel({
+          id: toChannelId(channel.id),
+          workspaceId,
+          name: channel.name,
+          visibility: channel.visibility,
+          createdBy: currentUserId,
+          createdAt: channel.createdAt
+        })
+      },
+    selectChannel: input.selectChannel === undefined
+      ? undefined
+      : (channelId) => input.selectChannel?.(toConvexChannelId(channelId)),
     createChannelMessage: ({ channelId, body }) => input.sendMessage({ channelId: toConvexChannelId(channelId), body }),
     editChannelMessage: ({ channelId, messageId, body }) =>
       input.editMessage({ channelId: toConvexChannelId(channelId), messageId: toConvexMessageId(messageId), body }),
@@ -338,6 +414,16 @@ const dogfoodAccessErrorMessage = (cause: unknown): string => {
 }
 
 const signInErrorMessage = (_cause: unknown): string => "Could not open sign-in. Try again."
+
+const mergeDogfoodChannels = (
+  channels: ReadonlyArray<DogfoodChannelView>,
+  nextChannels: ReadonlyArray<DogfoodChannelView>
+): ReadonlyArray<DogfoodChannelView> => {
+  const byId = new Map<Id<"channels">, DogfoodChannelView>()
+  channels.forEach((channel) => byId.set(channel.id, channel))
+  nextChannels.forEach((channel) => byId.set(channel.id, channel))
+  return Array.from(byId.values())
+}
 
 const dogfoodOperationErrorMessage = (operation: DogfoodOperation): string => {
   switch (operation) {

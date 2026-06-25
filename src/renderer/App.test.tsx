@@ -6,6 +6,7 @@ import { Effect, Layer, Stream } from "effect"
 import { afterEach, describe, expect, it } from "vitest"
 import {
   Channel,
+  type ChannelId,
   ChannelMessage,
   type ChannelMessageId,
   CollabSnapshot,
@@ -15,7 +16,7 @@ import {
   type WorkspaceId
 } from "../shared/collab-rpc"
 import { App, WorkspaceChat } from "./App"
-import { layerChatDataFromCollabApi } from "./chat-data"
+import { layerChatDataFromCollabApi, toChatDataModel } from "./chat-data"
 import { CollabApi } from "./collab-api"
 import { runtime } from "./collab-atoms"
 
@@ -24,6 +25,7 @@ afterEach(cleanup)
 const userId = "human-1" as HumanAccountId
 const workspaceId = "workspace-1" as WorkspaceId
 const channelId = "channel-1" as Channel["id"]
+const secondChannelId = "channel-2" as Channel["id"]
 const messageId = "message-1" as ChannelMessageId
 
 const makeSnapshot = (messages: ReadonlyArray<ChannelMessage> = [
@@ -68,6 +70,8 @@ const makeSnapshot = (messages: ReadonlyArray<ChannelMessage> = [
     agentRuns: [],
     auditEvents: []
   })
+
+const makeChatModel = (messages?: ReadonlyArray<ChannelMessage>) => toChatDataModel(makeSnapshot(messages))
 
 const renderApp = (model: CollabSnapshot) => {
   const calls: Array<{ method: string; args: unknown }> = []
@@ -122,6 +126,11 @@ const renderApp = (model: CollabSnapshot) => {
 const mockRendererDataLayer = (layer: Layer.Layer<CollabApi>) =>
   Layer.merge(layer, layerChatDataFromCollabApi.pipe(Layer.provide(layer)))
 
+const openMessageMenu = async (authorDisplayName: string) => {
+  fireEvent.click(await screen.findByLabelText(`More actions for message from ${authorDisplayName}`))
+  return screen.findByRole("menu", { name: new RegExp(`message from ${authorDisplayName}`) })
+}
+
 describe("App", () => {
   it("renders the chat workspace from CollabApi", async () => {
     renderApp(makeSnapshot())
@@ -148,11 +157,113 @@ describe("App", () => {
     expect(within(workspaceNavigation).queryByText("Maya Patel")).toBeNull()
   })
 
+  it("keeps direct messages in the global rail while changing channels", async () => {
+    const base = makeChatModel()
+    const secondChannel = new Channel({
+      id: secondChannelId,
+      workspaceId,
+      name: "design",
+      visibility: "public",
+      createdBy: userId,
+      createdAt: 3
+    })
+    const props = {
+      createChannelMessage: () => Promise.resolve(),
+      deleteChannelMessage: () => Promise.resolve()
+    }
+    const { rerender } = render(
+      <WorkspaceChat
+        {...props}
+        model={{ ...base, channels: [base.channel, secondChannel] }}
+      />
+    )
+
+    const globalNavigation = await screen.findByLabelText("Global navigation")
+    const directMessages = within(globalNavigation).getByRole("navigation", { name: "Direct messages" })
+    expect(await within(directMessages).findByRole("button", { name: "Maya Patel" })).toBeTruthy()
+
+    rerender(
+      <WorkspaceChat
+        {...props}
+        model={{
+          ...base,
+          channel: secondChannel,
+          channels: [base.channel, secondChannel],
+          channelMessages: [],
+          channelMessagesLoading: true
+        }}
+      />
+    )
+
+    expect(within(directMessages).getByRole("button", { name: "Maya Patel" })).toBeTruthy()
+    expect(within(directMessages).getByRole("tooltip", { name: "Maya Patel" })).toBeTruthy()
+  })
+
+  it("renders and switches channels from the model channel list", async () => {
+    const base = makeChatModel()
+    const secondChannel = new Channel({
+      id: secondChannelId,
+      workspaceId,
+      name: "design",
+      visibility: "public",
+      createdBy: userId,
+      createdAt: 3
+    })
+    const selections: Array<ChannelId> = []
+
+    render(
+      <WorkspaceChat
+        model={{ ...base, channels: [base.channel, secondChannel] }}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+        selectChannel={(id) => selections.push(id)}
+      />
+    )
+
+    const channels = await screen.findByRole("navigation", { name: "Channels" })
+    expect(within(channels).getByRole("button", { name: "#origination" })).toBeTruthy()
+    expect(within(channels).getByRole("button", { name: "#design" })).toBeTruthy()
+
+    fireEvent.click(within(channels).getByRole("button", { name: "#design" }))
+
+    expect(selections).toEqual([secondChannelId])
+  })
+
+  it("creates a channel from the inline sidebar form", async () => {
+    const calls: Array<{ readonly name: string }> = []
+
+    render(
+      <WorkspaceChat
+        model={makeChatModel()}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+        createChannel={(input) => {
+          calls.push(input)
+          return Promise.resolve(new Channel({
+            id: secondChannelId,
+            workspaceId,
+            name: input.name,
+            visibility: "public",
+            createdBy: userId,
+            createdAt: 4
+          }))
+        }}
+      />
+    )
+
+    fireEvent.click(await screen.findByRole("button", { name: "Add channel" }))
+    const form = await screen.findByRole("form", { name: "Create channel" })
+    fireEvent.change(within(form).getByLabelText("Channel name"), { target: { value: "product" } })
+    fireEvent.submit(form)
+
+    await waitFor(() => expect(calls).toEqual([{ name: "product" }]))
+  })
+
   it("opens profile settings from the rail avatar", async () => {
     let signOuts = 0
     render(
       <WorkspaceChat
-        model={makeSnapshot()}
+        model={makeChatModel()}
         createChannelMessage={() => Promise.resolve()}
         deleteChannelMessage={() => Promise.resolve()}
         profileMenuActions={[{ label: "Sign out", onSelect: () => signOuts++ }]}
@@ -265,10 +376,87 @@ describe("App", () => {
     expect(screen.getByText("Start the conversation in #origination.")).toBeTruthy()
   })
 
+  it("groups consecutive messages from the same author under one sticky avatar", async () => {
+    const model = makeChatModel([
+      new ChannelMessage({
+        id: "message-1" as ChannelMessageId,
+        channelId,
+        authorType: "human",
+        authorId: userId,
+        authorDisplayName: "Maya Patel",
+        body: "First Maya message.",
+        createdAt: 2,
+        deletedAt: null
+      }),
+      new ChannelMessage({
+        id: "message-2" as ChannelMessageId,
+        channelId,
+        authorType: "human",
+        authorId: userId,
+        authorDisplayName: "Maya Patel",
+        body: "Second Maya message.",
+        createdAt: 3,
+        editedAt: 6,
+        deletedAt: null
+      }),
+      new ChannelMessage({
+        id: "message-3" as ChannelMessageId,
+        channelId,
+        authorType: "human",
+        authorId: "human-2",
+        authorDisplayName: "Lee Chen",
+        body: "Lee breaks the chain.",
+        createdAt: 4,
+        deletedAt: null
+      }),
+      new ChannelMessage({
+        id: "message-4" as ChannelMessageId,
+        channelId,
+        authorType: "human",
+        authorId: userId,
+        authorDisplayName: "Maya Patel",
+        body: "Maya starts a new chain.",
+        createdAt: 5,
+        deletedAt: null
+      })
+    ])
+
+    const { container } = render(
+      <WorkspaceChat
+        model={model}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+      />
+    )
+
+    expect(await screen.findByText("First Maya message.")).toBeTruthy()
+    expect(Array.from(container.querySelectorAll(".chatTimeline .messageRunAvatar")).map((avatar) => avatar.textContent)).toEqual(["MP", "LC", "MP"])
+    expect(container.querySelectorAll(".chatTimeline .messageRun").item(0).querySelectorAll(".channelMessage")).toHaveLength(2)
+    expect(Array.from(container.querySelectorAll(".chatTimeline .messageMeta strong")).map((name) => name.textContent)).toEqual(["Maya Patel", "Lee Chen", "Maya Patel"])
+    expect(Array.from(container.querySelectorAll(".chatTimeline .messageTimestamp")).map((timestamp) => timestamp.classList.contains("hidden"))).toEqual([false, true, false, false])
+    expect(container.querySelector(".chatTimeline .channelMessage.compact .compactEdited")?.textContent).toBe("edited")
+  })
+
+  it("shows channel skeletons while selected channel messages load", async () => {
+    const { container } = render(
+      <WorkspaceChat
+        model={{ ...makeChatModel([]), channelMessagesLoading: true }}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+      />
+    )
+
+    expect(await screen.findByRole("heading", { name: "Aether Labs" })).toBeTruthy()
+    expect(screen.queryByText("No messages yet")).toBeNull()
+    expect(container.querySelectorAll(".channelMessageSkeleton")).toHaveLength(7)
+    expect(container.querySelectorAll(".memberSkeleton")).toHaveLength(4)
+    expect((screen.getByPlaceholderText("Message #origination") as HTMLTextAreaElement).disabled).toBe(true)
+  })
+
   it("shows a compact send failure when an operation formatter is provided", async () => {
     render(
       <WorkspaceChat
-        model={makeSnapshot()}
+        model={makeChatModel()}
         createChannelMessage={() => Promise.reject(new Error("backend token details"))}
         deleteChannelMessage={() => Promise.resolve()}
         operationErrorMessage={() => "Could not send message. Check your connection and try again."}
@@ -298,7 +486,7 @@ describe("App", () => {
       })
     ]))
 
-    fireEvent.click(await screen.findByLabelText("Select message from Maya Patel"))
+    fireEvent.click(within(await openMessageMenu("Maya Patel")).getByRole("menuitem", { name: "Select" }))
 
     expect(await screen.findByRole("checkbox", { name: "Deselect message from Maya Patel" })).toBeTruthy()
     expect(screen.getByRole("checkbox", { name: "Select message from Lee Chen" })).toBeTruthy()
@@ -333,7 +521,7 @@ describe("App", () => {
       })
     ]))
 
-    fireEvent.click(await screen.findByLabelText("Select message from Rina Shah"))
+    fireEvent.click(within(await openMessageMenu("Rina Shah")).getByRole("menuitem", { name: "Select" }))
     expect(screen.getByLabelText("More actions for message from Rina Shah")).toBeTruthy()
 
     fireEvent.click(await screen.findByRole("checkbox", { name: "Select message from Lee Chen" }))
@@ -352,6 +540,21 @@ describe("App", () => {
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Select" }))
 
     expect((await screen.findAllByLabelText("Deselect message from Maya Patel")).length).toBeGreaterThan(0)
+  })
+
+  it("shows only the More button in the inline message actions", async () => {
+    const { container } = render(
+      <WorkspaceChat
+        model={makeChatModel()}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+      />
+    )
+
+    expect(await screen.findByText(/partner brief/)).toBeTruthy()
+    const actions = container.querySelector(".messageActions")
+    expect(actions).not.toBeNull()
+    expect(Array.from(actions!.querySelectorAll("button")).map((button) => button.textContent)).toEqual(["More"])
   })
 
   it("waits for delete confirmation before deleting a message", async () => {
@@ -386,7 +589,7 @@ describe("App", () => {
 
   it("shows edit and delete actions only for messages allowed by per-message guards", async () => {
     const calls: Array<{ method: string; args: unknown }> = []
-    const model = makeSnapshot([
+    const model = makeChatModel([
       ...makeSnapshot().channelMessages,
       new ChannelMessage({
         id: "message-2" as ChannelMessageId,
@@ -417,10 +620,9 @@ describe("App", () => {
       />
     )
 
-    expect(await screen.findByLabelText("Edit message from Maya Patel")).toBeTruthy()
-    expect(screen.getByLabelText("Delete message from Maya Patel")).toBeTruthy()
-    expect(screen.queryByLabelText("Edit message from Lee Chen")).toBeNull()
-    expect(screen.queryByLabelText("Delete message from Lee Chen")).toBeNull()
+    const mayaMenu = await openMessageMenu("Maya Patel")
+    expect(within(mayaMenu).getByRole("menuitem", { name: "Edit message" })).toBeTruthy()
+    expect(within(mayaMenu).getByRole("menuitem", { name: "Delete message" })).toBeTruthy()
 
     fireEvent.contextMenu(screen.getByText(/incidents into the notes/), { clientX: 20, clientY: 30 })
     const menu = await screen.findByRole("menu", { name: /message from Lee Chen/ })
@@ -433,7 +635,7 @@ describe("App", () => {
 
     render(
       <WorkspaceChat
-        model={makeSnapshot()}
+        model={makeChatModel()}
         createChannelMessage={() => Promise.resolve()}
         editChannelMessage={(input) => {
           calls.push({ method: "editChannelMessage", args: input })
@@ -443,7 +645,7 @@ describe("App", () => {
       />
     )
 
-    fireEvent.click(await screen.findByLabelText("Edit message from Maya Patel"))
+    fireEvent.click(within(await openMessageMenu("Maya Patel")).getByRole("menuitem", { name: "Edit message" }))
     const editor = await screen.findByLabelText("Edit message text from Maya Patel")
     fireEvent.change(editor, { target: { value: "The partner brief is ready for review." } })
     fireEvent.keyDown(editor, { key: "Enter", code: "Enter" })
@@ -463,7 +665,7 @@ describe("App", () => {
   it("shows a compact edit failure and keeps the editor open", async () => {
     render(
       <WorkspaceChat
-        model={makeSnapshot()}
+        model={makeChatModel()}
         createChannelMessage={() => Promise.resolve()}
         editChannelMessage={() => Promise.reject(new Error("raw mutation stack"))}
         deleteChannelMessage={() => Promise.resolve()}
@@ -471,7 +673,7 @@ describe("App", () => {
       />
     )
 
-    fireEvent.click(await screen.findByLabelText("Edit message from Maya Patel"))
+    fireEvent.click(within(await openMessageMenu("Maya Patel")).getByRole("menuitem", { name: "Edit message" }))
     const editor = await screen.findByLabelText("Edit message text from Maya Patel")
     fireEvent.change(editor, { target: { value: "The partner brief is ready for review." } })
     fireEvent.keyDown(editor, { key: "Enter", code: "Enter" })
@@ -484,7 +686,7 @@ describe("App", () => {
   it("shows a compact delete failure and keeps the confirmation open", async () => {
     render(
       <WorkspaceChat
-        model={makeSnapshot()}
+        model={makeChatModel()}
         createChannelMessage={() => Promise.resolve()}
         deleteChannelMessage={() => Promise.reject(new Error("raw delete failure"))}
         operationErrorMessage={() => "Could not delete message. Check your connection and try again."}
@@ -507,7 +709,7 @@ describe("App", () => {
 
     render(
       <WorkspaceChat
-        model={makeSnapshot()}
+        model={makeChatModel()}
         createChannelMessage={() => Promise.resolve()}
         editChannelMessage={(input) => {
           calls.push({ method: "editChannelMessage", args: input })
@@ -517,7 +719,7 @@ describe("App", () => {
       />
     )
 
-    fireEvent.click(await screen.findByLabelText("Edit message from Maya Patel"))
+    fireEvent.click(within(await openMessageMenu("Maya Patel")).getByRole("menuitem", { name: "Edit message" }))
     const editor = await screen.findByLabelText("Edit message text from Maya Patel")
     fireEvent.change(editor, { target: { value: "Line one" } })
     const enterEvent = createEvent.keyDown(editor, { key: "Enter", code: "Enter", shiftKey: true })
