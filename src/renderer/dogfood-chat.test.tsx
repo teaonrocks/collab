@@ -3,8 +3,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import type { ComponentType } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Id } from "../../convex/_generated/dataModel"
-import { ChannelMessage, CollabSnapshot } from "../shared/collab-rpc"
-import { dogfoodChatToCollabSnapshot, type DogfoodChannelMessageView, type DogfoodWorkspaceView } from "./dogfood-chat"
+import { ChannelMessage } from "../shared/collab-rpc"
+import { dogfoodChatToChatData, type DogfoodChannelMessageView, type DogfoodWorkspaceView } from "./dogfood-chat"
 
 const mocks = vi.hoisted(() => ({
   auth: {
@@ -46,7 +46,11 @@ vi.mock("convex/react", () => ({
 
 vi.mock("./App", () => ({
   WorkspaceChat: ((props: {
-    readonly model: CollabSnapshot
+    readonly model: {
+      readonly workspace: { readonly name: string }
+      readonly channel: { readonly id: string }
+      readonly channelMessages: ReadonlyArray<ChannelMessage>
+    }
   readonly createChannelMessage: (input: { readonly channelId: string; readonly body: string }) => Promise<unknown>
   readonly editChannelMessage?: (input: { readonly channelId: string; readonly messageId: string; readonly body: string }) => Promise<unknown>
   readonly deleteChannelMessage: (input: { readonly channelId: string; readonly messageId: string }) => Promise<unknown>
@@ -169,18 +173,23 @@ const messagesWithAnotherAuthor: ReadonlyArray<DogfoodChannelMessageView> = [
   }
 ]
 
-describe("dogfoodChatToCollabSnapshot", () => {
-  it("adapts the Convex dogfood chat view into the legacy WorkspaceChat model", () => {
-    const snapshot = dogfoodChatToCollabSnapshot({ workspace, messages })
+describe("dogfoodChatToChatData", () => {
+  it("adapts the Convex dogfood chat view into the chat data interface", () => {
+    const chatData = dogfoodChatToChatData({
+      workspace,
+      messages,
+      sendMessage: mocks.sendMessage,
+      editMessage: mocks.editMessage,
+      deleteMessage: mocks.deleteMessage
+    })
 
-    expect(snapshot).toBeInstanceOf(CollabSnapshot)
-    expect(snapshot.currentUser.displayName).toBe("Maya Patel")
-    expect(snapshot.workspace.name).toBe("Aether Dogfood")
-    expect(snapshot.channel.name).toBe("general")
-    expect(snapshot.channel.createdBy).toBe(snapshot.currentUser.id)
-    expect(snapshot.channelMessages).toHaveLength(1)
-    expect(snapshot.channelMessages[0]).toBeInstanceOf(ChannelMessage)
-    expect(snapshot.channelMessages[0]).toMatchObject({
+    expect(chatData.model.currentUser.displayName).toBe("Maya Patel")
+    expect(chatData.model.workspace.name).toBe("Aether Dogfood")
+    expect(chatData.model.channel.name).toBe("general")
+    expect(chatData.model.channel.createdBy).toBe(chatData.model.currentUser.id)
+    expect(chatData.model.channelMessages).toHaveLength(1)
+    expect(chatData.model.channelMessages[0]).toBeInstanceOf(ChannelMessage)
+    expect(chatData.model.channelMessages[0]).toMatchObject({
       authorType: "human",
       authorDisplayName: "Maya Patel",
       body: "Dogfood chat is live.",
@@ -189,24 +198,47 @@ describe("dogfoodChatToCollabSnapshot", () => {
     })
   })
 
-  it("preserves Convex editedAt in the legacy WorkspaceChat bridge", () => {
-    const snapshot = dogfoodChatToCollabSnapshot({
+  it("preserves Convex editedAt in the chat data model", () => {
+    const chatData = dogfoodChatToChatData({
       workspace,
-      messages: [{ ...messages[0]!, editedAt: 45 }]
+      messages: [{ ...messages[0]!, editedAt: 45 }],
+      sendMessage: mocks.sendMessage,
+      editMessage: mocks.editMessage,
+      deleteMessage: mocks.deleteMessage
     })
 
-    expect(snapshot.channelMessages[0]?.editedAt).toBe(45)
+    expect(chatData.model.channelMessages[0]?.editedAt).toBe(45)
   })
 
-  it("keeps agent-era snapshot fields empty while the dogfood path is chat-only", () => {
-    const snapshot = dogfoodChatToCollabSnapshot({ workspace, messages })
+  it("uses Convex ids for chat commands without exposing snapshot-era fields", async () => {
+    const chatData = dogfoodChatToChatData({
+      workspace,
+      messages,
+      sendMessage: mocks.sendMessage,
+      editMessage: mocks.editMessage,
+      deleteMessage: mocks.deleteMessage
+    })
 
-    expect(snapshot.workspaceAgents).toEqual([])
-    expect(snapshot.channelAgentEnablements).toEqual([])
-    expect(snapshot.threads).toEqual([])
-    expect(snapshot.threadMessages).toEqual([])
-    expect(snapshot.agentRuns).toEqual([])
-    expect(snapshot.auditEvents).toEqual([])
+    await chatData.createChannelMessage({ channelId: chatData.model.channel.id, body: "Ship chat first." })
+    await chatData.editChannelMessage?.({
+      channelId: chatData.model.channel.id,
+      messageId: chatData.model.channelMessages[0]!.id,
+      body: "Edited dogfood"
+    })
+    await chatData.deleteChannelMessage({
+      channelId: chatData.model.channel.id,
+      messageId: chatData.model.channelMessages[0]!.id
+    })
+
+    expect(mocks.sendMessage).toHaveBeenCalledWith({ channelId: workspace.channel.id, body: "Ship chat first." })
+    expect(mocks.editMessage).toHaveBeenCalledWith({
+      channelId: workspace.channel.id,
+      messageId: messages[0]!.id,
+      body: "Edited dogfood"
+    })
+    expect(mocks.deleteMessage).toHaveBeenCalledWith({ channelId: workspace.channel.id, messageId: messages[0]!.id })
+    expect("workspaceAgents" in chatData.model).toBe(false)
+    expect("agentRuns" in chatData.model).toBe(false)
   })
 })
 

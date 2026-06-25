@@ -1,0 +1,80 @@
+import type { RpcClientError } from "@effect/rpc/RpcClientError"
+import { Context, Effect, Layer, Stream } from "effect"
+import type {
+  ChannelId,
+  ChannelMessage,
+  ChannelMessageId,
+  CollabError,
+  CollabNotFound,
+  CollabPolicyDenied,
+  CollabSnapshot
+} from "../shared/collab-rpc"
+import { CollabApi } from "./collab-api"
+
+export type ChatDataModel = Pick<CollabSnapshot, "currentUser" | "workspace" | "channel" | "channelMessages">
+
+export type CreateChatMessage = (input: {
+  readonly channelId: ChannelId
+  readonly body: string
+}) => Promise<unknown>
+
+export type EditChatMessage = (input: {
+  readonly channelId: ChannelId
+  readonly messageId: ChannelMessageId
+  readonly body: string
+}) => Promise<unknown>
+
+export type DeleteChatMessage = (input: {
+  readonly channelId: ChannelId
+  readonly messageId: ChannelMessageId
+}) => Promise<unknown>
+
+export type ChatMessageGuard = (message: ChannelMessage) => boolean
+export type ChatOperation = "send" | "edit" | "delete"
+export type ChatOperationErrorMessage = (operation: ChatOperation, cause: unknown) => string
+
+export type ChatDataView = {
+  readonly model: ChatDataModel
+  readonly createChannelMessage: CreateChatMessage
+  readonly deleteChannelMessage: DeleteChatMessage
+  readonly editChannelMessage?: EditChatMessage
+  readonly canDeleteMessages?: boolean
+  readonly canDeleteMessage?: ChatMessageGuard
+  readonly canEditMessage?: ChatMessageGuard
+  readonly operationErrorMessage?: ChatOperationErrorMessage
+}
+
+type ChatEffectError = CollabNotFound | CollabPolicyDenied | CollabError | RpcClientError
+
+export class ChatData extends Context.Tag("renderer/ChatData")<
+  ChatData,
+  {
+    readonly changes: () => Stream.Stream<ChatDataModel, RpcClientError>
+    readonly createChannelMessage: (input: {
+      readonly channelId: ChannelId
+      readonly body: string
+    }) => Effect.Effect<ChannelMessage, ChatEffectError>
+    readonly deleteChannelMessage: (input: {
+      readonly channelId: ChannelId
+      readonly messageId: ChannelMessageId
+    }) => Effect.Effect<ChannelMessage, ChatEffectError>
+  }
+>() {}
+
+export const layerChatDataFromCollabApi: Layer.Layer<ChatData, never, CollabApi> = Layer.effect(
+  ChatData,
+  Effect.map(CollabApi, (api) =>
+    ChatData.of({
+      changes: () => api.changes().pipe(Stream.map(toChatDataModel)),
+      createChannelMessage: api.createChannelMessage,
+      deleteChannelMessage: api.deleteChannelMessage
+    })
+  )
+)
+
+export const toChatDataModel = (snapshot: CollabSnapshot): ChatDataModel => ({
+  currentUser: snapshot.currentUser,
+  workspace: snapshot.workspace,
+  channel: snapshot.channel,
+  channelMessages: snapshot.channelMessages
+})

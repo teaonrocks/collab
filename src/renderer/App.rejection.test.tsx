@@ -16,6 +16,7 @@ import {
   type WorkspaceId
 } from "../shared/collab-rpc"
 import { App } from "./App"
+import { layerChatDataFromCollabApi } from "./chat-data"
 import { CollabApi } from "./collab-api"
 import { runtime } from "./collab-atoms"
 
@@ -85,6 +86,9 @@ const failingMessageLayer = Layer.succeed(
   })
 )
 
+const mockRendererDataLayer = (layer: Layer.Layer<CollabApi>) =>
+  Layer.merge(layer, layerChatDataFromCollabApi.pipe(Layer.provide(layer)))
+
 describe("App mutation failure handling", () => {
   it("does not leak an unhandled promise rejection when message send fails", async () => {
     const rejections: Array<unknown> = []
@@ -92,7 +96,10 @@ describe("App mutation failure handling", () => {
     process.on("unhandledRejection", handler)
     try {
       render(
-        <RegistryProvider initialValues={[Atom.initialValue(runtime.layer, failingMessageLayer)]} scheduleTask={(f) => f()}>
+        <RegistryProvider
+          initialValues={[Atom.initialValue(runtime.layer, mockRendererDataLayer(failingMessageLayer))]}
+          scheduleTask={(f) => f()}
+        >
           <App />
         </RegistryProvider>
       )

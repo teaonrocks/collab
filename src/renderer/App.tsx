@@ -2,9 +2,19 @@ import { Result } from "@effect-atom/atom"
 import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
 import { Cause } from "effect"
 import { type FormEvent, useEffect, useRef, useState } from "react"
-import type { ChannelId, ChannelMessage, ChannelMessageId, CollabSnapshot } from "../shared/collab-rpc"
+import type { ChannelMessage, ChannelMessageId } from "../shared/collab-rpc"
 import "./App.css"
+import type {
+  ChatDataModel,
+  ChatDataView,
+  ChatMessageGuard,
+  ChatOperationErrorMessage
+} from "./chat-data"
 import * as atoms from "./collab-atoms"
+import {
+  type MessageRowState,
+  useMessageInteractions
+} from "./message-interactions"
 
 type ChannelIndicator = "unread" | "mentioned"
 
@@ -13,40 +23,10 @@ type ChannelMember = {
   readonly displayName: string
 }
 
-type MessageMenuState = {
-  readonly messageId: ChannelMessageId
-  readonly x: number
-  readonly y: number
-} | null
-
 type ChannelViewModel = {
-  readonly selectedMessageIds: ReadonlyArray<ChannelMessageId>
-  readonly selectedMessageIdSet: ReadonlySet<ChannelMessageId>
   readonly members: ReadonlyArray<ChannelMember>
   readonly channelIndicator: ChannelIndicator | null
-  readonly topSelectedMessageId: ChannelMessageId | null
-  readonly menuMessage: ChannelMessage | null
 }
-
-type CreateChannelMessage = (input: {
-  readonly channelId: ChannelId
-  readonly body: string
-}) => Promise<unknown>
-
-type DeleteChannelMessage = (input: {
-  readonly channelId: ChannelId
-  readonly messageId: ChannelMessageId
-}) => Promise<unknown>
-
-type EditChannelMessage = (input: {
-  readonly channelId: ChannelId
-  readonly messageId: ChannelMessageId
-  readonly body: string
-}) => Promise<unknown>
-
-type MessageActionGuard = (message: ChannelMessage) => boolean
-type ChannelOperation = "send" | "edit" | "delete"
-type OperationErrorMessage = (operation: ChannelOperation, cause: unknown) => string
 
 export type ProfileMenuAction = {
   readonly label: string
@@ -78,14 +58,14 @@ export function App() {
 }
 
 export function WorkspaceChat(props: {
-  readonly model: CollabSnapshot
-  readonly createChannelMessage: CreateChannelMessage
-  readonly deleteChannelMessage: DeleteChannelMessage
-  readonly editChannelMessage?: EditChannelMessage
+  readonly model: ChatDataModel
+  readonly createChannelMessage: ChatDataView["createChannelMessage"]
+  readonly deleteChannelMessage: ChatDataView["deleteChannelMessage"]
+  readonly editChannelMessage?: ChatDataView["editChannelMessage"]
   readonly canDeleteMessages?: boolean
-  readonly canDeleteMessage?: MessageActionGuard
-  readonly canEditMessage?: MessageActionGuard
-  readonly operationErrorMessage?: OperationErrorMessage
+  readonly canDeleteMessage?: ChatMessageGuard
+  readonly canEditMessage?: ChatMessageGuard
+  readonly operationErrorMessage?: ChatOperationErrorMessage
   readonly profileMenuActions?: ReadonlyArray<ProfileMenuAction>
 }) {
   const {
@@ -101,49 +81,17 @@ export function WorkspaceChat(props: {
   } = props
   const [messageDraft, setMessageDraft] = useState("")
   const [operationError, setOperationError] = useState<string | null>(null)
-  const [selectedMessageIds, setSelectedMessageIds] = useState<ReadonlyArray<ChannelMessageId>>([])
-  const [editingMessage, setEditingMessage] = useState<{
-    readonly messageId: ChannelMessageId
-    readonly draft: string
-    readonly saving: boolean
-  } | null>(null)
-  const [pendingDeleteMessageId, setPendingDeleteMessageId] = useState<ChannelMessageId | null>(null)
   const [membersOpen, setMembersOpen] = useState(true)
-  const [messageMenu, setMessageMenu] = useState<MessageMenuState>(null)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
-  const view = createChannelViewModel(model, selectedMessageIds, messageMenu)
-  const menuMessage = view.menuMessage
-  const pendingDeleteMessage = pendingDeleteMessageId === null
-    ? null
-    : model.channelMessages.find((message) => message.id === pendingDeleteMessageId && message.deletedAt === null) ?? null
-
-  useEffect(() => {
-    setSelectedMessageIds((ids) => pruneSelectedMessageIds(ids, model.channelMessages))
-  }, [model.channelMessages])
-
-  useEffect(() => {
-    if (editingMessage === null) return
-    const message = model.channelMessages.find((item) => item.id === editingMessage.messageId)
-    if (message === undefined || message.deletedAt !== null) setEditingMessage(null)
-  }, [editingMessage, model.channelMessages])
-
-  useEffect(() => {
-    if (pendingDeleteMessageId !== null && pendingDeleteMessage === null) setPendingDeleteMessageId(null)
-  }, [pendingDeleteMessage, pendingDeleteMessageId])
-
-  useEffect(() => {
-    if (messageMenu === null) return
-    const closeMenu = () => setMessageMenu(null)
-    const closeMenuOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeMenu()
-    }
-    window.addEventListener("click", closeMenu)
-    window.addEventListener("keydown", closeMenuOnEscape)
-    return () => {
-      window.removeEventListener("click", closeMenu)
-      window.removeEventListener("keydown", closeMenuOnEscape)
-    }
-  }, [messageMenu])
+  const view = createChannelViewModel(model)
+  const messageInteractions = useMessageInteractions({
+    channelId: model.channel.id,
+    messages: model.channelMessages,
+    deleteChannelMessage,
+    editChannelMessage,
+    operationErrorMessage,
+    setOperationError
+  })
 
   useEffect(() => {
     if (!profileMenuOpen) return
@@ -158,10 +106,6 @@ export function WorkspaceChat(props: {
       window.removeEventListener("keydown", closeMenuOnEscape)
     }
   }, [profileMenuOpen])
-
-  const toggleMessageSelection = (messageId: ChannelMessageId) => {
-    setSelectedMessageIds((ids) => toggleMessageId(ids, messageId))
-  }
 
   const copyMessage = (message: ChannelMessage) => {
     if (typeof navigator !== "undefined" && navigator.clipboard !== undefined) {
@@ -183,63 +127,15 @@ export function WorkspaceChat(props: {
       })
   }
 
-  const requestDeleteMessage = (messageId: ChannelMessageId) => {
-    setPendingDeleteMessageId(messageId)
-    setMessageMenu(null)
-  }
-
-  const confirmDeleteMessage = () => {
-    if (pendingDeleteMessage === null) return
-    const messageId = pendingDeleteMessage.id
-    setOperationError(null)
-    void deleteChannelMessage({
-      channelId: model.channel.id,
-      messageId
-    })
-      .then(() => {
-        setSelectedMessageIds((ids) => ids.filter((id) => id !== messageId))
-        setEditingMessage((editing) => editing?.messageId === messageId ? null : editing)
-        setPendingDeleteMessageId(null)
-        setMessageMenu(null)
-      })
-      .catch((cause) => {
-        if (operationErrorMessage !== undefined) setOperationError(operationErrorMessage("delete", cause))
-      })
-  }
-
-  const startEditingMessage = (message: ChannelMessage) => {
-    setEditingMessage({ messageId: message.id, draft: message.body, saving: false })
-    setMessageMenu(null)
-  }
-
-  const saveEditingMessage = () => {
-    if (editingMessage === null || editChannelMessage === undefined || editingMessage.saving) return
-    const body = editingMessage.draft.trim()
-    if (body.length === 0) return
-
-    setOperationError(null)
-    setEditingMessage({ ...editingMessage, saving: true })
-    void editChannelMessage({
-      channelId: model.channel.id,
-      messageId: editingMessage.messageId,
-      body
-    })
-      .then(() => setEditingMessage(null))
-      .catch((cause) => {
-        if (operationErrorMessage !== undefined) setOperationError(operationErrorMessage("edit", cause))
-        setEditingMessage((editing) => editing === null ? null : { ...editing, saving: false })
-      })
-  }
-
-  const openMessageMenu = (messageId: ChannelMessageId, x: number, y: number) => {
-    setMessageMenu({ messageId, x, y })
-  }
-
   const messageCanDelete = (message: ChannelMessage): boolean =>
     canDeleteMessages && (canDeleteMessage?.(message) ?? true)
 
   const messageCanEdit = (message: ChannelMessage): boolean =>
     editChannelMessage !== undefined && (canEditMessage?.(message) ?? true)
+
+  const menuMessage = messageInteractions.menuMessage
+  const messageMenu = messageInteractions.messageMenu
+  const pendingDeleteMessage = messageInteractions.pendingDeleteMessage
 
   return (
     <main className={classNames("appShell", !membersOpen && "membersCollapsed")}>
@@ -269,24 +165,21 @@ export function WorkspaceChat(props: {
       <ChatPane
         channelName={model.channel.name}
         messages={model.channelMessages}
-        selectedMessageIds={view.selectedMessageIds}
-        selectedMessageIdSet={view.selectedMessageIdSet}
-        topSelectedMessageId={view.topSelectedMessageId}
         messageDraft={messageDraft}
         operationError={operationError}
         onMessageDraftChange={setMessageDraft}
         onSendMessage={sendChannelMessage}
-        onToggleMessage={toggleMessageSelection}
+        onToggleMessage={messageInteractions.toggleMessageSelection}
         onCopyMessage={copyMessage}
-        onStartEditMessage={startEditingMessage}
-        onEditDraftChange={(draft) => setEditingMessage((editing) => editing === null ? null : { ...editing, draft })}
-        onCancelEditMessage={() => setEditingMessage(null)}
-        onSaveEditMessage={saveEditingMessage}
-        onDeleteMessage={requestDeleteMessage}
+        onStartEditMessage={messageInteractions.startEditingMessage}
+        onEditDraftChange={messageInteractions.setEditingDraft}
+        onCancelEditMessage={messageInteractions.cancelEditingMessage}
+        onSaveEditMessage={messageInteractions.saveEditingMessage}
+        onDeleteMessage={messageInteractions.requestDeleteMessage}
         canDeleteMessage={messageCanDelete}
         canEditMessage={messageCanEdit}
-        editingMessage={editingMessage}
-        onOpenMessageMenu={openMessageMenu}
+        getMessageRowState={messageInteractions.getRowState}
+        onOpenMessageMenu={messageInteractions.openMessageMenu}
       />
 
       <MembersPanel
@@ -299,16 +192,16 @@ export function WorkspaceChat(props: {
         : (
           <MessageContextMenu
             message={menuMessage}
-            selected={view.selectedMessageIdSet.has(menuMessage.id)}
+            selected={messageInteractions.selectedMessageIdSet.has(menuMessage.id)}
             x={messageMenu.x}
             y={messageMenu.y}
-            onToggle={() => toggleMessageSelection(menuMessage.id)}
+            onToggle={() => messageInteractions.toggleMessageSelection(menuMessage.id)}
             onCopy={() => copyMessage(menuMessage)}
-            onEdit={() => startEditingMessage(menuMessage)}
-            onDelete={() => requestDeleteMessage(menuMessage.id)}
+            onEdit={() => messageInteractions.startEditingMessage(menuMessage)}
+            onDelete={() => messageInteractions.requestDeleteMessage(menuMessage.id)}
             canEdit={messageCanEdit(menuMessage)}
             canDelete={messageCanDelete(menuMessage)}
-            onClose={() => setMessageMenu(null)}
+            onClose={messageInteractions.closeMessageMenu}
           />
         )}
 
@@ -317,8 +210,8 @@ export function WorkspaceChat(props: {
         : (
           <DeleteMessageDialog
             authorDisplayName={pendingDeleteMessage.authorDisplayName}
-            onCancel={() => setPendingDeleteMessageId(null)}
-            onConfirm={confirmDeleteMessage}
+            onCancel={messageInteractions.cancelDeleteMessage}
+            onConfirm={messageInteractions.confirmDeleteMessage}
           />
         )}
     </main>
@@ -481,9 +374,6 @@ function ChannelHeader(props: {
 function ChatPane(props: {
   readonly channelName: string
   readonly messages: ReadonlyArray<ChannelMessage>
-  readonly selectedMessageIds: ReadonlyArray<ChannelMessageId>
-  readonly selectedMessageIdSet: ReadonlySet<ChannelMessageId>
-  readonly topSelectedMessageId: ChannelMessageId | null
   readonly messageDraft: string
   readonly operationError: string | null
   readonly onMessageDraftChange: (draft: string) => void
@@ -495,21 +385,14 @@ function ChatPane(props: {
   readonly onCancelEditMessage: () => void
   readonly onSaveEditMessage: () => void
   readonly onDeleteMessage: (messageId: ChannelMessageId) => void
-  readonly canDeleteMessage: MessageActionGuard
-  readonly canEditMessage: MessageActionGuard
-  readonly editingMessage: {
-    readonly messageId: ChannelMessageId
-    readonly draft: string
-    readonly saving: boolean
-  } | null
+  readonly canDeleteMessage: ChatMessageGuard
+  readonly canEditMessage: ChatMessageGuard
+  readonly getMessageRowState: (message: ChannelMessage) => MessageRowState
   readonly onOpenMessageMenu: (messageId: ChannelMessageId, x: number, y: number) => void
 }) {
   const {
     channelName,
     messages,
-    selectedMessageIds,
-    selectedMessageIdSet,
-    topSelectedMessageId,
     messageDraft,
     operationError,
     onMessageDraftChange,
@@ -523,10 +406,9 @@ function ChatPane(props: {
     onDeleteMessage,
     canDeleteMessage,
     canEditMessage,
-    editingMessage,
+    getMessageRowState,
     onOpenMessageMenu
   } = props
-  const selectionMode = selectedMessageIds.length > 0
 
   return (
     <section className="chatPane" aria-label={`#${channelName} chat`}>
@@ -540,15 +422,15 @@ function ChatPane(props: {
           )
           : null}
         {messages.map((message) => {
-          const actionsPinned = selectionMode && message.id === topSelectedMessageId
+          const rowState = getMessageRowState(message)
           return (
             <li key={message.id}>
               <ChannelMessageRow
                 message={message}
-                selected={selectedMessageIdSet.has(message.id)}
-                selectionMode={selectionMode}
-                actionsPinned={actionsPinned}
-                actionsAvailable={!selectionMode || actionsPinned}
+                selected={rowState.selected}
+                selectionMode={rowState.selectionMode}
+                actionsPinned={rowState.actionsPinned}
+                actionsAvailable={rowState.actionsAvailable}
                 onToggle={() => onToggleMessage(message.id)}
                 onCopy={() => onCopyMessage(message)}
                 onEdit={() => onStartEditMessage(message)}
@@ -558,8 +440,8 @@ function ChatPane(props: {
                 onDelete={() => onDeleteMessage(message.id)}
                 canEdit={canEditMessage(message)}
                 canDelete={canDeleteMessage(message)}
-                editingDraft={editingMessage?.messageId === message.id ? editingMessage.draft : null}
-                editSaving={editingMessage?.messageId === message.id && editingMessage.saving}
+                editingDraft={rowState.editingDraft}
+                editSaving={rowState.editSaving}
                 onOpenMenu={(x, y) => onOpenMessageMenu(message.id, x, y)}
               />
             </li>
@@ -963,49 +845,12 @@ function DeleteMessageDialog(props: {
   )
 }
 
-const createChannelViewModel = (
-  model: CollabSnapshot,
-  selectedMessageIds: ReadonlyArray<ChannelMessageId>,
-  messageMenu: MessageMenuState
-): ChannelViewModel => {
-  const liveMessages = model.channelMessages.filter(isLiveMessage)
-  const liveMessageIds = new Set(liveMessages.map((message) => message.id))
-  const visibleSelectedMessageIds = selectedMessageIds.filter((id) => liveMessageIds.has(id))
-  const selectedMessageIdSet = new Set(visibleSelectedMessageIds)
-  const topSelectedMessageId = liveMessages.find((message) => selectedMessageIdSet.has(message.id))?.id ?? null
-
+const createChannelViewModel = (model: ChatDataModel): ChannelViewModel => {
+  const liveMessages = model.channelMessages.filter((message) => message.deletedAt === null)
   return {
-    selectedMessageIds: visibleSelectedMessageIds,
-    selectedMessageIdSet,
     members: uniqueMembers(model.channelMessages),
-    channelIndicator: getChannelIndicator(liveMessages, model.currentUser.id, model.currentUser.displayName),
-    topSelectedMessageId,
-    menuMessage: messageMenu === null
-      ? null
-      : liveMessages.find((message) => message.id === messageMenu.messageId) ?? null
+    channelIndicator: getChannelIndicator(liveMessages, model.currentUser.id, model.currentUser.displayName)
   }
-}
-
-const isLiveMessage = (message: ChannelMessage): boolean => message.deletedAt === null
-
-const toggleMessageId = (
-  messageIds: ReadonlyArray<ChannelMessageId>,
-  messageId: ChannelMessageId
-): ReadonlyArray<ChannelMessageId> =>
-  messageIds.includes(messageId)
-    ? messageIds.filter((id) => id !== messageId)
-    : [...messageIds, messageId]
-
-const pruneSelectedMessageIds = (
-  selectedMessageIds: ReadonlyArray<ChannelMessageId>,
-  messages: ReadonlyArray<ChannelMessage>
-): ReadonlyArray<ChannelMessageId> => {
-  if (selectedMessageIds.length === 0) return selectedMessageIds
-  const liveMessageIds = new Set(messages.filter(isLiveMessage).map((message) => message.id))
-  const nextSelectedMessageIds = selectedMessageIds.filter((id) => liveMessageIds.has(id))
-  return nextSelectedMessageIds.length === selectedMessageIds.length
-    ? selectedMessageIds
-    : nextSelectedMessageIds
 }
 
 const uniqueMembers = (messages: ReadonlyArray<ChannelMessage>): ReadonlyArray<ChannelMember> => {

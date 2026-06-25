@@ -12,6 +12,7 @@ import {
   WorkspaceAgent,
   type WorkspaceId
 } from "../shared/collab-rpc"
+import { layerChatDataFromCollabApi, toChatDataModel } from "./chat-data"
 import { CollabApi } from "./collab-api"
 import { registerAgent, runtime, snapshot as snapshotAtom } from "./collab-atoms"
 
@@ -110,8 +111,11 @@ const makeApiMock = () => {
   return { calls, layer, model }
 }
 
+const mockRendererDataLayer = (layer: Layer.Layer<CollabApi>) =>
+  Layer.merge(layer, layerChatDataFromCollabApi.pipe(Layer.provide(layer)))
+
 const mock = (layer: Layer.Layer<CollabApi>) =>
-  Registry.make({ initialValues: [Atom.initialValue(runtime.layer, layer)] })
+  Registry.make({ initialValues: [Atom.initialValue(runtime.layer, mockRendererDataLayer(layer))] })
 
 describe("collaboration atoms", () => {
   it("resolves the snapshot atom from the CollabApi changes stream", async () => {
@@ -122,7 +126,7 @@ describe("collaboration atoms", () => {
       Registry.getResult(registry, snapshotAtom, { suspendOnWaiting: true })
     )
 
-    expect(result).toStrictEqual(model)
+    expect(result).toStrictEqual(toChatDataModel(model))
   })
 
   it("runs registerAgent through the mock api and records the call", async () => {

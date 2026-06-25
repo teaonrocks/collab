@@ -15,6 +15,7 @@ import {
   type WorkspaceId
 } from "../shared/collab-rpc"
 import { App, WorkspaceChat } from "./App"
+import { layerChatDataFromCollabApi } from "./chat-data"
 import { CollabApi } from "./collab-api"
 import { runtime } from "./collab-atoms"
 
@@ -108,12 +109,18 @@ const renderApp = (model: CollabSnapshot) => {
     })
   )
   render(
-    <RegistryProvider initialValues={[Atom.initialValue(runtime.layer, layer)]} scheduleTask={(f) => f()}>
+    <RegistryProvider
+      initialValues={[Atom.initialValue(runtime.layer, mockRendererDataLayer(layer))]}
+      scheduleTask={(f) => f()}
+    >
       <App />
     </RegistryProvider>
   )
   return calls
 }
+
+const mockRendererDataLayer = (layer: Layer.Layer<CollabApi>) =>
+  Layer.merge(layer, layerChatDataFromCollabApi.pipe(Layer.provide(layer)))
 
 describe("App", () => {
   it("renders the chat workspace from CollabApi", async () => {

@@ -3,12 +3,12 @@ import { useAction, useConvexAuth, useMutation, useQuery } from "convex/react"
 import { Component, type ErrorInfo, type ReactNode, useEffect, useMemo, useState } from "react"
 import { api } from "../../convex/_generated/api"
 import type { Id } from "../../convex/_generated/dataModel"
+import type { ChatDataView } from "./chat-data"
 import {
   Channel,
   type ChannelId,
   ChannelMessage,
   type ChannelMessageId,
-  CollabSnapshot,
   HumanAccount,
   type HumanAccountId,
   Workspace,
@@ -103,8 +103,14 @@ function ConvexDogfoodChat() {
   const model = useMemo(
     () => workspace === undefined || workspace === null || messages === undefined
       ? null
-      : dogfoodChatToCollabSnapshot({ workspace, messages }),
-    [messages, workspace]
+      : dogfoodChatToChatData({
+        workspace,
+        messages,
+        sendMessage,
+        editMessage,
+        deleteMessage
+      }),
+    [deleteMessage, editMessage, messages, sendMessage, workspace]
   )
 
   if (auth.isLoading) {
@@ -172,16 +178,8 @@ function ConvexDogfoodChat() {
 
   return (
     <WorkspaceChat
-      model={model}
+      {...model}
       profileMenuActions={[{ label: "Sign out", onSelect: () => auth.signOut() }]}
-      createChannelMessage={({ body }) => sendMessage({ channelId: toConvexChannelId(model.channel.id), body })}
-      editChannelMessage={({ channelId, messageId, body }) =>
-        editMessage({ channelId: toConvexChannelId(channelId), messageId: toConvexMessageId(messageId), body })}
-      deleteChannelMessage={({ channelId, messageId }) =>
-        deleteMessage({ channelId: toConvexChannelId(channelId), messageId: toConvexMessageId(messageId) })}
-      operationErrorMessage={(operation) => dogfoodOperationErrorMessage(operation)}
-      canEditMessage={(message) => message.authorId === model.currentUser.id}
-      canDeleteMessage={(message) => message.authorId === model.currentUser.id}
     />
   )
 }
@@ -246,46 +244,56 @@ class DogfoodErrorBoundary extends Component<
   }
 }
 
-export const dogfoodChatToCollabSnapshot = (input: {
+export const dogfoodChatToChatData = (input: {
   readonly workspace: DogfoodWorkspaceView
   readonly messages: ReadonlyArray<DogfoodChannelMessageView>
-}): CollabSnapshot => {
+  readonly sendMessage: (input: { readonly channelId: Id<"channels">; readonly body: string }) => Promise<unknown>
+  readonly editMessage: (input: {
+    readonly channelId: Id<"channels">
+    readonly messageId: Id<"messages">
+    readonly body: string
+  }) => Promise<unknown>
+  readonly deleteMessage: (input: {
+    readonly channelId: Id<"channels">
+    readonly messageId: Id<"messages">
+  }) => Promise<unknown>
+}): ChatDataView => {
   const currentUserId = toHumanAccountId(input.workspace.currentUser.id)
   const workspaceId = toWorkspaceId(input.workspace.workspace.id)
   const channelId = toChannelId(input.workspace.channel.id)
 
-  // Temporary bridge: the dogfood path reuses the legacy WorkspaceChat surface
-  // until chat has its own Convex-native view model.
-  return new CollabSnapshot({
-    currentUser: new HumanAccount({
-      id: currentUserId,
-      displayName: input.workspace.currentUser.displayName,
-      email: "",
-      createdAt: 0
-    }),
-    workspace: new Workspace({
-      id: workspaceId,
-      name: input.workspace.workspace.name,
-      createdAt: 0
-    }),
-    workspaceRole: "member",
-    channel: new Channel({
-      id: channelId,
-      workspaceId,
-      name: input.workspace.channel.name,
-      visibility: input.workspace.channel.visibility,
-      createdBy: currentUserId,
-      createdAt: 0
-    }),
-    channelRole: "member",
-    channelMessages: input.messages.map(toLegacyChannelMessage),
-    workspaceAgents: [],
-    channelAgentEnablements: [],
-    threads: [],
-    threadMessages: [],
-    agentRuns: [],
-    auditEvents: []
-  })
+  return {
+    model: {
+      currentUser: new HumanAccount({
+        id: currentUserId,
+        displayName: input.workspace.currentUser.displayName,
+        email: "",
+        createdAt: 0
+      }),
+      workspace: new Workspace({
+        id: workspaceId,
+        name: input.workspace.workspace.name,
+        createdAt: 0
+      }),
+      channel: new Channel({
+        id: channelId,
+        workspaceId,
+        name: input.workspace.channel.name,
+        visibility: input.workspace.channel.visibility,
+        createdBy: currentUserId,
+        createdAt: 0
+      }),
+      channelMessages: input.messages.map(toLegacyChannelMessage)
+    },
+    createChannelMessage: ({ channelId, body }) => input.sendMessage({ channelId: toConvexChannelId(channelId), body }),
+    editChannelMessage: ({ channelId, messageId, body }) =>
+      input.editMessage({ channelId: toConvexChannelId(channelId), messageId: toConvexMessageId(messageId), body }),
+    deleteChannelMessage: ({ channelId, messageId }) =>
+      input.deleteMessage({ channelId: toConvexChannelId(channelId), messageId: toConvexMessageId(messageId) }),
+    operationErrorMessage: (operation) => dogfoodOperationErrorMessage(operation),
+    canEditMessage: (message) => message.authorId === currentUserId,
+    canDeleteMessage: (message) => message.authorId === currentUserId
+  }
 }
 
 const toLegacyChannelMessage = (message: DogfoodChannelMessageView): ChannelMessage =>
