@@ -24,6 +24,28 @@ Use this checklist for the Convex/AuthKit dogfood chat path. Keep secrets out of
 - Edit and delete failures show compact retryable errors without raw internal details.
 - Signing out from the profile menu returns to the sign-in state.
 
+## UI Migration Checks
+
+- The app shell uses the migrated quiet UI surfaces: rail, channel sidebar, chat pane, and member panel have consistent borders, muted surfaces, and no legacy gradient/card chrome.
+- Icon-only controls expose useful labels: add channel, member panel toggle, send message, attachment, message actions, and profile menu.
+- Channel creation opens a centered dialog, keeps the create button disabled until the name is non-empty after trimming, and clears the draft after canceling.
+- Message action menus stay aligned to the selected row, expose select/copy/edit/delete actions, and do not show edit/delete for another user's message.
+- Inline edit focuses the textarea, Enter saves, Shift+Enter keeps a newline in the editor, and Escape returns to the original message without saving.
+- Delete confirmation uses the migrated dialog styling, keeps focus in the dialog, and leaves the dialog open on a failed delete.
+- Loading skeletons animate in the chat timeline and member panel without shifting the composer or sidebars.
+
+## Viewport Checks
+
+- At 1280 px or wider, verify rail, sidebar, chat, and member panel are all visible and the composer stays pinned to the bottom.
+- At 920 px or narrower, verify the channel sidebar and member panel collapse while the rail, header, chat timeline, and composer remain usable.
+- At a short viewport height, verify message scrolling is contained to the timeline and dialogs remain centered without clipping their actions.
+- Toggle light and dark theme attributes if testing them manually; color tokens should keep readable foreground, border, destructive, unread, and mention states.
+
+## Residual Visual Risks
+
+- Happy DOM coverage verifies semantics and class wiring, but it does not catch pixel-level spacing, z-index, or responsive overflow regressions.
+- Manual smoke passes should include at least one dense message channel and one empty/loading channel because those states stress the migrated layout differently.
+
 ## Common Failure States
 
 - `Waiting for your AuthKit session to reach Convex...`: AuthKit is signed in, but Convex has not received a valid auth token yet. Wait briefly, then retry sign-in if it does not recover.

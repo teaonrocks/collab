@@ -278,10 +278,48 @@ describe("App", () => {
     expect(await screen.findByRole("dialog", { name: "Create Channel" })).toBeTruthy()
     const form = await screen.findByRole("form", { name: "Create channel" })
     expect(within(form).getByRole("status").className).toContain("min-h-[17px]")
-    fireEvent.change(within(form).getByLabelText("Channel name"), { target: { value: "product" } })
+    fireEvent.change(within(form).getByLabelText("Channel name"), { target: { value: "  product  " } })
     fireEvent.submit(form)
 
     await waitFor(() => expect(calls).toEqual([{ name: "product" }]))
+  })
+
+  it("keeps the channel creation dialog state scoped to an open attempt", async () => {
+    render(
+      <WorkspaceChat
+        model={makeChatModel()}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+        createChannel={() => Promise.resolve(new Channel({
+          id: secondChannelId,
+          workspaceId,
+          name: "product",
+          visibility: "public",
+          createdBy: userId,
+          createdAt: 4
+        }))}
+      />
+    )
+
+    fireEvent.click(await screen.findByRole("button", { name: "Add channel" }))
+    const form = await screen.findByRole("form", { name: "Create channel" })
+    const channelName = within(form).getByLabelText("Channel name") as HTMLInputElement
+    const createButton = within(form).getByRole("button", { name: "Create" }) as HTMLButtonElement
+    expect(createButton.disabled).toBe(true)
+
+    fireEvent.change(channelName, { target: { value: "   " } })
+    expect(createButton.disabled).toBe(true)
+
+    fireEvent.change(channelName, { target: { value: "ops" } })
+    expect(createButton.disabled).toBe(false)
+    fireEvent.click(within(form).getByRole("button", { name: "Cancel" }))
+
+    expect(screen.queryByRole("dialog", { name: "Create Channel" })).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "Add channel" }))
+    const nextForm = await screen.findByRole("form", { name: "Create channel" })
+    expect((within(nextForm).getByLabelText("Channel name") as HTMLInputElement).value).toBe("")
+    expect((within(nextForm).getByRole("button", { name: "Create" }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it("shows channel creation backend errors without collapsing reserved error space", async () => {
@@ -752,6 +790,32 @@ describe("App", () => {
     expect((await screen.findByRole("status")).textContent).toBe("Could not save edit. Check your connection and try again.")
     expect(screen.getByLabelText("Edit message text from Maya Patel")).toBeTruthy()
     expect(screen.queryByText(/raw mutation stack/)).toBeNull()
+  })
+
+  it("cancels an inline message edit with Escape", async () => {
+    const calls: Array<{ method: string; args: unknown }> = []
+
+    render(
+      <WorkspaceChat
+        model={makeChatModel()}
+        createChannelMessage={() => Promise.resolve()}
+        editChannelMessage={(input) => {
+          calls.push({ method: "editChannelMessage", args: input })
+          return Promise.resolve()
+        }}
+        deleteChannelMessage={() => Promise.resolve()}
+      />
+    )
+
+    fireEvent.click(within(await openMessageMenu("Maya Patel")).getByRole("menuitem", { name: "Edit message" }))
+    const editor = await screen.findByLabelText("Edit message text from Maya Patel")
+    fireEvent.change(editor, { target: { value: "Draft that should be discarded." } })
+    fireEvent.keyDown(editor, { key: "Escape", code: "Escape" })
+
+    expect(screen.queryByLabelText("Edit message text from Maya Patel")).toBeNull()
+    expect(await screen.findByText("The partner brief needs a concise risk summary.")).toBeTruthy()
+    expect(screen.queryByText("Draft that should be discarded.")).toBeNull()
+    expect(calls).toEqual([])
   })
 
   it("shows a compact delete failure and keeps the confirmation open", async () => {

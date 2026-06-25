@@ -83,6 +83,8 @@ const messageContentClassName =
   "messageContent min-w-0 max-w-[820px]"
 const messageBodyClassName =
   "mb-0 mt-[3px] text-sm leading-[1.42] text-foreground [overflow-wrap:anywhere]"
+const iconClassName =
+  "size-4 [stroke-width:2]"
 const messageActionButtonClassName =
   "size-[34px] min-h-[30px] rounded-none border-0 border-l border-surface-rail bg-surface-raised text-foreground-muted first:border-l-0 hover:bg-surface-muted hover:text-foreground"
 const loadingShellClassName =
@@ -491,7 +493,7 @@ function ChannelSidebar(props: {
                 onChannelOperationError(null)
               }}
             >
-              <Plus className="buttonIcon" aria-hidden="true" />
+              <Plus className={iconClassName} aria-hidden="true" />
             </button>
           </div>
           {channels.map((channel) => {
@@ -584,7 +586,7 @@ function CreateChannelDialog(props: {
     <Dialog open onOpenChange={handleOpenChange}>
       <DialogContent className="channelCreateDialog max-w-[380px]">
         <DialogTitle id="create-channel-title">Create Channel</DialogTitle>
-        <DialogDescription id="create-channel-description" className="srOnly">
+        <DialogDescription id="create-channel-description" className="sr-only">
           Name the channel to add it to this workspace.
         </DialogDescription>
         <form className="mt-3 flex flex-col gap-2.5" aria-label="Create channel" onSubmit={onSubmit}>
@@ -652,7 +654,7 @@ function ChannelHeader(props: {
   return (
     <header className="chatHeader flex min-h-0 min-w-0 items-center justify-between gap-3 border-b border-border bg-surface-canvas px-4 py-2 [grid-area:header]">
       <div className="channelTitle flex min-w-0 items-center gap-2">
-        <Hash className="channelHashIcon buttonIcon shrink-0 text-foreground-subtle" aria-hidden="true" />
+        <Hash className={classNames("channelHashIcon shrink-0 text-foreground-subtle", iconClassName)} aria-hidden="true" />
         <h2 className="m-0 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-lg leading-tight tracking-normal text-foreground">{channelName}</h2>
       </div>
       <div className="chatHeaderActions flex items-center justify-end gap-2 text-xs text-foreground-subtle" aria-label="Channel actions">
@@ -667,7 +669,7 @@ function ChannelHeader(props: {
           title={membersToggleLabel}
           onClick={onToggleMembers}
         >
-          <Users className="buttonIcon" aria-hidden="true" />
+          <Users className={iconClassName} aria-hidden="true" />
         </button>
       </div>
     </header>
@@ -727,7 +729,7 @@ function ChatPane(props: {
               <strong className="text-[15px] text-foreground">No messages yet</strong>
               <span className="chatEmptyChannel inline-flex items-center justify-center gap-1">
                 Start the conversation in
-                <Hash className="channelHashIcon buttonIcon" aria-hidden="true" />
+                <Hash className={classNames("channelHashIcon", iconClassName)} aria-hidden="true" />
                 <span>{channelName}.</span>
               </span>
             </li>
@@ -939,7 +941,7 @@ function ChannelMessageRow(props: {
                 onOpenMenu(x, rect.bottom + MESSAGE_CONTEXT_MENU_OFFSET)
               }}
             >
-              <Ellipsis className="buttonIcon" aria-hidden="true" />
+              <Ellipsis className={iconClassName} aria-hidden="true" />
             </Button>
           </div>
         )}
@@ -1052,9 +1054,9 @@ function MessageComposer(props: {
           aria-label="Add attachment"
           disabled={disabled}
         >
-          <Paperclip className="buttonIcon" aria-hidden="true" />
+          <Paperclip className={iconClassName} aria-hidden="true" />
         </Button>
-        <label className="srOnly" htmlFor="channel-message">Message</label>
+        <label className="sr-only" htmlFor="channel-message">Message</label>
         <Textarea
           ref={textareaRef}
           id="channel-message"
@@ -1079,7 +1081,7 @@ function MessageComposer(props: {
           aria-label="Send message"
           disabled={!canSend}
         >
-          <SendHorizontal className="buttonIcon" aria-hidden="true" />
+          <SendHorizontal className={iconClassName} aria-hidden="true" />
         </Button>
       </form>
     </div>
@@ -1168,7 +1170,7 @@ function MessageContextMenu(props: {
           onClose()
         }}
       >
-        <SelectIcon className="buttonIcon" aria-hidden="true" />
+        <SelectIcon className={iconClassName} aria-hidden="true" />
         <span>{selected ? "Deselect" : "Select"}</span>
       </Button>
       <Button
@@ -1181,7 +1183,7 @@ function MessageContextMenu(props: {
           onClose()
         }}
       >
-        <Copy className="buttonIcon" aria-hidden="true" />
+        <Copy className={iconClassName} aria-hidden="true" />
         <span>Copy message</span>
       </Button>
       {canEdit
@@ -1196,7 +1198,7 @@ function MessageContextMenu(props: {
               onClose()
             }}
           >
-            <Pencil className="buttonIcon" aria-hidden="true" />
+            <Pencil className={iconClassName} aria-hidden="true" />
             <span>Edit message</span>
           </Button>
         )
@@ -1213,7 +1215,7 @@ function MessageContextMenu(props: {
               onClose()
             }}
           >
-            <Trash2 className="buttonIcon" aria-hidden="true" />
+            <Trash2 className={iconClassName} aria-hidden="true" />
             <span>Delete message</span>
           </Button>
         )

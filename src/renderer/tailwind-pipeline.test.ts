@@ -17,4 +17,12 @@ describe("renderer Tailwind pipeline", () => {
     expect(result.css).toContain(".text-foreground")
     expect(result.css).toContain(".shadow-popover")
   })
+
+  it("keeps migrated app-only CSS out of the renderer stylesheet", async () => {
+    const css = await readFile(resolve("src/renderer/App.css"), "utf8")
+
+    expect(css).not.toContain(".srOnly")
+    expect(css).not.toContain(".buttonIcon")
+    expect(css).toContain("@keyframes skeletonPulse")
+  })
 })
