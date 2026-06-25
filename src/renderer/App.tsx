@@ -1,6 +1,19 @@
 import { Result } from "@effect-atom/atom"
 import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
 import { Cause } from "effect"
+import {
+  Copy,
+  Ellipsis,
+  Hash,
+  Lock,
+  Paperclip,
+  Pencil,
+  Plus,
+  Square,
+  SquareCheck,
+  Trash2,
+  Users
+} from "lucide-react"
 import { type FormEvent, useEffect, useRef, useState } from "react"
 import type { Channel, ChannelId, ChannelMessage, ChannelMessageId } from "../shared/collab-rpc"
 import "./App.css"
@@ -182,6 +195,7 @@ export function WorkspaceChat(props: {
         channels={model.channels}
         activeChannelId={model.channel.id}
         channelName={model.channel.name}
+        channelVisibility={model.channel.visibility}
         channelIndicator={view.channelIndicator}
         channelOperationError={channelOperationError}
         createChannel={createChannel}
@@ -191,7 +205,6 @@ export function WorkspaceChat(props: {
 
       <ChannelHeader
         channelName={model.channel.name}
-        channelVisibility={model.channel.visibility}
         membersOpen={membersOpen}
         onToggleMembers={() => setMembersOpen((open) => !open)}
       />
@@ -344,6 +357,7 @@ function ChannelSidebar(props: {
   readonly channels: ReadonlyArray<Channel>
   readonly activeChannelId: ChannelId
   readonly channelName: string
+  readonly channelVisibility: Channel["visibility"]
   readonly channelIndicator: ChannelIndicator | null
   readonly channelOperationError: string | null
   readonly createChannel?: ChatDataView["createChannel"]
@@ -355,6 +369,7 @@ function ChannelSidebar(props: {
     channels,
     activeChannelId,
     channelName,
+    channelVisibility,
     channelIndicator,
     channelOperationError,
     createChannel,
@@ -366,6 +381,12 @@ function ChannelSidebar(props: {
   const [saving, setSaving] = useState(false)
   const showAgentParkedPanel = import.meta.env.VITE_AETHER_SHOW_AGENT_UI === "true"
   const canCreate = createChannel !== undefined
+  const closeCreateDialog = () => {
+    if (saving) return
+    setCreating(false)
+    setDraft("")
+    onChannelOperationError(null)
+  }
   const submitChannel = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const name = draft.trim()
@@ -382,129 +403,191 @@ function ChannelSidebar(props: {
   }
 
   return (
-    <aside className="channelSidebar" aria-label="Workspace navigation">
-      <header className="workspaceHeader">
-        <h1>{workspaceName}</h1>
-      </header>
+    <>
+      <aside className="channelSidebar" aria-label="Workspace navigation">
+        <header className="workspaceHeader">
+          <h1>{workspaceName}</h1>
+        </header>
 
-      <nav className="sidebarSection" aria-label="Channels">
-        <div className="sidebarHeaderRow">
-          <span>Channels</span>
-          <button
-            type="button"
-            aria-label="Add channel"
-            aria-expanded={creating}
-            disabled={!canCreate}
-            onClick={() => {
-              setCreating((open) => !open)
-              onChannelOperationError(null)
-            }}
-          >
-            +
-          </button>
-        </div>
-        {creating
-          ? (
-            <form className="channelCreateForm" aria-label="Create channel" onSubmit={submitChannel}>
-              <label className="srOnly" htmlFor="new-channel-name">Channel name</label>
-              <input
-                id="new-channel-name"
-                value={draft}
-                placeholder="new-channel"
-                autoFocus
-                disabled={saving}
-                onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") {
-                    event.preventDefault()
-                    setCreating(false)
-                    setDraft("")
-                    onChannelOperationError(null)
-                  }
-                }}
-              />
-              <div className="channelCreateActions">
-                <button type="button" disabled={saving} onClick={() => {
-                  setCreating(false)
-                  setDraft("")
-                  onChannelOperationError(null)
-                }}>
-                  Cancel
-                </button>
-                <button type="submit" disabled={draft.trim().length === 0 || saving}>
-                  {saving ? "Creating..." : "Create"}
-                </button>
-              </div>
-            </form>
-          )
-          : null}
-        {channelOperationError === null
-          ? null
-          : <p className="channelCreateError" role="status">{channelOperationError}</p>}
-        {channels.map((channel) => {
-          const active = channel.id === activeChannelId
-          return (
+        <nav className="sidebarSection" aria-label="Channels">
+          <div className="sidebarHeaderRow">
+            <span>Channels</span>
             <button
-              key={channel.id}
               type="button"
-              className={classNames("channelNavItem", active && "active")}
-              aria-current={active ? "page" : undefined}
+              aria-label="Add channel"
+              aria-haspopup="dialog"
+              aria-expanded={creating}
+              disabled={!canCreate}
               onClick={() => {
-                if (!active) onSelectChannel?.(channel.id)
+                setCreating(true)
+                onChannelOperationError(null)
               }}
             >
-              <span>#{channel.name}</span>
-              {active && channelIndicator !== null
-                ? (
-                  <span
-                    className={`channelIndicator ${channelIndicator}`}
-                    aria-label={channelIndicator === "mentioned" ? "Mentioned" : "Unread messages"}
-                  />
-                )
-                : null}
+              <Plus className="buttonIcon" aria-hidden="true" />
             </button>
-          )
-        })}
-        {channels.length === 0
+          </div>
+          {channels.map((channel) => {
+            const active = channel.id === activeChannelId
+            return (
+              <button
+                key={channel.id}
+                type="button"
+                className={classNames("channelNavItem", active && "active")}
+                aria-current={active ? "page" : undefined}
+                onClick={() => {
+                  if (!active) onSelectChannel?.(channel.id)
+                }}
+              >
+                <span className="channelNavMain">
+                  <span className="channelNavName">
+                    <ChannelGlyph visibility={channel.visibility} />
+                    <span className="channelNavText">{channel.name}</span>
+                  </span>
+                </span>
+                {active && channelIndicator !== null
+                  ? (
+                    <span
+                      className={`channelIndicator ${channelIndicator}`}
+                      aria-label={channelIndicator === "mentioned" ? "Mentioned" : "Unread messages"}
+                    />
+                  )
+                  : null}
+              </button>
+            )
+          })}
+          {channels.length === 0
+            ? (
+              <button type="button" className="channelNavItem active" aria-current="page">
+                <span className="channelNavMain">
+                  <span className="channelNavName">
+                    <ChannelGlyph visibility={channelVisibility} />
+                    <span className="channelNavText">{channelName}</span>
+                  </span>
+                </span>
+              </button>
+            )
+            : null}
+        </nav>
+
+        {showAgentParkedPanel
           ? (
-            <button type="button" className="channelNavItem active" aria-current="page">
-              <span>#{channelName}</span>
-            </button>
+            <section className="laterPanel" aria-label="Later integrations">
+              <strong>Agents later</strong>
+              <p>Chat stays first. The existing RPC agent plumbing is parked behind the product surface for the next phase.</p>
+            </section>
           )
           : null}
-      </nav>
+      </aside>
 
-      {showAgentParkedPanel
+      {creating
         ? (
-          <section className="laterPanel" aria-label="Later integrations">
-            <strong>Agents later</strong>
-            <p>Chat stays first. The existing RPC agent plumbing is parked behind the product surface for the next phase.</p>
-          </section>
+          <CreateChannelDialog
+            draft={draft}
+            saving={saving}
+            error={channelOperationError}
+            onDraftChange={setDraft}
+            onSubmit={submitChannel}
+            onCancel={closeCreateDialog}
+          />
         )
         : null}
-    </aside>
+    </>
+  )
+}
+
+function CreateChannelDialog(props: {
+  readonly draft: string
+  readonly saving: boolean
+  readonly error: string | null
+  readonly onDraftChange: (draft: string) => void
+  readonly onSubmit: (event: FormEvent<HTMLFormElement>) => void
+  readonly onCancel: () => void
+}) {
+  const { draft, saving, error, onDraftChange, onSubmit, onCancel } = props
+  const inputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    inputRef.current?.focus()
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onCancel()
+    }
+    window.addEventListener("keydown", closeOnEscape)
+    return () => {
+      window.removeEventListener("keydown", closeOnEscape)
+    }
+  }, [onCancel])
+
+  return (
+    <div className="dialogScrim" role="presentation" onClick={onCancel}>
+      <section
+        className="channelCreateDialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="create-channel-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <h2 id="create-channel-title">Create Channel</h2>
+        <form className="channelCreateForm" aria-label="Create channel" onSubmit={onSubmit}>
+          <label htmlFor="new-channel-name">Channel name</label>
+          <input
+            ref={inputRef}
+            id="new-channel-name"
+            value={draft}
+            placeholder="new-channel"
+            disabled={saving}
+            onChange={(event) => onDraftChange(event.target.value)}
+          />
+          {error === null
+            ? null
+            : <p className="channelCreateError" role="status">{error}</p>}
+          <div className="channelCreateActions">
+            <button type="button" disabled={saving} onClick={onCancel}>
+              Cancel
+            </button>
+            <button type="submit" disabled={draft.trim().length === 0 || saving}>
+              {saving ? "Creating..." : "Create"}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  )
+}
+
+function ChannelGlyph(props: { readonly visibility?: Channel["visibility"] }) {
+  return (
+    <span className={classNames("channelGlyph", props.visibility === "private" && "private")} aria-hidden="true">
+      <Hash className="channelHashIcon buttonIcon" />
+      {props.visibility === "private"
+        ? <Lock className="channelLockBadge" />
+        : null}
+    </span>
   )
 }
 
 function ChannelHeader(props: {
   readonly channelName: string
-  readonly channelVisibility: string
   readonly membersOpen: boolean
   readonly onToggleMembers: () => void
 }) {
-  const { channelName, channelVisibility, membersOpen, onToggleMembers } = props
+  const { channelName, membersOpen, onToggleMembers } = props
+  const membersToggleLabel = membersOpen ? "Hide members" : "Show members"
   return (
     <header className="chatHeader">
       <div className="channelTitle">
-        <span aria-hidden="true">#</span>
-        <div>
-          <h2>{channelName}</h2>
-          <p>{channelVisibility} channel</p>
-        </div>
+        <Hash className="channelHashIcon buttonIcon" aria-hidden="true" />
+        <h2>{channelName}</h2>
       </div>
       <div className="chatHeaderActions" aria-label="Channel actions">
-        <button type="button" onClick={onToggleMembers}>
-          {membersOpen ? "Hide members" : "Show members"}
+        <button
+          type="button"
+          className={classNames("membersToggle", membersOpen && "active")}
+          aria-label={membersToggleLabel}
+          aria-pressed={membersOpen}
+          title={membersToggleLabel}
+          onClick={onToggleMembers}
+        >
+          <Users className="buttonIcon" aria-hidden="true" />
         </button>
       </div>
     </header>
@@ -555,7 +638,7 @@ function ChatPane(props: {
   const messageGroups = groupConsecutiveMessages(messages)
 
   return (
-    <section className="chatPane" aria-label={`#${channelName} chat`}>
+    <section className="chatPane" aria-label={`${channelName} chat`}>
       <ol className="chatTimeline" aria-label="Channel messages" aria-busy={loading}>
         {loading
           ? <ChannelMessagesSkeleton />
@@ -564,7 +647,11 @@ function ChatPane(props: {
           ? (
             <li className="chatEmptyState">
               <strong>No messages yet</strong>
-              <span>Start the conversation in #{channelName}.</span>
+              <span className="chatEmptyChannel">
+                Start the conversation in
+                <Hash className="channelHashIcon buttonIcon" aria-hidden="true" />
+                <span>{channelName}.</span>
+              </span>
             </li>
           )
           : null}
@@ -739,7 +826,7 @@ function ChannelMessageRow(props: {
                 onOpenMenu(x, rect.bottom + MESSAGE_CONTEXT_MENU_OFFSET)
               }}
             >
-              More
+              <Ellipsis className="buttonIcon" aria-hidden="true" />
             </button>
           </div>
         )}
@@ -830,7 +917,9 @@ function MessageComposer(props: {
         ? null
         : <p className="composerError" role="status">{operationError}</p>}
       <form className={classNames("composer", disabled && "disabled")} onSubmit={onSubmit} aria-label="Channel message composer">
-        <button type="button" className="composerAddButton" aria-label="Add attachment" disabled={disabled}>+</button>
+        <button type="button" className="composerAddButton" aria-label="Add attachment" disabled={disabled}>
+          <Paperclip className="buttonIcon" aria-hidden="true" />
+        </button>
         <label className="srOnly" htmlFor="channel-message">Message</label>
         <textarea
           ref={textareaRef}
@@ -838,7 +927,7 @@ function MessageComposer(props: {
           rows={1}
           value={draft}
           disabled={disabled}
-          placeholder={`Message #${channelName}`}
+          placeholder={`Message ${channelName}`}
           onChange={(event) => onDraftChange(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
@@ -912,6 +1001,7 @@ function MessageContextMenu(props: {
   readonly onClose: () => void
 }) {
   const { message, selected, x, y, onToggle, onCopy, onEdit, onDelete, canEdit, canDelete, onClose } = props
+  const SelectIcon = selected ? Square : SquareCheck
   return (
     <div
       className="messageContextMenu"
@@ -928,7 +1018,8 @@ function MessageContextMenu(props: {
           onClose()
         }}
       >
-        {selected ? "Deselect" : "Select"}
+        <SelectIcon className="buttonIcon" aria-hidden="true" />
+        <span>{selected ? "Deselect" : "Select"}</span>
       </button>
       <button
         type="button"
@@ -938,7 +1029,8 @@ function MessageContextMenu(props: {
           onClose()
         }}
       >
-        Copy message
+        <Copy className="buttonIcon" aria-hidden="true" />
+        <span>Copy message</span>
       </button>
       {canEdit
         ? (
@@ -950,7 +1042,8 @@ function MessageContextMenu(props: {
               onClose()
             }}
           >
-            Edit message
+            <Pencil className="buttonIcon" aria-hidden="true" />
+            <span>Edit message</span>
           </button>
         )
         : null}
@@ -964,7 +1057,8 @@ function MessageContextMenu(props: {
               onClose()
             }}
           >
-            Delete message
+            <Trash2 className="buttonIcon" aria-hidden="true" />
+            <span>Delete message</span>
           </button>
         )
         : null}

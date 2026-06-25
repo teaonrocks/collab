@@ -221,15 +221,30 @@ describe("App", () => {
     )
 
     const channels = await screen.findByRole("navigation", { name: "Channels" })
-    expect(within(channels).getByRole("button", { name: "#origination" })).toBeTruthy()
-    expect(within(channels).getByRole("button", { name: "#design" })).toBeTruthy()
+    expect(within(channels).getByRole("button", { name: "origination" })).toBeTruthy()
+    expect(within(channels).getByRole("button", { name: "design" })).toBeTruthy()
 
-    fireEvent.click(within(channels).getByRole("button", { name: "#design" }))
+    fireEvent.click(within(channels).getByRole("button", { name: "design" }))
 
     expect(selections).toEqual([secondChannelId])
   })
 
-  it("creates a channel from the inline sidebar form", async () => {
+  it("uses icon-only channel visibility cues outside the channel header", async () => {
+    const { container } = render(
+      <WorkspaceChat
+        model={makeChatModel()}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+      />
+    )
+
+    const channels = await screen.findByRole("navigation", { name: "Channels" })
+
+    expect(within(channels).queryByText("private channel")).toBeNull()
+    expect(container.querySelector(".chatHeader")?.textContent).not.toContain("private channel")
+  })
+
+  it("creates a channel from the add channel dialog", async () => {
     const calls: Array<{ readonly name: string }> = []
 
     render(
@@ -252,6 +267,7 @@ describe("App", () => {
     )
 
     fireEvent.click(await screen.findByRole("button", { name: "Add channel" }))
+    expect(await screen.findByRole("dialog", { name: "Create Channel" })).toBeTruthy()
     const form = await screen.findByRole("form", { name: "Create channel" })
     fireEvent.change(within(form).getByLabelText("Channel name"), { target: { value: "product" } })
     fireEvent.submit(form)
@@ -342,7 +358,7 @@ describe("App", () => {
 
   it("sends a channel message from the bottom composer with Enter", async () => {
     const calls = renderApp(makeSnapshot())
-    const input = await screen.findByPlaceholderText("Message #origination")
+    const input = await screen.findByPlaceholderText("Message origination")
 
     fireEvent.change(input, { target: { value: "I will tighten the partner brief." } })
     fireEvent.keyDown(input, { key: "Enter", code: "Enter" })
@@ -360,7 +376,7 @@ describe("App", () => {
 
   it("keeps Shift+Enter inside the composer without sending", async () => {
     const calls = renderApp(makeSnapshot())
-    const input = await screen.findByPlaceholderText("Message #origination")
+    const input = await screen.findByPlaceholderText("Message origination")
 
     fireEvent.change(input, { target: { value: "First line" } })
     fireEvent.keyDown(input, { key: "Enter", code: "Enter", shiftKey: true })
@@ -373,7 +389,8 @@ describe("App", () => {
     renderApp(makeSnapshot([]))
 
     expect(await screen.findByText("No messages yet")).toBeTruthy()
-    expect(screen.getByText("Start the conversation in #origination.")).toBeTruthy()
+    expect(screen.getByText("Start the conversation in")).toBeTruthy()
+    expect(screen.getByText("origination.")).toBeTruthy()
   })
 
   it("groups consecutive messages from the same author under one sticky avatar", async () => {
@@ -450,7 +467,7 @@ describe("App", () => {
     expect(screen.queryByText("No messages yet")).toBeNull()
     expect(container.querySelectorAll(".channelMessageSkeleton")).toHaveLength(7)
     expect(container.querySelectorAll(".memberSkeleton")).toHaveLength(4)
-    expect((screen.getByPlaceholderText("Message #origination") as HTMLTextAreaElement).disabled).toBe(true)
+    expect((screen.getByPlaceholderText("Message origination") as HTMLTextAreaElement).disabled).toBe(true)
   })
 
   it("shows a compact send failure when an operation formatter is provided", async () => {
@@ -463,7 +480,7 @@ describe("App", () => {
       />
     )
 
-    const input = await screen.findByPlaceholderText("Message #origination")
+    const input = await screen.findByPlaceholderText("Message origination")
     fireEvent.change(input, { target: { value: "I will tighten the partner brief." } })
     fireEvent.submit(input.closest("form")!)
 
@@ -542,7 +559,7 @@ describe("App", () => {
     expect((await screen.findAllByLabelText("Deselect message from Maya Patel")).length).toBeGreaterThan(0)
   })
 
-  it("shows only the More button in the inline message actions", async () => {
+  it("shows only the icon More button in the inline message actions", async () => {
     const { container } = render(
       <WorkspaceChat
         model={makeChatModel()}
@@ -554,7 +571,10 @@ describe("App", () => {
     expect(await screen.findByText(/partner brief/)).toBeTruthy()
     const actions = container.querySelector(".messageActions")
     expect(actions).not.toBeNull()
-    expect(Array.from(actions!.querySelectorAll("button")).map((button) => button.textContent)).toEqual(["More"])
+    const buttons = Array.from(actions!.querySelectorAll("button"))
+    expect(buttons).toHaveLength(1)
+    expect(buttons[0]?.textContent).toBe("")
+    expect(screen.getByLabelText("More actions for message from Maya Patel")).toBeTruthy()
   })
 
   it("waits for delete confirmation before deleting a message", async () => {
@@ -734,10 +754,14 @@ describe("App", () => {
   it("collapses and reopens the channel members panel", async () => {
     renderApp(makeSnapshot())
 
-    fireEvent.click(await screen.findByRole("button", { name: "Hide members" }))
-    expect(screen.getByRole("button", { name: "Show members" })).toBeTruthy()
+    const hideMembersButton = await screen.findByRole("button", { name: "Hide members" })
+    expect(hideMembersButton.getAttribute("aria-pressed")).toBe("true")
+    fireEvent.click(hideMembersButton)
 
-    fireEvent.click(screen.getByRole("button", { name: "Show members" }))
-    expect(screen.getByRole("button", { name: "Hide members" })).toBeTruthy()
+    const showMembersButton = screen.getByRole("button", { name: "Show members" })
+    expect(showMembersButton.getAttribute("aria-pressed")).toBe("false")
+    fireEvent.click(showMembersButton)
+
+    expect(screen.getByRole("button", { name: "Hide members" }).getAttribute("aria-pressed")).toBe("true")
   })
 })

@@ -104,7 +104,7 @@ describe("App mutation failure handling", () => {
         </RegistryProvider>
       )
 
-      const input = await screen.findByPlaceholderText("Message #origination")
+      const input = await screen.findByPlaceholderText("Message origination")
       fireEvent.change(input, { target: { value: "Ship chat first." } })
       fireEvent.submit(input.closest("form")!)
 

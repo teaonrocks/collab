@@ -86,7 +86,7 @@ vi.mock("./App", () => ({
           {props.model.channels.map((channel) => (
             <li key={channel.id}>
               <button type="button" onClick={() => props.selectChannel?.(channel.id)}>
-                #{channel.name}
+                {channel.name}
               </button>
             </li>
           ))}
@@ -454,7 +454,7 @@ describe("ConvexDogfoodApp", () => {
 
     render(<ConvexDogfoodApp />)
 
-    fireEvent.click(await screen.findByRole("button", { name: "#design" }))
+    fireEvent.click(await screen.findByRole("button", { name: "design" }))
     expect(await screen.findByText("Design kickoff is scoped here.")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Send mock message" }))
 

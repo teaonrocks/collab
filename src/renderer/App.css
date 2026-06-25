@@ -59,6 +59,7 @@ body,
   gap: 12px;
   padding: 12px 8px;
   background: #e3e5e8;
+  border-right: 1px solid #d4d7dc;
 }
 
 .railGroup {
@@ -102,6 +103,16 @@ body,
 .workspaceRailItem.active {
   background: #ffffff;
   outline: 2px solid #d4d7dc;
+}
+
+.workspaceRailItem.active::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  width: 3px;
+  height: 24px;
+  border-radius: 0 3px 3px 0;
+  background: #313338;
 }
 
 .dmRailItem {
@@ -263,8 +274,8 @@ body,
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 0 12px;
+  gap: 0;
+  padding: 0;
 }
 
 .sidebarHeaderRow {
@@ -273,7 +284,7 @@ body,
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 0 4px;
+  padding: 0 16px;
   color: #6d6f78;
   font-size: 12px;
   font-weight: 750;
@@ -283,6 +294,8 @@ body,
 .sidebarHeaderRow button {
   width: 24px;
   height: 24px;
+  display: grid;
+  place-items: center;
   border: 0;
   border-radius: 4px;
   background: transparent;
@@ -294,6 +307,12 @@ body,
 .sidebarHeaderRow button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
+}
+
+.sidebarHeaderRow button:not(:disabled):hover,
+.sidebarHeaderRow button:not(:disabled):focus-visible {
+  background: #eceef1;
+  color: #313338;
 }
 
 .channelNavItem,
@@ -309,8 +328,14 @@ body,
 .channelCreateForm {
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  padding: 6px 4px 8px;
+  gap: 10px;
+  padding: 0;
+}
+
+.channelCreateForm label {
+  color: #4e5058;
+  font-size: 13px;
+  font-weight: 750;
 }
 
 .channelCreateForm input {
@@ -361,7 +386,7 @@ body,
 
 .channelCreateError {
   margin: 0;
-  padding: 0 4px;
+  padding: 0;
   color: #a12828;
   font-size: 12px;
   line-height: 1.35;
@@ -374,25 +399,86 @@ body,
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 7px 8px;
+  padding: 7px 20px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 0;
   background: transparent;
   color: #4e5058;
   text-align: left;
 }
 
-.channelNavItem.active,
 .channelNavItem:hover {
+  background: #eceef1;
+}
+
+.channelNavItem.active {
   background: #e3e5e8;
 }
 
-.channelNavItem span {
+.channelNavMain {
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.channelNavName {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 750;
+}
+
+.channelNavText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channelGlyph {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #6d6f78;
+}
+
+.channelGlyph.private {
+  width: 21px;
+}
+
+.channelGlyph .channelHashIcon {
+  width: 18px;
+  height: 18px;
+}
+
+.channelLockBadge {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 9px;
+  height: 9px;
+  padding: 1px;
+  border-radius: 2px;
+  background: #f2f3f5;
+  color: #6d6f78;
+  stroke-width: 4;
+}
+
+.channelNavItem:hover .channelLockBadge {
+  background: #eceef1;
+}
+
+.channelNavItem.active .channelLockBadge {
+  background: #e3e5e8;
 }
 
 .channelIndicator {
@@ -464,9 +550,13 @@ body,
   gap: 8px;
 }
 
-.channelTitle > span {
+.channelHashIcon {
+  flex: 0 0 auto;
   color: #6d6f78;
-  font-size: 22px;
+}
+
+.channelTitle > .channelHashIcon {
+  color: #6d6f78;
 }
 
 .channelTitle h2 {
@@ -480,12 +570,6 @@ body,
   letter-spacing: 0;
 }
 
-.channelTitle p {
-  margin: 3px 0 0;
-  color: #6d6f78;
-  font-size: 12px;
-}
-
 .chatHeaderActions {
   display: flex;
   align-items: center;
@@ -496,13 +580,51 @@ body,
 }
 
 .chatHeaderActions button {
+  width: 32px;
   min-height: 30px;
-  padding: 0 9px;
+  display: grid;
+  place-items: center;
+  padding: 0;
   border: 1px solid #c7ccd1;
   border-radius: 5px;
   background: #ffffff;
   color: #4e5058;
   cursor: pointer;
+}
+
+.membersToggle {
+  width: 32px;
+  min-height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #c7ccd1;
+  border-radius: 5px;
+  background: #ffffff;
+  color: #9ca3af;
+  cursor: pointer;
+}
+
+.membersToggle.active {
+  color: #313338;
+}
+
+.membersToggle:hover,
+.membersToggle:focus-visible {
+  border-color: #9ca3af;
+  background: #f2f3f5;
+  color: #6d6f78;
+}
+
+.membersToggle.active:hover,
+.membersToggle.active:focus-visible {
+  color: #313338;
+}
+
+.buttonIcon {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2;
 }
 
 .chatTimeline,
@@ -822,8 +944,11 @@ body,
 }
 
 .messageActions button {
+  width: 34px;
   min-height: 30px;
-  padding: 0 8px;
+  display: grid;
+  place-items: center;
+  padding: 0;
   border: 0;
   border-left: 1px solid #e3e5e8;
   background: #ffffff;
@@ -869,6 +994,13 @@ body,
   font-size: 13px;
 }
 
+.chatEmptyChannel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+}
+
 .composerError {
   margin: 0 0 8px;
   color: #a12828;
@@ -902,7 +1034,6 @@ body,
   background: #ffffff;
   color: #6d6f78;
   font: inherit;
-  font-size: 26px;
   line-height: 1;
   cursor: pointer;
 }
@@ -1058,6 +1189,9 @@ body,
 
 .messageContextMenu button {
   min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 0 10px;
   border: 0;
   border-bottom: 1px solid #e3e5e8;
@@ -1088,6 +1222,23 @@ body,
   border-radius: 8px;
   background: #ffffff;
   box-shadow: 0 16px 40px rgba(32, 33, 36, 0.2);
+}
+
+.channelCreateDialog {
+  width: min(380px, 100%);
+  padding: 16px;
+  border: 1px solid #c7ccd1;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 16px 40px rgba(32, 33, 36, 0.2);
+}
+
+.channelCreateDialog h2 {
+  margin: 0 0 14px;
+  color: #313338;
+  font-size: 16px;
+  line-height: 1.25;
+  letter-spacing: 0;
 }
 
 .deleteMessageDialog h2 {

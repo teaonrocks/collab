@@ -27,6 +27,7 @@
     "@workos-inc/authkit-react": "^0.16.1",
     "convex": "^1.42.0",
     "effect": "3.21.3",
+    "lucide-react": "^1.21.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
