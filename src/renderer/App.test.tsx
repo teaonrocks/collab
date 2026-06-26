@@ -1268,6 +1268,10 @@ describe("App", () => {
     expect(reaction.getAttribute("aria-pressed")).toBe("true")
     expect(reaction.textContent).toContain("2")
 
+    const message = reaction.closest(".channelMessage")
+    expect(message?.className).toContain("has-[:focus-visible]:bg-surface-muted")
+    expect(message?.className).not.toContain("focus-within:bg-surface-muted")
+
     fireEvent.click(reaction)
 
     await waitFor(() => expect(calls).toEqual([{ messageId, emoji: "👍" }]))

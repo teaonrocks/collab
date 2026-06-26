@@ -121,7 +121,7 @@ const chatTimelineClassName =
 const channelMessageGroupClassName =
   "channelMessageGroup min-w-0"
 const channelMessageClassName =
-  "channelMessage group/message relative grid min-w-0 grid-cols-[var(--message-avatar-column)_minmax(0,1fr)] items-start gap-[var(--message-column-gap)] border border-transparent bg-transparent px-[var(--message-group-x)] py-2 hover:bg-surface-muted focus-within:bg-surface-muted"
+  "channelMessage group/message relative grid min-w-0 grid-cols-[var(--message-avatar-column)_minmax(0,1fr)] items-start gap-[var(--message-column-gap)] border border-transparent bg-transparent px-[var(--message-group-x)] py-2 hover:bg-surface-muted has-[:focus-visible]:bg-surface-muted"
 const messageContentClassName =
   "messageContent min-w-0 w-full"
 const messageBodyClassName =
@@ -1230,7 +1230,7 @@ function ChannelMessageRow(props: {
           )
           : (
             <time
-              className="messageTimestamp mt-[3px] inline-flex flex-col items-center whitespace-nowrap text-[11px] leading-tight text-foreground-subtle opacity-0 group-hover/message:opacity-100 group-focus-within/message:opacity-100"
+              className="messageTimestamp mt-[3px] inline-flex flex-col items-center whitespace-nowrap text-[11px] leading-tight text-foreground-subtle opacity-0 group-hover/message:opacity-100 group-has-[:focus-visible]/message:opacity-100"
               dateTime={toIso(displayTimestamp)}
               title={edited ? `Edited ${formatTime(displayTimestamp)}` : undefined}
               aria-label={`${formatTime(displayTimestamp)}${edited ? " edited" : ""}`}
@@ -1290,7 +1290,7 @@ function ChannelMessageRow(props: {
         : (
           <div
             className={classNames(
-              "messageActions pointer-events-none absolute right-3 top-[-14px] z-10 flex overflow-hidden rounded-panel border border-border-strong bg-surface-raised opacity-0 shadow-floating group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100",
+              "messageActions pointer-events-none absolute right-3 top-[-14px] z-10 flex overflow-hidden rounded-panel border border-border-strong bg-surface-raised opacity-0 shadow-floating group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-has-[:focus-visible]/message:pointer-events-auto group-has-[:focus-visible]/message:opacity-100",
               actionsPinned && "visible pointer-events-auto opacity-100"
             )}
             aria-label={`Message actions for ${message.authorDisplayName}`}
@@ -1463,7 +1463,7 @@ function MessageReactions(props: {
             type="button"
             className={classNames(
               "messageReaction inline-flex h-6 min-w-6 items-center justify-center gap-1 rounded-control border border-border bg-surface-canvas px-1.5 text-xs leading-none text-foreground-muted hover:border-border-strong hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-              count === 0 && "opacity-0 group-hover/message:opacity-100 group-focus-within/message:opacity-100",
+              count === 0 && "opacity-0 group-hover/message:opacity-100 group-has-[:focus-visible]/message:opacity-100",
               active && "border-foreground bg-surface-muted text-foreground"
             )}
             aria-pressed={active}
