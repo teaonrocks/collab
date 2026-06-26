@@ -91,7 +91,7 @@ vi.mock("./App", () => ({
     }
   readonly createChannel?: (input: { readonly name: string }) => Promise<unknown>
   readonly selectChannel?: (channelId: string) => void
-  readonly createChannelMessage: (input: { readonly channelId: string; readonly body: string }) => Promise<unknown>
+  readonly createChannelMessage: (input: { readonly channelId: string; readonly body: string; readonly parentMessageId?: string | null }) => Promise<unknown>
   readonly editChannelMessage?: (input: { readonly channelId: string; readonly messageId: string; readonly body: string }) => Promise<unknown>
   readonly deleteChannelMessage: (input: { readonly channelId: string; readonly messageId: string }) => Promise<unknown>
   readonly toggleMessageReaction?: (input: { readonly channelId: string; readonly messageId: string; readonly emoji: string }) => Promise<unknown>
@@ -332,7 +332,57 @@ describe("dogfoodChatToChatData", () => {
       authorDisplayName: "Maya Patel",
       body: "Dogfood chat is live.",
       editedAt: null,
-      deletedAt: null
+      deletedAt: null,
+      parentMessageId: null,
+      parentMessage: null
+    })
+  })
+
+  it("adapts reply parent ids and previews", async () => {
+    const chatData = dogfoodChatToChatData({
+      workspace,
+      channels,
+      selectedChannelId: workspace.channel.id,
+      messages: [{
+        id: "message-2" as Id<"messages">,
+        channelId: "channel-1" as Id<"channels">,
+        authorUserId: "user-2" as Id<"users">,
+        authorDisplayName: "Lee Chen",
+        body: "Reply body.",
+        parentMessageId: messages[0]!.id,
+        parentMessage: {
+          id: messages[0]!.id,
+          authorDisplayName: "Maya Patel",
+          bodyPreview: "Dogfood chat is live.",
+          deleted: false
+        },
+        createdAt: 43
+      }],
+      sendMessage: mocks.sendMessage,
+      editMessage: mocks.editMessage,
+      deleteMessage: mocks.deleteMessage
+    })
+
+    expect(chatData.model.channelMessages[0]).toMatchObject({
+      parentMessageId: String(messages[0]!.id),
+      parentMessage: {
+        id: String(messages[0]!.id),
+        authorDisplayName: "Maya Patel",
+        bodyPreview: "Dogfood chat is live.",
+        deleted: false
+      }
+    })
+
+    await chatData.createChannelMessage({
+      channelId: chatData.model.channel.id,
+      body: "Reply through adapter.",
+      parentMessageId: chatData.model.channelMessages[0]!.parentMessageId
+    })
+
+    expect(mocks.sendMessage).toHaveBeenCalledWith({
+      channelId: workspace.channel.id,
+      body: "Reply through adapter.",
+      parentMessageId: messages[0]!.id
     })
   })
 
@@ -442,7 +492,11 @@ describe("dogfoodChatToChatData", () => {
       messageId: chatData.model.channelMessages[0]!.id
     })
 
-    expect(mocks.sendMessage).toHaveBeenCalledWith({ channelId: workspace.channel.id, body: "Ship chat first." })
+    expect(mocks.sendMessage).toHaveBeenCalledWith({
+      channelId: workspace.channel.id,
+      body: "Ship chat first.",
+      parentMessageId: undefined
+    })
     expect(mocks.editMessage).toHaveBeenCalledWith({
       channelId: workspace.channel.id,
       messageId: messages[0]!.id,

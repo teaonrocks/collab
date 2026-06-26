@@ -89,6 +89,13 @@ export class ChannelMessageReaction extends Schema.Class<ChannelMessageReaction>
   reactedByCurrentUser: Schema.Boolean
 }) {}
 
+export class ChannelMessageParent extends Schema.Class<ChannelMessageParent>("ChannelMessageParent")({
+  id: ChannelMessageId,
+  authorDisplayName: NonEmptyText,
+  bodyPreview: Schema.String,
+  deleted: Schema.Boolean
+}) {}
+
 export class ChannelMessage extends Schema.Class<ChannelMessage>("ChannelMessage")({
   id: ChannelMessageId,
   channelId: ChannelId,
@@ -99,6 +106,8 @@ export class ChannelMessage extends Schema.Class<ChannelMessage>("ChannelMessage
   createdAt: Schema.Number,
   editedAt: Schema.optionalWith(Schema.NullOr(Schema.Number), { default: () => null }),
   deletedAt: Schema.NullOr(Schema.Number),
+  parentMessageId: Schema.optionalWith(Schema.NullOr(ChannelMessageId), { default: () => null }),
+  parentMessage: Schema.optionalWith(Schema.NullOr(ChannelMessageParent), { default: () => null }),
   reactions: Schema.optionalWith(Schema.Array(ChannelMessageReaction), { default: () => [] })
 }) {}
 
@@ -259,7 +268,8 @@ export class CollabRpcs extends RpcGroup.make(
   Rpc.make("ChannelMessageCreate", {
     payload: {
       channelId: ChannelId,
-      body: NonEmptyText
+      body: NonEmptyText,
+      parentMessageId: Schema.optional(Schema.NullOr(ChannelMessageId))
     },
     success: ChannelMessage,
     error: Schema.Union(CollabNotFound, CollabPolicyDenied, CollabError)

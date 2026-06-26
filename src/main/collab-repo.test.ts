@@ -92,6 +92,38 @@ describe("CollabRepo (filesystem-backed MVP collaboration store)", () => {
       )
     })))
 
+  it.effect("creates replies and marks parent previews deleted when the parent is soft-deleted", () =>
+    run(Effect.gen(function*() {
+      const repo = yield* makeRepo
+      const snapshot = yield* repo.snapshot
+      const parent = snapshot.channelMessages[0]!
+
+      const reply = yield* repo.createChannelMessage({
+        channelId: snapshot.channel.id,
+        body: "I can turn this into a reply.",
+        parentMessageId: parent.id
+      })
+      yield* repo.deleteChannelMessage({
+        channelId: snapshot.channel.id,
+        messageId: parent.id
+      })
+      const afterDelete = yield* repo.snapshot
+
+      expect(reply.parentMessageId).toBe(parent.id)
+      expect(reply.parentMessage).toMatchObject({
+        id: parent.id,
+        authorDisplayName: parent.authorDisplayName,
+        bodyPreview: parent.body,
+        deleted: false
+      })
+      expect(afterDelete.channelMessages.find((message) => message.id === reply.id)?.parentMessage).toMatchObject({
+        id: parent.id,
+        authorDisplayName: parent.authorDisplayName,
+        bodyPreview: "",
+        deleted: true
+      })
+    })))
+
   it.effect("creates a private draft thread with selected context before any run exists", () =>
     run(Effect.gen(function*() {
       const repo = yield* makeRepo

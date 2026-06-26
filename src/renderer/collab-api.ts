@@ -35,6 +35,7 @@ export class CollabApi extends Context.Tag("renderer/CollabApi")<
     readonly createChannelMessage: (input: {
       readonly channelId: ChannelId
       readonly body: string
+      readonly parentMessageId?: ChannelMessageId | null
     }) => Effect.Effect<ChannelMessage, CollabNotFound | CollabPolicyDenied | CollabError | RpcClientError>
     readonly deleteChannelMessage: (input: {
       readonly channelId: ChannelId

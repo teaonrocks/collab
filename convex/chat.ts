@@ -9,6 +9,7 @@ const DOGFOOD_CHANNEL_KEY = "general"
 const DOGFOOD_CHANNEL_NAME = "general"
 const MAX_CHANNELS = 100
 const MESSAGE_REACTION_EMOJIS = ["👍", "🎉", "👀"] as const
+const MESSAGE_PARENT_PREVIEW_MAX_LENGTH = 120
 
 const messageReactionEmoji = v.union(
   v.literal(MESSAGE_REACTION_EMOJIS[0]),
@@ -666,7 +667,8 @@ export const channelMembers = query({
 export const sendMessage = mutation({
   args: {
     channelId: v.id("channels"),
-    body: v.string()
+    body: v.string(),
+    parentMessageId: v.optional(v.id("messages"))
   },
   handler: async (ctx, args) => {
     const body = args.body.trim()
@@ -675,6 +677,16 @@ export const sendMessage = mutation({
     const user = await requireAllowedCurrentUser(ctx)
 
     const channel = await requireChannelMember(ctx, { channelId: args.channelId, userId: user._id })
+    if (args.parentMessageId !== undefined) {
+      const parent = await ctx.db.get(args.parentMessageId)
+      if (
+        parent === null ||
+        parent.workspaceId !== channel.workspaceId ||
+        parent.channelId !== args.channelId
+      ) {
+        throw new Error("Parent message not found")
+      }
+    }
 
     const messageId = await ctx.db.insert("messages", {
       workspaceId: channel.workspaceId,
@@ -682,6 +694,7 @@ export const sendMessage = mutation({
       authorUserId: user._id,
       authorDisplayName: user.displayName,
       body,
+      ...(args.parentMessageId === undefined ? {} : { parentMessageId: args.parentMessageId }),
       createdAt: Date.now()
     })
 
@@ -784,6 +797,13 @@ type MessageView = {
   readonly authorUserId: Doc<"messages">["authorUserId"]
   readonly authorDisplayName: string
   readonly body: string
+  readonly parentMessageId: Id<"messages"> | null
+  readonly parentMessage: {
+    readonly id: Id<"messages">
+    readonly authorDisplayName: string
+    readonly bodyPreview: string
+    readonly deleted: boolean
+  } | null
   readonly createdAt: number
   readonly editedAt: number | null
   readonly reactions: ReadonlyArray<{
@@ -831,6 +851,12 @@ const reactionsForMessage = async (
   })).sort((left, right) => messageReactionRank(left.emoji) - messageReactionRank(right.emoji) || left.emoji.localeCompare(right.emoji))
 }
 
+const trimParentPreview = (body: string): string => {
+  const normalized = body.replace(/\s+/g, " ").trim()
+  if (normalized.length <= MESSAGE_PARENT_PREVIEW_MAX_LENGTH) return normalized
+  return `${normalized.slice(0, MESSAGE_PARENT_PREVIEW_MAX_LENGTH - 3)}...`
+}
+
 const toMessageViews = async (
   ctx: QueryCtx | MutationCtx,
   messages: ReadonlyArray<Doc<"messages">>,
@@ -838,6 +864,7 @@ const toMessageViews = async (
 ): Promise<ReadonlyArray<MessageView>> => {
   const authorNamesById = new Map<Id<"users">, string>()
   const reactionsByMessageId = new Map<Id<"messages">, Awaited<ReturnType<typeof reactionsForMessage>>>()
+  const parentsById = new Map<Id<"messages">, Doc<"messages"> | null>()
 
   for (const message of messages) {
     if (message.authorDisplayName !== undefined) continue
@@ -850,16 +877,45 @@ const toMessageViews = async (
     reactionsByMessageId.set(message._id, await reactionsForMessage(ctx, { messageId: message._id, currentUserId }))
   }
 
-  return messages.map((message) => ({
-    id: message._id,
-    channelId: message.channelId,
-    authorUserId: message.authorUserId,
-    authorDisplayName: message.authorDisplayName ?? authorNamesById.get(message.authorUserId) ?? "Unknown",
-    body: message.body,
-    createdAt: message.createdAt,
-    editedAt: message.editedAt ?? null,
-    reactions: reactionsByMessageId.get(message._id) ?? []
-  }))
+  for (const message of messages) {
+    if (message.parentMessageId === undefined || parentsById.has(message.parentMessageId)) continue
+    const parent = await ctx.db.get(message.parentMessageId)
+    parentsById.set(message.parentMessageId, parent)
+    if (parent !== null && parent.authorDisplayName === undefined && !authorNamesById.has(parent.authorUserId)) {
+      const author = await ctx.db.get(parent.authorUserId)
+      authorNamesById.set(parent.authorUserId, author?.displayName ?? "Unknown")
+    }
+  }
+
+  return messages.map((message) => {
+    const parent = message.parentMessageId === undefined ? null : parentsById.get(message.parentMessageId) ?? null
+    return {
+      id: message._id,
+      channelId: message.channelId,
+      authorUserId: message.authorUserId,
+      authorDisplayName: message.authorDisplayName ?? authorNamesById.get(message.authorUserId) ?? "Unknown",
+      body: message.body,
+      parentMessageId: message.parentMessageId ?? null,
+      parentMessage: message.parentMessageId === undefined
+        ? null
+        : parent === null
+          ? {
+            id: message.parentMessageId,
+            authorDisplayName: "Original message",
+            bodyPreview: "",
+            deleted: true
+          }
+          : {
+            id: parent._id,
+            authorDisplayName: parent.authorDisplayName ?? authorNamesById.get(parent.authorUserId) ?? "Unknown",
+            bodyPreview: trimParentPreview(parent.body),
+            deleted: false
+          },
+      createdAt: message.createdAt,
+      editedAt: message.editedAt ?? null,
+      reactions: reactionsByMessageId.get(message._id) ?? []
+    }
+  })
 }
 
 const toMessageView = async (

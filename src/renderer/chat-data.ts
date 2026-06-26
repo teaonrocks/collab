@@ -42,6 +42,7 @@ export type SelectChatChannel = (channelId: ChannelId) => void
 export type CreateChatMessage = (input: {
   readonly channelId: ChannelId
   readonly body: string
+  readonly parentMessageId?: ChannelMessageId | null
 }) => Promise<unknown>
 
 export type EditChatMessage = (input: {
@@ -88,6 +89,7 @@ export class ChatData extends Context.Tag("renderer/ChatData")<
     readonly createChannelMessage: (input: {
       readonly channelId: ChannelId
       readonly body: string
+      readonly parentMessageId?: ChannelMessageId | null
     }) => Effect.Effect<ChannelMessage, ChatEffectError>
     readonly deleteChannelMessage: (input: {
       readonly channelId: ChannelId

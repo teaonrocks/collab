@@ -55,12 +55,13 @@ export default defineSchema({
     authorUserId: v.id("users"),
     authorDisplayName: v.optional(v.string()),
     body: v.string(),
+    parentMessageId: v.optional(v.id("messages")),
     createdAt: v.number(),
     editedAt: v.optional(v.number())
   }).index("by_channel_created_at", ["channelId", "createdAt"]).index("by_workspace_created_at", [
     "workspaceId",
     "createdAt"
-  ]),
+  ]).index("by_parent_message", ["parentMessageId"]),
 
   messageReactions: defineTable({
     workspaceId: v.id("workspaces"),

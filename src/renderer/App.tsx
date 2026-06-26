@@ -10,6 +10,7 @@ import {
   Paperclip,
   Pencil,
   Plus,
+  Reply,
   Search,
   SendHorizontal,
   Square,
@@ -207,6 +208,7 @@ export function WorkspaceChat(props: {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [messageSearchQuery, setMessageSearchQuery] = useState("")
   const [activeSearchMessageId, setActiveSearchMessageId] = useState<ChannelMessageId | null>(null)
+  const [replyParent, setReplyParent] = useState<ChannelMessage | null>(null)
   const view = useMemo(() => createChannelViewModel(model), [model])
   const messageGroups = useMemo(
     () => groupConsecutiveMessages(model.channelMessages),
@@ -237,7 +239,14 @@ export function WorkspaceChat(props: {
     setChannelOperationError(null)
     setMessageSearchQuery("")
     setActiveSearchMessageId(null)
+    setReplyParent(null)
   }, [model.channel.id])
+
+  useEffect(() => {
+    if (replyParent === null) return
+    const latestParent = model.channelMessages.find((message) => message.id === replyParent.id)
+    if (latestParent === undefined || latestParent.deletedAt !== null) setReplyParent(null)
+  }, [model.channelMessages, replyParent])
 
   useEffect(() => {
     if (channelMessagesLoading) return
@@ -275,9 +284,13 @@ export function WorkspaceChat(props: {
     setOperationError(null)
     void createChannelMessage({
       channelId: model.channel.id,
-      body
+      body,
+      parentMessageId: replyParent?.id ?? null
     })
-      .then(() => setMessageDraft(""))
+      .then(() => {
+        setMessageDraft("")
+        setReplyParent(null)
+      })
       .catch((cause) => {
         if (operationErrorMessage !== undefined) setOperationError(operationErrorMessage("send", cause))
       })
@@ -347,6 +360,8 @@ export function WorkspaceChat(props: {
         onCancelEditMessage={messageInteractions.cancelEditingMessage}
         onSaveEditMessage={messageInteractions.saveEditingMessage}
         onDeleteMessage={messageInteractions.requestDeleteMessage}
+        replyParent={replyParent}
+        onCancelReply={() => setReplyParent(null)}
         onToggleReaction={toggleMessageReaction === undefined ? undefined : toggleReaction}
         mentionMembers={visibleMembers}
         mentionMembersLoading={channelMembersLoading}
@@ -374,6 +389,7 @@ export function WorkspaceChat(props: {
             onToggle={() => messageInteractions.toggleMessageSelection(menuMessage.id)}
             onCopy={() => copyMessage(menuMessage)}
             onEdit={() => messageInteractions.startEditingMessage(menuMessage)}
+            onReply={() => setReplyParent(menuMessage)}
             onDelete={() => messageInteractions.requestDeleteMessage(menuMessage.id)}
             canEdit={messageCanEdit(menuMessage)}
             canDelete={messageCanDelete(menuMessage)}
@@ -813,6 +829,8 @@ function ChatPane(props: {
   readonly onCancelEditMessage: () => void
   readonly onSaveEditMessage: () => void
   readonly onDeleteMessage: (messageId: ChannelMessageId) => void
+  readonly replyParent: ChannelMessage | null
+  readonly onCancelReply: () => void
   readonly onToggleReaction?: (message: ChannelMessage, emoji: string) => void
   readonly mentionMembers: ReadonlyArray<ChatChannelMember>
   readonly mentionMembersLoading: boolean
@@ -841,6 +859,8 @@ function ChatPane(props: {
     onCancelEditMessage,
     onSaveEditMessage,
     onDeleteMessage,
+    replyParent,
+    onCancelReply,
     onToggleReaction,
     mentionMembers,
     mentionMembersLoading,
@@ -905,6 +925,11 @@ function ChatPane(props: {
                     editingDraft={rowState.editingDraft}
                     editSaving={rowState.editSaving}
                     onOpenMenu={(x, y) => onOpenMessageMenu(message.id, x, y)}
+                    onFocusParent={(messageId) => {
+                      const row = messageRowRefs.current.get(messageId)
+                      row?.scrollIntoView?.({ block: "center" })
+                      row?.focus({ preventScroll: true })
+                    }}
                     onToggleReaction={onToggleReaction === undefined ? undefined : (emoji) => onToggleReaction(message, emoji)}
                     highlighted={activeSearchMessageId === message.id}
                     refCallback={(element) => {
@@ -927,10 +952,12 @@ function ChatPane(props: {
         draft={messageDraft}
         operationError={operationError}
         disabled={loading}
+        replyParent={replyParent}
         members={mentionMembers}
         membersLoading={mentionMembersLoading}
         onDraftChange={onMessageDraftChange}
         onSend={onSendMessage}
+        onCancelReply={onCancelReply}
       />
     </section>
   )
@@ -1058,6 +1085,7 @@ function ChannelMessageRow(props: {
   readonly editingDraft: string | null
   readonly editSaving: boolean
   readonly onOpenMenu: (x: number, y: number) => void
+  readonly onFocusParent: (messageId: ChannelMessageId) => void
   readonly onToggleReaction?: (emoji: string) => void
   readonly highlighted: boolean
   readonly refCallback: (element: HTMLElement | null) => void
@@ -1076,6 +1104,7 @@ function ChannelMessageRow(props: {
     editingDraft,
     editSaving,
     onOpenMenu,
+    onFocusParent,
     onToggleReaction,
     highlighted,
     refCallback
@@ -1172,6 +1201,11 @@ function ChannelMessageRow(props: {
             </div>
           )
           : null}
+        {message.parentMessageId !== null && message.parentMessage !== null
+          ? <MessageParentPreview parent={message.parentMessage} onFocusParent={onFocusParent} />
+          : message.parentMessageId !== null
+            ? <MessageParentUnavailable />
+            : null}
         {editing
           ? (
             <MessageEditForm
@@ -1216,6 +1250,43 @@ function ChannelMessageRow(props: {
           </div>
         )}
     </article>
+  )
+}
+
+function MessageParentPreview(props: {
+  readonly parent: NonNullable<ChannelMessage["parentMessage"]>
+  readonly onFocusParent: (messageId: ChannelMessageId) => void
+}) {
+  const { parent, onFocusParent } = props
+  if (parent.deleted) return <MessageParentUnavailable />
+  return (
+    <button
+      type="button"
+      className="replyParentPreview mt-1.5 grid max-w-[min(520px,100%)] min-w-0 grid-cols-[3px_minmax(0,1fr)] gap-2 rounded-control border border-border bg-surface-muted px-2.5 py-1.5 text-left text-xs text-foreground-muted hover:border-border-strong hover:bg-surface-muted-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      aria-label={`Reply to ${parent.authorDisplayName}: ${parent.bodyPreview}`}
+      onClick={(event) => {
+        event.stopPropagation()
+        onFocusParent(parent.id)
+      }}
+    >
+      <span className="rounded-full bg-border-strong" aria-hidden="true" />
+      <span className="min-w-0">
+        <strong className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-foreground">{parent.authorDisplayName}</strong>
+        <span className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{parent.bodyPreview}</span>
+      </span>
+    </button>
+  )
+}
+
+function MessageParentUnavailable() {
+  return (
+    <div className="replyParentPreview unavailable mt-1.5 grid max-w-[min(520px,100%)] min-w-0 grid-cols-[3px_minmax(0,1fr)] gap-2 rounded-control border border-border bg-surface-muted px-2.5 py-1.5 text-left text-xs text-foreground-subtle">
+      <span className="rounded-full bg-border-strong" aria-hidden="true" />
+      <span className="min-w-0">
+        <strong className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-foreground-muted">Original message unavailable</strong>
+        <span className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">The parent message was deleted or cannot be shown.</span>
+      </span>
+    </div>
   )
 }
 
@@ -1328,12 +1399,14 @@ function MessageComposer(props: {
   readonly draft: string
   readonly operationError: string | null
   readonly disabled: boolean
+  readonly replyParent: ChannelMessage | null
   readonly members: ReadonlyArray<ChatChannelMember>
   readonly membersLoading: boolean
   readonly onDraftChange: (draft: string) => void
   readonly onSend: () => void
+  readonly onCancelReply: () => void
 }) {
-  const { channelName, draft, operationError, disabled, members, membersLoading, onDraftChange, onSend } = props
+  const { channelName, draft, operationError, disabled, replyParent, members, membersLoading, onDraftChange, onSend, onCancelReply } = props
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const [cursorIndex, setCursorIndex] = useState(draft.length)
   const [activeMentionIndex, setActiveMentionIndex] = useState(0)
@@ -1393,6 +1466,19 @@ function MessageComposer(props: {
       {operationError === null
         ? null
         : <p className="composerError mb-2 mt-0 text-[13px] leading-[1.35] text-destructive-text" role="status">{operationError}</p>}
+      {replyParent === null
+        ? null
+        : (
+          <div className="composerReplyPreview mb-2 flex min-w-0 items-start justify-between gap-3 rounded-panel border border-border bg-surface-muted px-3 py-2 text-xs">
+            <div className="min-w-0">
+              <p className="m-0 font-bold text-foreground">Replying to {replyParent.authorDisplayName}</p>
+              <p className="m-0 mt-0.5 overflow-hidden text-ellipsis whitespace-nowrap text-foreground-muted">{replyParent.body}</p>
+            </div>
+            <Button type="button" variant="ghost" size="sm" className="h-7 shrink-0 px-2" onClick={onCancelReply}>
+              Cancel
+            </Button>
+          </div>
+        )}
       <form
         className={classNames(
           "composer grid min-h-11 grid-cols-[48px_minmax(0,1fr)_44px] items-center overflow-hidden rounded-panel border border-border bg-surface-canvas",
@@ -1581,12 +1667,13 @@ function MessageContextMenu(props: {
   readonly onToggle: () => void
   readonly onCopy: () => void
   readonly onEdit: () => void
+  readonly onReply: () => void
   readonly onDelete: () => void
   readonly canEdit: boolean
   readonly canDelete: boolean
   readonly onClose: () => void
 }) {
-  const { message, selected, x, y, onToggle, onCopy, onEdit, onDelete, canEdit, canDelete, onClose } = props
+  const { message, selected, x, y, onToggle, onCopy, onEdit, onReply, onDelete, canEdit, canDelete, onClose } = props
   const SelectIcon = selected ? Square : SquareCheck
   const itemClassName =
     "min-h-[34px] w-full justify-start rounded-none border-0 border-b border-surface-rail bg-surface-raised px-2.5 text-left text-foreground last:border-b-0 hover:bg-surface-muted"
@@ -1641,6 +1728,19 @@ function MessageContextMenu(props: {
           </Button>
         )
         : null}
+      <Button
+        type="button"
+        variant="ghost"
+        className={itemClassName}
+        role="menuitem"
+        onClick={() => {
+          onReply()
+          onClose()
+        }}
+      >
+        <Reply className={iconClassName} aria-hidden="true" />
+        <span>Reply</span>
+      </Button>
       {canDelete
         ? (
           <Button

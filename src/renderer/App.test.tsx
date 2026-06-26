@@ -8,6 +8,7 @@ import {
   Channel,
   type ChannelId,
   ChannelMessage,
+  ChannelMessageParent,
   type ChannelMessageId,
   ChannelMessageReaction,
   CollabSnapshot,
@@ -685,6 +686,87 @@ describe("App", () => {
     )
   })
 
+  it("sends a reply with the selected parent and can cancel reply mode without clearing the draft", async () => {
+    const calls = renderApp(makeSnapshot())
+    const menu = await openMessageMenu("Maya Patel")
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Reply" }))
+
+    expect(await screen.findByText("Replying to Maya Patel")).toBeTruthy()
+    expect(screen.getAllByText("The partner brief needs a concise risk summary.")).toHaveLength(2)
+
+    const input = await screen.findByPlaceholderText("Message origination")
+    fireEvent.change(input, { target: { value: "I can add that risk summary." } })
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+
+    expect(screen.queryByText("Replying to Maya Patel")).toBeNull()
+    expect((input as HTMLTextAreaElement).value).toBe("I can add that risk summary.")
+
+    const nextMenu = await openMessageMenu("Maya Patel")
+    fireEvent.click(within(nextMenu).getByRole("menuitem", { name: "Reply" }))
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" })
+
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        method: "createChannelMessage",
+        args: expect.objectContaining({
+          channelId,
+          body: "I can add that risk summary.",
+          parentMessageId: messageId
+        })
+      })
+    )
+    expect(screen.queryByText("Replying to Maya Patel")).toBeNull()
+  })
+
+  it("renders parent previews for replies and deleted parent fallbacks", async () => {
+    const replyId = "message-2" as ChannelMessageId
+    renderApp(makeSnapshot([
+      new ChannelMessage({
+        id: messageId,
+        channelId,
+        authorType: "human",
+        authorId: userId,
+        authorDisplayName: "Maya Patel",
+        body: "The partner brief needs a concise risk summary.",
+        createdAt: 2,
+        deletedAt: null
+      }),
+      new ChannelMessage({
+        id: replyId,
+        channelId,
+        authorType: "human",
+        authorId: "human-2",
+        authorDisplayName: "Lee Chen",
+        body: "I will draft it.",
+        createdAt: 3,
+        deletedAt: null,
+        parentMessageId: messageId,
+        parentMessage: new ChannelMessageParent({
+          id: messageId,
+          authorDisplayName: "Maya Patel",
+          bodyPreview: "The partner brief needs a concise risk summary.",
+          deleted: false
+        })
+      }),
+      new ChannelMessage({
+        id: "message-3" as ChannelMessageId,
+        channelId,
+        authorType: "human",
+        authorId: userId,
+        authorDisplayName: "Maya Patel",
+        body: "Thanks.",
+        createdAt: 4,
+        deletedAt: null,
+        parentMessageId: "message-missing" as ChannelMessageId,
+        parentMessage: null
+      })
+    ]))
+
+    expect(await screen.findByRole("button", { name: /Reply to Maya Patel/ })).toBeTruthy()
+    expect(screen.getByText("I will draft it.")).toBeTruthy()
+    expect(screen.getByText("Original message unavailable")).toBeTruthy()
+  })
+
   it("keeps Shift+Enter inside the composer without sending", async () => {
     const calls = renderApp(makeSnapshot())
     const input = await screen.findByPlaceholderText("Message origination")
@@ -733,7 +815,8 @@ describe("App", () => {
     await waitFor(() =>
       expect(calls).toEqual([{
         channelId,
-        body: "Thanks @Lee Chen for the pass."
+        body: "Thanks @Lee Chen for the pass.",
+        parentMessageId: null
       }])
     )
   })

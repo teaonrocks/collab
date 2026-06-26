@@ -414,6 +414,110 @@ describe("dogfood channel memberships", () => {
       .resolves.toEqual([expect.objectContaining({ id: message.id, reactions: [] })])
   })
 
+  it("creates message replies with compact parent previews", async () => {
+    const t = convexTest(schema, modules)
+    await t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: mayaIdentity.tokenIdentifier,
+      email: mayaIdentity.email,
+      displayName: mayaIdentity.name
+    })
+    await t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: leeIdentity.tokenIdentifier,
+      email: leeIdentity.email,
+      displayName: leeIdentity.name
+    })
+
+    const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design" })
+    await t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: design.id })
+    const parent = await t.withIdentity(mayaIdentity).mutation(api.chat.sendMessage, {
+      channelId: design.id,
+      body: "Parent context ".repeat(20)
+    })
+    const reply = await t.withIdentity(leeIdentity).mutation(api.chat.sendMessage, {
+      channelId: design.id,
+      body: "Replying with the next step.",
+      parentMessageId: parent.id
+    })
+
+    expect(reply).toMatchObject({
+      parentMessageId: parent.id,
+      parentMessage: {
+        id: parent.id,
+        authorDisplayName: "Maya Patel",
+        deleted: false
+      }
+    })
+    expect(reply.parentMessage?.bodyPreview.length).toBeLessThanOrEqual(120)
+
+    await expect(t.withIdentity(leeIdentity).query(api.chat.channelMessages, { channelId: design.id }))
+      .resolves.toEqual([
+        expect.objectContaining({ id: parent.id, parentMessageId: null, parentMessage: null }),
+        expect.objectContaining({
+          id: reply.id,
+          parentMessageId: parent.id,
+          parentMessage: expect.objectContaining({
+            id: parent.id,
+            authorDisplayName: "Maya Patel",
+            deleted: false
+          })
+        })
+      ])
+  })
+
+  it("rejects reply parents from another channel and keeps replies visible after parent deletion", async () => {
+    const t = convexTest(schema, modules)
+    await t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: mayaIdentity.tokenIdentifier,
+      email: mayaIdentity.email,
+      displayName: mayaIdentity.name
+    })
+    await t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: leeIdentity.tokenIdentifier,
+      email: leeIdentity.email,
+      displayName: leeIdentity.name
+    })
+
+    const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design" })
+    const product = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "product" })
+    await t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: design.id })
+    await t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: product.id })
+    const parent = await t.withIdentity(mayaIdentity).mutation(api.chat.sendMessage, {
+      channelId: design.id,
+      body: "Parent in design."
+    })
+
+    await expect(t.withIdentity(leeIdentity).mutation(api.chat.sendMessage, {
+      channelId: product.id,
+      body: "Wrong channel reply.",
+      parentMessageId: parent.id
+    })).rejects.toThrow("Parent message not found")
+
+    const reply = await t.withIdentity(leeIdentity).mutation(api.chat.sendMessage, {
+      channelId: design.id,
+      body: "Valid reply before deletion.",
+      parentMessageId: parent.id
+    })
+    await t.withIdentity(mayaIdentity).mutation(api.chat.deleteMessage, {
+      channelId: design.id,
+      messageId: parent.id
+    })
+
+    await expect(t.withIdentity(leeIdentity).query(api.chat.channelMessages, { channelId: design.id }))
+      .resolves.toEqual([
+        expect.objectContaining({
+          id: reply.id,
+          body: "Valid reply before deletion.",
+          parentMessageId: parent.id,
+          parentMessage: {
+            id: parent.id,
+            authorDisplayName: "Original message",
+            bodyPreview: "",
+            deleted: true
+          }
+        })
+      ])
+  })
+
   it("collapses duplicate reaction rows from the same user", async () => {
     const t = convexTest(schema, modules)
     await t.mutation(internal.chat.ensureViewerForIdentity, {

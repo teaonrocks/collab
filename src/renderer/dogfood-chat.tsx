@@ -9,6 +9,7 @@ import {
   type ChannelId,
   ChannelMessage,
   type ChannelMessageId,
+  ChannelMessageParent,
   ChannelMessageReaction,
   HumanAccount,
   type HumanAccountId,
@@ -67,6 +68,13 @@ export type DogfoodChannelMessageView = {
   readonly authorUserId: Id<"users">
   readonly authorDisplayName: string
   readonly body: string
+  readonly parentMessageId?: Id<"messages"> | null
+  readonly parentMessage?: {
+    readonly id: Id<"messages">
+    readonly authorDisplayName: string
+    readonly bodyPreview: string
+    readonly deleted: boolean
+  } | null
   readonly createdAt: number
   readonly editedAt?: number | null
   readonly reactions?: ReadonlyArray<{
@@ -380,7 +388,11 @@ export const dogfoodChatToChatData = (input: {
   readonly membersLoading?: boolean
   readonly createChannel?: (input: { readonly name: string; readonly visibility?: "public" | "private" }) => Promise<DogfoodChannelView>
   readonly selectChannel?: (channelId: Id<"channels">) => void
-  readonly sendMessage: (input: { readonly channelId: Id<"channels">; readonly body: string }) => Promise<unknown>
+  readonly sendMessage: (input: {
+    readonly channelId: Id<"channels">
+    readonly body: string
+    readonly parentMessageId?: Id<"messages">
+  }) => Promise<unknown>
   readonly editMessage: (input: {
     readonly channelId: Id<"channels">
     readonly messageId: Id<"messages">
@@ -466,7 +478,11 @@ export const dogfoodChatToChatData = (input: {
     selectChannel: input.selectChannel === undefined
       ? undefined
       : (channelId) => input.selectChannel?.(toConvexChannelId(channelId)),
-    createChannelMessage: ({ channelId, body }) => input.sendMessage({ channelId: toConvexChannelId(channelId), body }),
+    createChannelMessage: ({ channelId, body, parentMessageId }) => input.sendMessage({
+      channelId: toConvexChannelId(channelId),
+      body,
+      parentMessageId: parentMessageId == null ? undefined : toConvexMessageId(parentMessageId)
+    }),
     editChannelMessage: ({ channelId, messageId, body }) =>
       input.editMessage({ channelId: toConvexChannelId(channelId), messageId: toConvexMessageId(messageId), body }),
     deleteChannelMessage: ({ channelId, messageId }) =>
@@ -495,6 +511,15 @@ const toLegacyChannelMessage = (message: DogfoodChannelMessageView): ChannelMess
     createdAt: message.createdAt,
     editedAt: message.editedAt ?? null,
     deletedAt: null,
+    parentMessageId: message.parentMessageId == null ? null : toChannelMessageId(message.parentMessageId),
+    parentMessage: message.parentMessage == null
+      ? null
+      : new ChannelMessageParent({
+        id: toChannelMessageId(message.parentMessage.id),
+        authorDisplayName: message.parentMessage.authorDisplayName,
+        bodyPreview: message.parentMessage.bodyPreview,
+        deleted: message.parentMessage.deleted
+      }),
     reactions: (message.reactions ?? []).map((reaction) => new ChannelMessageReaction(reaction))
   })
 

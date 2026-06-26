@@ -17,6 +17,7 @@ import {
   type ChannelId,
   ChannelMessage,
   type ChannelMessageId,
+  ChannelMessageParent,
   CollabError,
   CollabNotFound,
   CollabPolicyDenied,
@@ -204,6 +205,14 @@ const fakeAgentResponse = (
   return `${agent.displayName} reviewed ${selectedMessages.length} message(s) from #${channel.name} by ${names}. Draft response: ${thread.prompt} Priority read: ${contextLine}`
 }
 
+const parentPreview = (message: ChannelMessage): ChannelMessageParent =>
+  new ChannelMessageParent({
+    id: message.id,
+    authorDisplayName: message.authorDisplayName,
+    bodyPreview: message.deletedAt === null ? message.body.replace(/\s+/g, " ").trim().slice(0, 120) : "",
+    deleted: message.deletedAt !== null
+  })
+
 export class CollabRepo extends Effect.Service<CollabRepo>()("main/CollabRepo", {
   dependencies: [NodeFileSystem.layer],
   effect: Effect.gen(function*() {
@@ -237,7 +246,7 @@ export class CollabRepo extends Effect.Service<CollabRepo>()("main/CollabRepo", 
       )
 
     const createChannelMessage = Effect.fn("CollabRepo.createChannelMessage")(
-      (input: { readonly channelId: ChannelId; readonly body: string }) =>
+      (input: { readonly channelId: ChannelId; readonly body: string; readonly parentMessageId?: ChannelMessageId | null }) =>
         SubscriptionRef.modifyEffect(ref, (state) =>
           Effect.gen(function*() {
             if (state.channel.id !== input.channelId) {
@@ -249,6 +258,12 @@ export class CollabRepo extends Effect.Service<CollabRepo>()("main/CollabRepo", 
                 detail: "This channel role cannot post messages."
               }))
             }
+            const parentMessage = input.parentMessageId == null
+              ? null
+              : state.channelMessages.find((item) => item.id === input.parentMessageId && item.channelId === input.channelId) ?? null
+            if (input.parentMessageId != null && parentMessage === null) {
+              return yield* Effect.fail(new CollabNotFound({ entity: "channel_message", id: input.parentMessageId }))
+            }
 
             const createdAt = yield* Clock.currentTimeMillis
             const message = new ChannelMessage({
@@ -259,7 +274,9 @@ export class CollabRepo extends Effect.Service<CollabRepo>()("main/CollabRepo", 
               authorDisplayName: state.currentUser.displayName,
               body: input.body,
               createdAt,
-              deletedAt: null
+              deletedAt: null,
+              parentMessageId: input.parentMessageId ?? null,
+              parentMessage: parentMessage === null ? null : parentPreview(parentMessage)
             })
             const next = new CollabSnapshot({
               ...state,
@@ -304,9 +321,16 @@ export class CollabRepo extends Effect.Service<CollabRepo>()("main/CollabRepo", 
 
             const deletedAt = yield* Clock.currentTimeMillis
             const deletedMessage = new ChannelMessage({ ...message, deletedAt })
+            const deletedParentPreview = parentPreview(deletedMessage)
             const next = new CollabSnapshot({
               ...state,
-              channelMessages: state.channelMessages.map((item) => item.id === input.messageId ? deletedMessage : item),
+              channelMessages: state.channelMessages.map((item) => {
+                if (item.id === input.messageId) return deletedMessage
+                if (item.parentMessageId === input.messageId) {
+                  return new ChannelMessage({ ...item, parentMessage: deletedParentPreview })
+                }
+                return item
+              }),
               auditEvents: appendAuditEvent(
                 state.auditEvents,
                 audit(state, {
