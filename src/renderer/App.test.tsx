@@ -631,7 +631,7 @@ describe("App", () => {
     expect(within(results).queryByText("Mina Rao")).toBeNull()
 
     const resultOption = within(results).getByRole("option", { name: /Risk summary needs one more pass/ })
-    expect(resultOption.getAttribute("aria-selected")).toBe("true")
+    expect(resultOption.hasAttribute("data-active")).toBe(true)
     fireEvent.click(resultOption)
 
     await waitFor(() => {
@@ -697,12 +697,12 @@ describe("App", () => {
     const listbox = await screen.findByRole("listbox", { name: "Message search matches" })
     const options = within(listbox).getAllByRole("option")
     expect(options).toHaveLength(2)
-    expect(options[0]!.getAttribute("aria-selected")).toBe("true")
-    expect(options[1]!.getAttribute("aria-selected")).toBe("false")
+    expect(options[0]!.hasAttribute("data-active")).toBe(true)
+    expect(options[1]!.hasAttribute("data-active")).toBe(false)
 
     fireEvent.keyDown(search, { key: "ArrowDown", code: "ArrowDown" })
-    expect(options[0]!.getAttribute("aria-selected")).toBe("false")
-    expect(options[1]!.getAttribute("aria-selected")).toBe("true")
+    expect(options[0]!.hasAttribute("data-active")).toBe(false)
+    expect(options[1]!.hasAttribute("data-active")).toBe(true)
 
     fireEvent.keyDown(search, { key: "Enter", code: "Enter" })
 
@@ -714,7 +714,7 @@ describe("App", () => {
     expect(options[1]!.getAttribute("aria-pressed")).toBe("true")
 
     fireEvent.keyDown(search, { key: "ArrowUp", code: "ArrowUp" })
-    expect(options[0]!.getAttribute("aria-selected")).toBe("true")
+    expect(options[0]!.hasAttribute("data-active")).toBe(true)
 
     fireEvent.keyDown(search, { key: "Enter", code: "Enter" })
 
@@ -781,7 +781,7 @@ describe("App", () => {
     expect(search).toBe(document.activeElement)
 
     fireEvent.keyDown(search, { key: "ArrowDown", code: "ArrowDown" })
-    expect(options[1]!.getAttribute("aria-selected")).toBe("true")
+    expect(options[1]!.hasAttribute("data-active")).toBe(true)
   })
 
   it("shows message search empty and error states", async () => {

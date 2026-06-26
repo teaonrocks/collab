@@ -20,7 +20,7 @@ import {
   X,
   Users
 } from "lucide-react"
-import { type FormEvent, type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react"
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react"
 import type { Channel, ChannelId, ChannelMessage, ChannelMessageId } from "../shared/collab-rpc"
 import "./App.css"
 import type {
@@ -42,6 +42,11 @@ import { cn } from "./lib/cn"
 import {
   Avatar,
   Button,
+  Combobox,
+  ComboboxContent,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -1085,14 +1090,15 @@ function ChannelMessageSearch(props: {
 }) {
   const { channelName, open, query, state, activeSearchMessageId, disabled, onQueryChange, onSelectResult } = props
   const inputRef = useRef<HTMLInputElement>(null)
-  const resultRefs = useRef(new Map<number, HTMLButtonElement>())
+  const activeResultIndexRef = useRef(0)
   const [activeResultIndex, setActiveResultIndex] = useState(0)
   const showResults = query.trim().length > 0
   const navigableResults = state.status === "results" ? state.results : []
-  const hasNavigableResults = showResults && navigableResults.length > 0
-  const activeResultId = hasNavigableResults
-    ? navigableResults[activeResultIndex]?.message.id ?? navigableResults[0]?.message.id
-    : undefined
+  const selectedResult = activeSearchMessageId === null
+    ? null
+    : navigableResults.find((result) => result.message.id === activeSearchMessageId) ?? null
+  const activeResult = navigableResults[activeResultIndex] ?? navigableResults[0]
+  const activeResultId = activeResult === undefined ? undefined : `channel-message-search-option-${activeResult.message.id}`
 
   useEffect(() => {
     if (!open) return
@@ -1100,18 +1106,26 @@ function ChannelMessageSearch(props: {
   }, [open])
 
   useEffect(() => {
+    activeResultIndexRef.current = 0
     setActiveResultIndex(0)
   }, [query])
 
   useEffect(() => {
     if (state.status !== "results") return
-    setActiveResultIndex((index) => Math.min(index, Math.max(0, state.results.length - 1)))
+    setActiveResultIndex((index) => {
+      const nextIndex = Math.min(index, Math.max(0, state.results.length - 1))
+      activeResultIndexRef.current = nextIndex
+      return nextIndex
+    })
   }, [state])
 
   useEffect(() => {
     if (activeSearchMessageId === null || state.status !== "results") return
     const index = state.results.findIndex((result) => result.message.id === activeSearchMessageId)
-    if (index >= 0) setActiveResultIndex(index)
+    if (index >= 0) {
+      activeResultIndexRef.current = index
+      setActiveResultIndex(index)
+    }
   }, [activeSearchMessageId, state])
 
   useEffect(() => {
@@ -1119,70 +1133,85 @@ function ChannelMessageSearch(props: {
     inputRef.current?.focus()
   }, [activeSearchMessageId, open])
 
-  useEffect(() => {
-    if (!hasNavigableResults) return
-    resultRefs.current.get(activeResultIndex)?.scrollIntoView({ block: "nearest" })
-  }, [activeResultIndex, hasNavigableResults])
-
-  const handleInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (hasNavigableResults && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
-      event.preventDefault()
-      setActiveResultIndex((index) =>
-        event.key === "ArrowDown"
-          ? (index + 1) % navigableResults.length
-          : (index - 1 + navigableResults.length) % navigableResults.length
-      )
-      return
-    }
-    if (hasNavigableResults && event.key === "Enter") {
-      event.preventDefault()
-      const result = navigableResults[activeResultIndex]
-      if (result !== undefined) onSelectResult(result.message.id)
-    }
+  const selectSearchResult = (result: ChannelMessageSearchResult) => {
+    onSelectResult(result.message.id)
+    window.setTimeout(() => inputRef.current?.focus(), 0)
   }
 
   return (
-    <div className={classNames("channelMessageSearch relative z-30 row-start-1 border-b border-border bg-surface-canvas px-4 py-2.5", !open && "hidden")}>
-      <label className="sr-only" htmlFor="channel-message-search">Search messages</label>
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-foreground-subtle" aria-hidden="true" />
-        <Input
-          ref={inputRef}
-          id="channel-message-search"
-          className="h-9 pl-9 text-sm"
-          value={query}
-          disabled={disabled}
-          placeholder={`Search ${channelName}`}
-          role="combobox"
-          aria-autocomplete="list"
-          aria-expanded={hasNavigableResults}
-          aria-controls="channel-message-search-results"
-          aria-activedescendant={activeResultId === undefined ? undefined : `channel-message-search-option-${activeResultId}`}
-          aria-invalid={state.status === "error"}
-          onChange={(event) => onQueryChange(event.target.value)}
-          onKeyDown={handleInputKeyDown}
-        />
-        <div
-          id="channel-message-search-results"
-          className={classNames(
-            "messageSearchResults absolute inset-x-0 top-[calc(100%+8px)] z-20 overflow-hidden rounded-panel border border-border-strong bg-surface-raised px-2 py-2 shadow-popover",
-            !showResults && "sr-only"
-          )}
-          role={showResults ? "region" : undefined}
-          aria-label="Message search results"
-        >
-          {renderChannelMessageSearchState(
-            channelName,
-            state,
-            activeSearchMessageId,
-            activeResultIndex,
-            resultRefs,
-            setActiveResultIndex,
-            onSelectResult
-          )}
+    <Combobox<ChannelMessageSearchResult>
+      items={navigableResults}
+      value={selectedResult}
+      inputValue={query}
+      open={open && showResults}
+      disabled={disabled}
+      filter={null}
+      autoHighlight={false}
+      highlightItemOnHover={false}
+      itemToStringLabel={(result) => result.bodyPreview}
+      itemToStringValue={(result) => result.message.id}
+      isItemEqualToValue={(item, value) => item.message.id === value.message.id}
+      onInputValueChange={(value, eventDetails) => {
+        if (eventDetails.reason === "input-change" || eventDetails.reason === "input-clear") onQueryChange(value)
+      }}
+    >
+      <div className={classNames("channelMessageSearch relative z-30 row-start-1 border-b border-border bg-surface-canvas px-4 py-2.5", !open && "hidden")}>
+        <label className="sr-only" htmlFor="channel-message-search">Search messages</label>
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-foreground-subtle" aria-hidden="true" />
+          <ComboboxInput
+            ref={inputRef}
+            id="channel-message-search"
+            className="h-9 pl-9 text-sm"
+            placeholder={`Search ${channelName}`}
+            aria-controls="channel-message-search-results"
+            aria-activedescendant={activeResultId}
+            aria-invalid={state.status === "error"}
+            onKeyDownCapture={(event) => {
+              if (navigableResults.length === 0) return
+              if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                event.preventDefault()
+                event.stopPropagation()
+                setActiveResultIndex((index) => {
+                  const nextIndex = event.key === "ArrowDown"
+                    ? (index + 1) % navigableResults.length
+                    : (index - 1 + navigableResults.length) % navigableResults.length
+                  activeResultIndexRef.current = nextIndex
+                  return nextIndex
+                })
+                return
+              }
+              if (event.key !== "Enter") return
+              const selectedResult = navigableResults[activeResultIndexRef.current] ?? activeResult
+              if (selectedResult === undefined) return
+              event.preventDefault()
+              event.stopPropagation()
+              selectSearchResult(selectedResult)
+            }}
+          />
+          <ComboboxContent
+            id="channel-message-search-results"
+            className="messageSearchResults w-[min(680px,calc(100vw-120px))]"
+            role={showResults ? "region" : undefined}
+            aria-label="Message search results"
+            initialFocus={false}
+            finalFocus={false}
+          >
+            {renderChannelMessageSearchState(
+              channelName,
+              state,
+              activeSearchMessageId,
+              activeResultIndex,
+              (index) => {
+                activeResultIndexRef.current = index
+                setActiveResultIndex(index)
+              },
+              selectSearchResult
+            )}
+          </ComboboxContent>
         </div>
       </div>
-    </div>
+    </Combobox>
   )
 }
 
@@ -1191,9 +1220,8 @@ function renderChannelMessageSearchState(
   state: ChannelMessageSearchState,
   activeSearchMessageId: ChannelMessageId | null,
   activeResultIndex: number,
-  resultRefs: { readonly current: Map<number, HTMLButtonElement> },
   onActiveResultIndexChange: (index: number) => void,
-  onSelectResult: (messageId: ChannelMessageId) => void
+  onSelectResult: (result: ChannelMessageSearchResult) => void
 ) {
   if (state.status === "idle") {
     return <p className="m-0 text-xs text-foreground-subtle">Search the current channel.</p>
@@ -1205,33 +1233,25 @@ function renderChannelMessageSearchState(
     return <p className="m-0 text-xs text-foreground-subtle" role="status">No matching messages.</p>
   }
   return (
-    <ol className="m-0 flex max-h-[220px] list-none flex-col gap-1 overflow-auto p-0" role="listbox" aria-label="Message search matches">
+    <ComboboxList className="messageSearchMatches" aria-label="Message search matches">
       {state.results.map((result, index) => {
         const highlighted = activeSearchMessageId === result.message.id
         const active = index === activeResultIndex
         return (
-        <li key={result.message.id}>
-          <button
-            ref={(element) => {
-              if (element === null) {
-                resultRefs.current.delete(index)
-              } else {
-                resultRefs.current.set(index, element)
-              }
-            }}
+          <ComboboxItem
+            key={result.message.id}
             id={`channel-message-search-option-${result.message.id}`}
-            type="button"
+            value={result}
             className={classNames(
               "messageSearchResult grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-3 rounded-control border border-transparent bg-transparent px-2 py-1.5 text-left hover:border-border hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
               active && "border-border bg-surface-muted",
               highlighted && "border-border-strong"
             )}
-            role="option"
+            data-active={active ? "" : undefined}
             aria-selected={active}
             aria-pressed={highlighted}
             onMouseEnter={() => onActiveResultIndexChange(index)}
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => onSelectResult(result.message.id)}
+            onClick={() => onSelectResult(result)}
           >
             <span className="min-w-0">
               <span className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs font-bold text-foreground">
@@ -1245,11 +1265,10 @@ function renderChannelMessageSearchState(
               <time dateTime={toIso(result.message.createdAt)}>{formatTime(result.message.createdAt)}</time>
               <span>#{channelName}</span>
             </span>
-          </button>
-        </li>
+          </ComboboxItem>
         )
       })}
-    </ol>
+    </ComboboxList>
   )
 }
 
