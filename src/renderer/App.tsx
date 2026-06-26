@@ -1678,101 +1678,103 @@ function MessageComposer(props: {
               : null}
           </div>
         )}
-      <form
-        className={classNames(
-          "composer grid min-h-11 grid-cols-[48px_minmax(0,1fr)_44px] items-center overflow-hidden rounded-panel border border-border bg-surface-canvas",
-          disabled && "disabled bg-surface-sunken"
-        )}
-        onSubmit={onSubmit}
-        aria-label="Channel message composer"
-      >
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="composerAddButton h-full min-h-11 w-12 rounded-none border-0 border-r border-border bg-surface-canvas text-foreground-subtle hover:bg-surface-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
-          aria-label="Add attachment"
-          disabled={!canAttach}
-          onClick={() => fileInputRef.current?.click()}
+      <div className="relative">
+        {mentionMenuOpen
+          ? (
+            <MentionSuggestionMenu
+              members={mentionSuggestions}
+              loading={membersLoading}
+              activeIndex={activeMentionIndex}
+              query={mentionRequest.query}
+              onSelect={selectMention}
+              onActiveIndexChange={setActiveMentionIndex}
+            />
+          )
+          : null}
+        <form
+          className={classNames(
+            "composer grid min-h-11 grid-cols-[48px_minmax(0,1fr)_44px] items-center overflow-hidden rounded-panel border border-border bg-surface-canvas",
+            disabled && "disabled bg-surface-sunken"
+          )}
+          onSubmit={onSubmit}
+          aria-label="Channel message composer"
         >
-          <Paperclip className={iconClassName} aria-hidden="true" />
-        </Button>
-        <input
-          ref={fileInputRef}
-          className="sr-only"
-          type="file"
-          multiple
-          tabIndex={-1}
-          onChange={(event) => {
-            const files = Array.from(event.currentTarget.files ?? [])
-            event.currentTarget.value = ""
-            onChooseAttachments(files)
-          }}
-        />
-        <label className="sr-only" htmlFor="channel-message">Message</label>
-        <div className="relative min-w-0">
-          {mentionMenuOpen
-            ? (
-              <MentionSuggestionMenu
-                members={mentionSuggestions}
-                loading={membersLoading}
-                activeIndex={activeMentionIndex}
-                query={mentionRequest.query}
-                onSelect={selectMention}
-                onActiveIndexChange={setActiveMentionIndex}
-              />
-            )
-            : null}
-          <Textarea
-            ref={textareaRef}
-            id="channel-message"
-            rows={1}
-            value={draft}
-            disabled={disabled}
-            className="block max-h-[140px] min-h-11 resize-none overflow-hidden rounded-none border-0 bg-surface-canvas px-3 py-3 text-sm leading-5 focus-visible:border-transparent focus-visible:ring-0 focus-visible:ring-offset-0 disabled:bg-surface-sunken"
-            placeholder={`Message ${channelName}`}
-            onChange={(event) => updateDraft(event.target.value, event.currentTarget.selectionStart ?? event.target.value.length)}
-            onClick={(event) => setCursorIndex(event.currentTarget.selectionStart ?? draft.length)}
-            onKeyUp={(event) => setCursorIndex(event.currentTarget.selectionStart ?? draft.length)}
-            onKeyDown={(event) => {
-              if (mentionMenuOpen && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
-                event.preventDefault()
-                if (mentionSuggestions.length === 0) return
-                setActiveMentionIndex((index) =>
-                  event.key === "ArrowDown"
-                    ? (index + 1) % mentionSuggestions.length
-                    : (index - 1 + mentionSuggestions.length) % mentionSuggestions.length
-                )
-                return
-              }
-              if (mentionMenuOpen && event.key === "Escape") {
-                event.preventDefault()
-                setDismissedMentionKey(mentionKey)
-                return
-              }
-              if (mentionMenuOpen && (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey))) {
-                event.preventDefault()
-                if (activeMention !== null) selectMention(activeMention)
-                return
-              }
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault()
-                if (canSend) onSend()
-              }
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="composerAddButton h-full min-h-11 w-12 rounded-none border-0 border-r border-border bg-surface-canvas text-foreground-subtle hover:bg-surface-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
+            aria-label="Add attachment"
+            disabled={!canAttach}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Paperclip className={iconClassName} aria-hidden="true" />
+          </Button>
+          <input
+            ref={fileInputRef}
+            className="sr-only"
+            type="file"
+            multiple
+            tabIndex={-1}
+            onChange={(event) => {
+              const files = Array.from(event.currentTarget.files ?? [])
+              event.currentTarget.value = ""
+              onChooseAttachments(files)
             }}
           />
-        </div>
-        <Button
-          type="submit"
-          variant="ghost"
-          size="icon"
-          className="h-full min-h-11 w-11 rounded-none border-0 border-l border-border text-foreground-muted hover:bg-surface-muted hover:text-foreground"
-          aria-label="Send message"
-          disabled={!canSend}
-        >
-          <SendHorizontal className={iconClassName} aria-hidden="true" />
-        </Button>
-      </form>
+          <label className="sr-only" htmlFor="channel-message">Message</label>
+          <div className="min-w-0">
+            <Textarea
+              ref={textareaRef}
+              id="channel-message"
+              rows={1}
+              value={draft}
+              disabled={disabled}
+              className="block max-h-[140px] min-h-11 resize-none overflow-hidden rounded-none border-0 bg-surface-canvas px-3 py-3 text-sm leading-5 focus-visible:border-transparent focus-visible:ring-0 focus-visible:ring-offset-0 disabled:bg-surface-sunken"
+              placeholder={`Message ${channelName}`}
+              onChange={(event) => updateDraft(event.target.value, event.currentTarget.selectionStart ?? event.target.value.length)}
+              onClick={(event) => setCursorIndex(event.currentTarget.selectionStart ?? draft.length)}
+              onKeyUp={(event) => setCursorIndex(event.currentTarget.selectionStart ?? draft.length)}
+              onKeyDown={(event) => {
+                if (mentionMenuOpen && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+                  event.preventDefault()
+                  if (mentionSuggestions.length === 0) return
+                  setActiveMentionIndex((index) =>
+                    event.key === "ArrowDown"
+                      ? (index + 1) % mentionSuggestions.length
+                      : (index - 1 + mentionSuggestions.length) % mentionSuggestions.length
+                  )
+                  return
+                }
+                if (mentionMenuOpen && event.key === "Escape") {
+                  event.preventDefault()
+                  setDismissedMentionKey(mentionKey)
+                  return
+                }
+                if (mentionMenuOpen && (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey))) {
+                  event.preventDefault()
+                  if (activeMention !== null) selectMention(activeMention)
+                  return
+                }
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault()
+                  if (canSend) onSend()
+                }
+              }}
+            />
+          </div>
+          <Button
+            type="submit"
+            variant="ghost"
+            size="icon"
+            className="h-full min-h-11 w-11 rounded-none border-0 border-l border-border text-foreground-muted hover:bg-surface-muted hover:text-foreground"
+            aria-label="Send message"
+            disabled={!canSend}
+          >
+            <SendHorizontal className={iconClassName} aria-hidden="true" />
+          </Button>
+        </form>
+      </div>
     </div>
   )
 }
@@ -1794,7 +1796,7 @@ function MentionSuggestionMenu(props: {
 
   return (
     <div
-      className="mentionMenu absolute bottom-[calc(100%+6px)] left-0 z-20 w-[min(320px,calc(100vw-120px))] overflow-hidden rounded-panel border border-border-strong bg-surface-raised py-1 shadow-popover"
+      className="mentionMenu absolute bottom-[calc(100%+6px)] left-12 z-20 w-[min(320px,calc(100vw-120px))] overflow-hidden rounded-panel border border-border-strong bg-surface-raised py-1 shadow-popover"
       role="listbox"
       aria-label="Mention suggestions"
     >

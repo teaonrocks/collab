@@ -843,6 +843,8 @@ describe("App", () => {
     fireEvent.change(input, { target: { value: "Thanks @le" } })
 
     const suggestions = await screen.findByRole("listbox", { name: "Mention suggestions" })
+    const composer = screen.getByRole("form", { name: "Channel message composer" })
+    expect(composer.contains(suggestions)).toBe(false)
     expect(within(suggestions).getByRole("option", { name: "Lee Chen" })).toBeTruthy()
     expect(within(suggestions).queryByRole("option", { name: "Mina Rao" })).toBeNull()
 
