@@ -86,5 +86,22 @@ export default defineSchema({
   ]).index("by_channel_message", [
     "channelId",
     "messageId"
-  ])
+  ]),
+
+  dogfoodAllowlistEntries: defineTable({
+    email: v.string(),
+    active: v.boolean(),
+    createdAt: v.number(),
+    createdBy: v.string(),
+    updatedAt: v.number(),
+    updatedBy: v.string()
+  }).index("by_email", ["email"]).index("by_active", ["active"]),
+
+  dogfoodAllowlistAudit: defineTable({
+    email: v.string(),
+    action: v.union(v.literal("add"), v.literal("remove")),
+    operator: v.string(),
+    reason: v.optional(v.string()),
+    createdAt: v.number()
+  }).index("by_email", ["email"]).index("by_created_at", ["createdAt"])
 })

@@ -31,11 +31,20 @@ changed deliberately.
 Packaged and preview builds use the same native callback value. The tested deep-link behavior is
 documented in [`docs/packaged-authkit-callback.md`](packaged-authkit-callback.md).
 
-The dogfood allowlist stays in Convex environment state, not in the renderer bundle:
+The dogfood allowlist stays in server-side Convex state, not in the renderer bundle:
 
 ```sh
-pnpm convex env set AETHER_ALLOWED_EMAILS "you@example.com,friend@example.com"
+pnpm convex env set AETHER_ALLOWLIST_OPERATOR_KEY "<shared-operator-key>"
+pnpm convex run chat:updateDogfoodAllowlist '{
+  "operatorKey": "<shared-operator-key>",
+  "email": "friend@example.com",
+  "action": "add",
+  "reason": "initial dogfood invite"
+}'
 ```
+
+`AETHER_ALLOWED_EMAILS` is still supported as a bootstrap list, but regular add/remove operations
+should use the audited Convex flow in [`docs/dogfood-allowlist.md`](dogfood-allowlist.md).
 
 Use `docs/dogfood-smoke-test.md` after setup to confirm sign-in, allowlist behavior, realtime sends,
 mutation failures, and sign-out.

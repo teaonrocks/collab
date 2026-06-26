@@ -10,6 +10,7 @@ const DOGFOOD_CHANNEL_NAME = "general"
 const MAX_CHANNELS = 100
 const MAX_MESSAGE_ATTACHMENTS = 4
 const MAX_ATTACHMENT_NAME_LENGTH = 180
+const MAX_ALLOWLIST_REASON_LENGTH = 240
 const MESSAGE_REACTION_EMOJIS = ["👍", "🎉", "👀"] as const
 const MESSAGE_PARENT_PREVIEW_MAX_LENGTH = 120
 
@@ -36,13 +37,23 @@ const stringClaim = (identity: ViewerIdentity, key: string): string | undefined 
   return typeof value === "string" ? value : undefined
 }
 
-const allowedEmails = (): ReadonlySet<string> =>
+const bootstrapAllowedEmails = (): ReadonlySet<string> =>
   new Set(
     (process.env.AETHER_ALLOWED_EMAILS ?? "")
       .split(",")
       .map(normalizeEmail)
       .filter((email) => email.length > 0)
   )
+
+const requireAllowlistOperatorKey = (operatorKey: string): void => {
+  const expected = process.env.AETHER_ALLOWLIST_OPERATOR_KEY
+  if (expected === undefined || expected.trim().length === 0) {
+    throw new Error("Dogfood allowlist operator key is not configured")
+  }
+  if (operatorKey !== expected) {
+    throw new Error("Dogfood allowlist operator key is invalid")
+  }
+}
 
 const emailFromIdentity = (identity: ViewerIdentity): string | undefined =>
   identity.email ??
@@ -59,6 +70,11 @@ const attachmentName = (name: string): string => {
 
 const attachmentKind = (contentType: string): "file" | "image" =>
   contentType.toLowerCase().startsWith("image/") ? "image" : "file"
+
+const allowlistReason = (reason: string | undefined): string | undefined => {
+  const normalized = reason?.trim().replace(/\s+/g, " ").slice(0, MAX_ALLOWLIST_REASON_LENGTH)
+  return normalized === undefined || normalized.length === 0 ? undefined : normalized
+}
 
 const normalizeChannelName = (name: string): string =>
   name.trim().replace(/^#+/, "").replace(/\s+/g, "-").toLowerCase()
@@ -101,22 +117,32 @@ const requireIdentity = async (ctx: QueryCtx | MutationCtx | ActionCtx): Promise
   return identity
 }
 
-const requireAllowedEmail = (rawEmail: string): string => {
+const isEmailAllowlisted = async (ctx: QueryCtx | MutationCtx, email: string): Promise<boolean> => {
+  const entry = await ctx.db
+    .query("dogfoodAllowlistEntries")
+    .withIndex("by_email", (q) => q.eq("email", email))
+    .unique()
+  if (entry !== null) return entry.active
+  return bootstrapAllowedEmails().has(email)
+}
+
+const requireAllowedEmail = async (ctx: QueryCtx | MutationCtx, rawEmail: string): Promise<string> => {
   if (rawEmail === undefined || rawEmail.trim().length === 0) {
     throw new Error("Authenticated user is missing an email address")
   }
 
   const email = normalizeEmail(rawEmail)
-  if (!allowedEmails().has(email)) {
+  if (!(await isEmailAllowlisted(ctx, email))) {
     throw new Error("This email is not on the Aether dogfood allowlist")
   }
   return email
 }
 
-const requireAllowedIdentityEmail = (identity: ViewerIdentity): string => {
-  const rawEmail = emailFromIdentity(identity)
-  if (rawEmail === undefined) throw new Error("Authenticated user is missing an email address")
-  return requireAllowedEmail(rawEmail)
+const normalizeViewerEmail = (rawEmail: string | undefined): string => {
+  if (rawEmail === undefined || rawEmail.trim().length === 0) {
+    throw new Error("Authenticated user is missing an email address")
+  }
+  return normalizeEmail(rawEmail)
 }
 
 const getUserByTokenIdentifier = (ctx: QueryCtx | MutationCtx, tokenIdentifier: string) =>
@@ -129,7 +155,7 @@ const requireAllowedCurrentUser = async (ctx: QueryCtx | MutationCtx): Promise<D
   const identity = await requireIdentity(ctx)
   const user = await getUserByTokenIdentifier(ctx, identity.tokenIdentifier)
   if (user === null) throw new Error("Current user has not been initialized")
-  requireAllowedEmail(user.email)
+  await requireAllowedEmail(ctx, user.email)
   return user
 }
 
@@ -165,7 +191,7 @@ const withDogfoodDiagnostics = async <Result>(
 const resolveWorkOsViewer = async (identity: ViewerIdentity): Promise<{ readonly email: string; readonly displayName: string }> => {
   const identityEmail = emailFromIdentity(identity)
   if (identityEmail !== undefined && identityEmail.trim().length > 0) {
-    const email = requireAllowedEmail(identityEmail)
+    const email = normalizeViewerEmail(identityEmail)
     return { email, displayName: displayNameFromIdentity(identity, email) }
   }
 
@@ -184,7 +210,7 @@ const resolveWorkOsViewer = async (identity: ViewerIdentity): Promise<{ readonly
   const body = await response.json() as unknown
   const rawEmail = workOsField(body, "email")
   if (rawEmail === undefined) throw new Error("WorkOS user profile is missing an email address")
-  const email = requireAllowedEmail(rawEmail)
+  const email = normalizeViewerEmail(rawEmail)
   return { email, displayName: workOsField(body, "name") ?? displayNameFromEmail(email) }
 }
 
@@ -474,6 +500,56 @@ export const generateAttachmentUploadUrl = mutation({
   })
 })
 
+export const updateDogfoodAllowlist = mutation({
+  args: {
+    operatorKey: v.string(),
+    email: v.string(),
+    action: v.union(v.literal("add"), v.literal("remove")),
+    reason: v.optional(v.string())
+  },
+  handler: (ctx, args) => withDogfoodDiagnostics("updateDogfoodAllowlist", {
+    action: args.action,
+    reasonLength: args.reason?.trim().length ?? 0
+  }, async () => {
+    requireAllowlistOperatorKey(args.operatorKey)
+    const email = normalizeViewerEmail(args.email)
+    const now = Date.now()
+    const operator = "operator-key"
+    const reason = allowlistReason(args.reason)
+    const existing = await ctx.db
+      .query("dogfoodAllowlistEntries")
+      .withIndex("by_email", (q) => q.eq("email", email))
+      .unique()
+
+    if (existing === null) {
+      await ctx.db.insert("dogfoodAllowlistEntries", {
+        email,
+        active: args.action === "add",
+        createdAt: now,
+        createdBy: operator,
+        updatedAt: now,
+        updatedBy: operator
+      })
+    } else {
+      await ctx.db.patch(existing._id, {
+        active: args.action === "add",
+        updatedAt: now,
+        updatedBy: operator
+      })
+    }
+
+    await ctx.db.insert("dogfoodAllowlistAudit", {
+      email,
+      action: args.action,
+      operator,
+      ...(reason === undefined ? {} : { reason }),
+      createdAt: now
+    })
+
+    return { email, active: args.action === "add" }
+  })
+})
+
 export const ensureViewer = action({
   args: {},
   handler: (ctx) => withDogfoodDiagnostics("ensureViewer", {}, async () => {
@@ -502,12 +578,13 @@ export const ensureViewerForIdentity = internalMutation({
   },
   handler: async (ctx, args) => {
     const now = Date.now()
+    const email = await requireAllowedEmail(ctx, args.email)
     const existingUser =
-      (await getUserByTokenIdentifier(ctx, args.tokenIdentifier)) ?? (await getUserByEmail(ctx, args.email))
+      (await getUserByTokenIdentifier(ctx, args.tokenIdentifier)) ?? (await getUserByEmail(ctx, email))
 
     const userId = existingUser?._id ?? (await ctx.db.insert("users", {
       tokenIdentifier: args.tokenIdentifier,
-      email: args.email,
+      email,
       displayName: args.displayName,
       createdAt: now,
       updatedAt: now
@@ -516,12 +593,12 @@ export const ensureViewerForIdentity = internalMutation({
     if (
       existingUser !== null &&
       (existingUser.tokenIdentifier !== args.tokenIdentifier ||
-        existingUser.email !== args.email ||
+        existingUser.email !== email ||
         existingUser.displayName !== args.displayName)
     ) {
       await ctx.db.patch(existingUser._id, {
         tokenIdentifier: args.tokenIdentifier,
-        email: args.email,
+        email,
         displayName: args.displayName,
         updatedAt: now
       })

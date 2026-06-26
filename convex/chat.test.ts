@@ -21,6 +21,7 @@ const leeIdentity = {
 
 beforeEach(() => {
   vi.stubEnv("AETHER_ALLOWED_EMAILS", "maya@example.com,lee@example.com")
+  vi.stubEnv("AETHER_ALLOWLIST_OPERATOR_KEY", "test-operator-key")
 })
 
 afterEach(() => {
@@ -29,6 +30,118 @@ afterEach(() => {
 })
 
 describe("dogfood channel memberships", () => {
+  it("adds dogfood allowlist entries through an operator-key protected flow and audits the change", async () => {
+    const t = convexTest(schema, modules)
+    const diegoIdentity = {
+      tokenIdentifier: "https://issuer.example|diego",
+      email: "DIEGO@EXAMPLE.COM",
+      name: "Diego Rivera"
+    }
+
+    await expect(t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: diegoIdentity.tokenIdentifier,
+      email: diegoIdentity.email,
+      displayName: diegoIdentity.name
+    })).rejects.toThrow("This email is not on the Aether dogfood allowlist")
+
+    await expect(t.mutation(api.chat.updateDogfoodAllowlist, {
+      operatorKey: "test-operator-key",
+      email: "  Diego@Example.com ",
+      action: "add",
+      reason: "  first dogfood group  "
+    })).resolves.toEqual({ email: "diego@example.com", active: true })
+
+    await expect(t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: diegoIdentity.tokenIdentifier,
+      email: diegoIdentity.email,
+      displayName: diegoIdentity.name
+    })).resolves.toMatchObject({
+      displayName: "Diego Rivera"
+    })
+
+    const records = await t.run(async (ctx) => ({
+      entry: await ctx.db
+        .query("dogfoodAllowlistEntries")
+        .withIndex("by_email", (q) => q.eq("email", "diego@example.com"))
+        .unique(),
+      audit: await ctx.db
+        .query("dogfoodAllowlistAudit")
+        .withIndex("by_email", (q) => q.eq("email", "diego@example.com"))
+        .collect()
+    }))
+
+    expect(records.entry).toMatchObject({
+      email: "diego@example.com",
+      active: true,
+      createdBy: "operator-key",
+      updatedBy: "operator-key"
+    })
+    expect(records.audit).toEqual([
+      expect.objectContaining({
+        email: "diego@example.com",
+        action: "add",
+        operator: "operator-key",
+        reason: "first dogfood group"
+      })
+    ])
+  })
+
+  it("removes dogfood users, overrides bootstrap env entries, and keeps removed users blocked", async () => {
+    const t = convexTest(schema, modules)
+    await t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: leeIdentity.tokenIdentifier,
+      email: leeIdentity.email,
+      displayName: leeIdentity.name
+    })
+
+    await expect(t.mutation(api.chat.updateDogfoodAllowlist, {
+      operatorKey: "test-operator-key",
+      email: "Lee@Example.com",
+      action: "remove",
+      reason: "offboarded"
+    })).resolves.toEqual({ email: "lee@example.com", active: false })
+
+    await expect(t.withIdentity(leeIdentity).query(api.chat.viewer))
+      .rejects.toThrow("This email is not on the Aether dogfood allowlist")
+    await expect(t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: leeIdentity.tokenIdentifier,
+      email: leeIdentity.email,
+      displayName: leeIdentity.name
+    })).rejects.toThrow("This email is not on the Aether dogfood allowlist")
+
+    const audit = await t.run((ctx) =>
+      ctx.db
+        .query("dogfoodAllowlistAudit")
+        .withIndex("by_email", (q) => q.eq("email", "lee@example.com"))
+        .collect()
+    )
+    expect(audit).toEqual([
+      expect.objectContaining({
+        email: "lee@example.com",
+        action: "remove",
+        reason: "offboarded"
+      })
+    ])
+  })
+
+  it("rejects allowlist management without the server-side operator key", async () => {
+    const t = convexTest(schema, modules)
+
+    await expect(t.mutation(api.chat.updateDogfoodAllowlist, {
+      operatorKey: "wrong-key",
+      email: "friend@example.com",
+      action: "add"
+    })).rejects.toThrow("Dogfood allowlist operator key is invalid")
+
+    const audit = await t.run((ctx) =>
+      ctx.db
+        .query("dogfoodAllowlistAudit")
+        .withIndex("by_email", (q) => q.eq("email", "friend@example.com"))
+        .collect()
+    )
+    expect(audit).toEqual([])
+  })
+
   it("logs sanitized Convex diagnostic context when a dogfood function fails", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
     const t = convexTest(schema, modules)
