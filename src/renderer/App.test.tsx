@@ -571,6 +571,83 @@ describe("App", () => {
     expect(document.querySelector(".chatTimeline .messageEdited")).toBeNull()
   })
 
+  it("searches current channel messages and highlights a selected result", async () => {
+    render(
+      <WorkspaceChat
+        model={makeChatModel([
+          new ChannelMessage({
+            id: "message-1" as ChannelMessageId,
+            channelId,
+            authorType: "human",
+            authorId: userId,
+            authorDisplayName: "Maya Patel",
+            body: "The launch memo is ready for review.",
+            createdAt: 2,
+            deletedAt: null
+          }),
+          new ChannelMessage({
+            id: "message-2" as ChannelMessageId,
+            channelId,
+            authorType: "human",
+            authorId: "human-2",
+            authorDisplayName: "Lee Chen",
+            body: "Risk summary needs one more pass.",
+            createdAt: 4,
+            deletedAt: null
+          }),
+          new ChannelMessage({
+            id: "message-3" as ChannelMessageId,
+            channelId,
+            authorType: "human",
+            authorId: "human-3",
+            authorDisplayName: "Mina Rao",
+            body: "Risk summary was superseded.",
+            createdAt: 5,
+            deletedAt: 8
+          })
+        ])}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+      />
+    )
+
+    const search = await screen.findByPlaceholderText("Search origination")
+    fireEvent.change(search, { target: { value: "risk" } })
+
+    const results = await screen.findByRole("region", { name: "Message search results" })
+    expect(within(results).getByText("Lee Chen")).toBeTruthy()
+    expect(within(results).getByText("Risk summary needs one more pass.")).toBeTruthy()
+    expect(within(results).getByText("#origination")).toBeTruthy()
+    expect(within(results).queryByText("Mina Rao")).toBeNull()
+
+    fireEvent.click(within(results).getByRole("button", { name: /Risk summary needs one more pass/ }))
+
+    await waitFor(() => {
+      const message = screen.getAllByText("Risk summary needs one more pass.")
+        .find((element) => element.closest(".chatTimeline") !== null)
+      expect(message!.closest("article")?.className).toContain("searchHighlighted")
+    })
+  })
+
+  it("shows message search empty and error states", async () => {
+    render(
+      <WorkspaceChat
+        model={makeChatModel()}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+      />
+    )
+
+    const search = await screen.findByPlaceholderText("Search origination")
+    fireEvent.change(search, { target: { value: "nonexistent" } })
+
+    expect((await screen.findByRole("status")).textContent).toBe("No matching messages.")
+
+    fireEvent.change(search, { target: { value: "x".repeat(121) } })
+
+    expect((await screen.findByRole("alert")).textContent).toBe("Search is limited to 120 characters.")
+  })
+
   it("sends a channel message from the bottom composer with Enter", async () => {
     const calls = renderApp(makeSnapshot())
     const input = await screen.findByPlaceholderText("Message origination")

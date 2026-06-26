@@ -10,6 +10,7 @@ import {
   Paperclip,
   Pencil,
   Plus,
+  Search,
   SendHorizontal,
   Square,
   SquareCheck,
@@ -64,6 +65,17 @@ type ChannelMessageGroup = {
   readonly messages: ReadonlyArray<ChannelMessage>
 }
 
+type ChannelMessageSearchResult = {
+  readonly message: ChannelMessage
+  readonly bodyPreview: string
+}
+
+type ChannelMessageSearchState =
+  | { readonly status: "idle" }
+  | { readonly status: "error"; readonly message: string }
+  | { readonly status: "empty" }
+  | { readonly status: "results"; readonly results: ReadonlyArray<ChannelMessageSearchResult> }
+
 export type ProfileMenuAction = {
   readonly label: string
   readonly onSelect: () => void
@@ -75,6 +87,8 @@ const COMPOSER_MIN_HEIGHT = 44
 const COMPOSER_MAX_HEIGHT = 140
 const MESSAGE_EDIT_MAX_HEIGHT = 180
 const MENTION_SUGGESTION_LIMIT = 6
+const MESSAGE_SEARCH_RESULT_LIMIT = 8
+const MESSAGE_SEARCH_MAX_QUERY_LENGTH = 120
 const normalizeChannelName = (name: string): string =>
   name.trim().replace(/^#+/, "").replace(/\s+/g, "-").toLowerCase()
 
@@ -189,10 +203,16 @@ export function WorkspaceChat(props: {
   const [channelOperationError, setChannelOperationError] = useState<string | null>(null)
   const [membersOpen, setMembersOpen] = useState(true)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
+  const [messageSearchQuery, setMessageSearchQuery] = useState("")
+  const [activeSearchMessageId, setActiveSearchMessageId] = useState<ChannelMessageId | null>(null)
   const view = useMemo(() => createChannelViewModel(model), [model])
   const messageGroups = useMemo(
     () => groupConsecutiveMessages(model.channelMessages),
     [model.channelMessages]
+  )
+  const messageSearchState = useMemo(
+    () => searchChannelMessages(model.channelMessages, messageSearchQuery),
+    [model.channelMessages, messageSearchQuery]
   )
   const channelMessagesLoading = model.channelMessagesLoading === true
   const channelMembersLoading = model.channelMembers === undefined
@@ -213,6 +233,8 @@ export function WorkspaceChat(props: {
     setMessageDraft("")
     setOperationError(null)
     setChannelOperationError(null)
+    setMessageSearchQuery("")
+    setActiveSearchMessageId(null)
   }, [model.channel.id])
 
   useEffect(() => {
@@ -296,8 +318,16 @@ export function WorkspaceChat(props: {
         messageGroups={messageGroups}
         loading={channelMessagesLoading}
         messageDraft={messageDraft}
+        searchQuery={messageSearchQuery}
+        searchState={messageSearchState}
+        activeSearchMessageId={activeSearchMessageId}
         operationError={operationError}
         onMessageDraftChange={setMessageDraft}
+        onSearchQueryChange={(query) => {
+          setMessageSearchQuery(query)
+          setActiveSearchMessageId(null)
+        }}
+        onSelectSearchResult={(messageId) => setActiveSearchMessageId(messageId)}
         onSendMessage={sendChannelMessage}
         onToggleMessage={messageInteractions.toggleMessageSelection}
         onCopyMessage={copyMessage}
@@ -756,8 +786,13 @@ function ChatPane(props: {
   readonly messageGroups: ReadonlyArray<ChannelMessageGroup>
   readonly loading: boolean
   readonly messageDraft: string
+  readonly searchQuery: string
+  readonly searchState: ChannelMessageSearchState
+  readonly activeSearchMessageId: ChannelMessageId | null
   readonly operationError: string | null
   readonly onMessageDraftChange: (draft: string) => void
+  readonly onSearchQueryChange: (query: string) => void
+  readonly onSelectSearchResult: (messageId: ChannelMessageId) => void
   readonly onSendMessage: () => void
   readonly onToggleMessage: (messageId: ChannelMessageId) => void
   readonly onCopyMessage: (message: ChannelMessage) => void
@@ -778,8 +813,13 @@ function ChatPane(props: {
     messageGroups,
     loading,
     messageDraft,
+    searchQuery,
+    searchState,
+    activeSearchMessageId,
     operationError,
     onMessageDraftChange,
+    onSearchQueryChange,
+    onSelectSearchResult,
     onSendMessage,
     onToggleMessage,
     onCopyMessage,
@@ -795,9 +835,25 @@ function ChatPane(props: {
     getMessageRowState,
     onOpenMessageMenu
   } = props
+  const messageRowRefs = useRef(new Map<ChannelMessageId, HTMLElement>())
+
+  useEffect(() => {
+    if (activeSearchMessageId === null) return
+    const row = messageRowRefs.current.get(activeSearchMessageId)
+    row?.scrollIntoView?.({ block: "center" })
+    row?.focus({ preventScroll: true })
+  }, [activeSearchMessageId])
 
   return (
-    <section className="chatPane grid h-full min-h-0 min-w-0 grid-rows-[minmax(0,1fr)_auto] bg-surface-canvas [grid-area:chat]" aria-label={`${channelName} chat`}>
+    <section className="chatPane grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-surface-canvas [grid-area:chat]" aria-label={`${channelName} chat`}>
+      <ChannelMessageSearch
+        channelName={channelName}
+        query={searchQuery}
+        state={searchState}
+        disabled={loading}
+        onQueryChange={onSearchQueryChange}
+        onSelectResult={onSelectSearchResult}
+      />
       <ol className={chatTimelineClassName} aria-label="Channel messages" aria-busy={loading}>
         {loading
           ? <ChannelMessagesSkeleton />
@@ -835,6 +891,14 @@ function ChatPane(props: {
                     editingDraft={rowState.editingDraft}
                     editSaving={rowState.editSaving}
                     onOpenMenu={(x, y) => onOpenMessageMenu(message.id, x, y)}
+                    highlighted={activeSearchMessageId === message.id}
+                    refCallback={(element) => {
+                      if (element === null) {
+                        messageRowRefs.current.delete(message.id)
+                      } else {
+                        messageRowRefs.current.set(message.id, element)
+                      }
+                    }}
                   />
                 )
               })}
@@ -854,6 +918,87 @@ function ChatPane(props: {
         onSend={onSendMessage}
       />
     </section>
+  )
+}
+
+function ChannelMessageSearch(props: {
+  readonly channelName: string
+  readonly query: string
+  readonly state: ChannelMessageSearchState
+  readonly disabled: boolean
+  readonly onQueryChange: (query: string) => void
+  readonly onSelectResult: (messageId: ChannelMessageId) => void
+}) {
+  const { channelName, query, state, disabled, onQueryChange, onSelectResult } = props
+  const showResults = query.trim().length > 0
+
+  return (
+    <div className="channelMessageSearch border-b border-border bg-surface-canvas px-4 py-2.5">
+      <label className="sr-only" htmlFor="channel-message-search">Search messages</label>
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-foreground-subtle" aria-hidden="true" />
+        <Input
+          id="channel-message-search"
+          className="h-9 pl-9 text-sm"
+          value={query}
+          disabled={disabled}
+          placeholder={`Search ${channelName}`}
+          aria-controls="channel-message-search-results"
+          aria-invalid={state.status === "error"}
+          onChange={(event) => onQueryChange(event.target.value)}
+        />
+      </div>
+      <div
+        id="channel-message-search-results"
+        className={classNames("messageSearchResults mt-2", !showResults && "sr-only")}
+        role={showResults ? "region" : undefined}
+        aria-label="Message search results"
+      >
+        {renderChannelMessageSearchState(channelName, state, onSelectResult)}
+      </div>
+    </div>
+  )
+}
+
+function renderChannelMessageSearchState(
+  channelName: string,
+  state: ChannelMessageSearchState,
+  onSelectResult: (messageId: ChannelMessageId) => void
+) {
+  if (state.status === "idle") {
+    return <p className="m-0 text-xs text-foreground-subtle">Search the current channel.</p>
+  }
+  if (state.status === "error") {
+    return <p className="m-0 text-xs text-destructive-text" role="alert">{state.message}</p>
+  }
+  if (state.status === "empty") {
+    return <p className="m-0 text-xs text-foreground-subtle" role="status">No matching messages.</p>
+  }
+  return (
+    <ol className="m-0 flex max-h-[220px] list-none flex-col gap-1 overflow-auto p-0" aria-label="Message search matches">
+      {state.results.map((result) => (
+        <li key={result.message.id}>
+          <button
+            type="button"
+            className="messageSearchResult grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-3 rounded-control border border-transparent bg-transparent px-2 py-1.5 text-left hover:border-border hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            onClick={() => onSelectResult(result.message.id)}
+          >
+            <span className="min-w-0">
+              <span className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs font-bold text-foreground">
+                {result.message.authorDisplayName}
+              </span>
+              <span className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-foreground-muted">
+                {result.bodyPreview}
+              </span>
+            </span>
+            <span className="flex shrink-0 flex-col items-end gap-0.5 text-[11px] leading-tight text-foreground-subtle">
+              <time dateTime={toIso(result.message.createdAt)}>{formatTime(result.message.createdAt)}</time>
+              <span>#{channelName}</span>
+            </span>
+          </button>
+        </li>
+      ))}
+    </ol>
   )
 }
 
@@ -898,6 +1043,8 @@ function ChannelMessageRow(props: {
   readonly editingDraft: string | null
   readonly editSaving: boolean
   readonly onOpenMenu: (x: number, y: number) => void
+  readonly highlighted: boolean
+  readonly refCallback: (element: HTMLElement | null) => void
 }) {
   const {
     message,
@@ -912,7 +1059,9 @@ function ChannelMessageRow(props: {
     onSaveEdit,
     editingDraft,
     editSaving,
-    onOpenMenu
+    onOpenMenu,
+    highlighted,
+    refCallback
   } = props
   const deleted = message.deletedAt !== null
   const editing = editingDraft !== null
@@ -923,13 +1072,16 @@ function ChannelMessageRow(props: {
     !startsAuthorRun && "compact items-center",
     deleted && "deleted text-foreground-placeholder",
     editing && "editing bg-surface-muted",
+    highlighted && "searchHighlighted border-border-strong bg-surface-muted",
     selected && "selected border-border bg-surface-muted",
     selectionMode && !deleted && "selecting grid-cols-[20px_var(--message-avatar-column)_minmax(0,1fr)] cursor-pointer"
   )
 
   return (
     <article
+      ref={refCallback}
       className={className}
+      tabIndex={highlighted ? -1 : undefined}
       onClick={() => {
         if (selectionMode && !deleted) onToggle()
       }}
@@ -1510,6 +1662,36 @@ const mergeChannelMembers = (
     }
   })
   return changed ? Array.from(byId.values()) : members
+}
+
+const searchChannelMessages = (
+  messages: ReadonlyArray<ChannelMessage>,
+  query: string
+): ChannelMessageSearchState => {
+  const normalizedQuery = query.trim().toLowerCase()
+  if (normalizedQuery.length === 0) return { status: "idle" }
+  if (normalizedQuery.length > MESSAGE_SEARCH_MAX_QUERY_LENGTH) {
+    return {
+      status: "error",
+      message: `Search is limited to ${MESSAGE_SEARCH_MAX_QUERY_LENGTH} characters.`
+    }
+  }
+
+  const results = messages
+    .filter((message) =>
+      message.deletedAt === null &&
+      (message.body.toLowerCase().includes(normalizedQuery) ||
+        message.authorDisplayName.toLowerCase().includes(normalizedQuery))
+    )
+    .slice(0, MESSAGE_SEARCH_RESULT_LIMIT)
+    .map((message) => ({
+      message,
+      bodyPreview: message.body
+    }))
+
+  return results.length === 0
+    ? { status: "empty" }
+    : { status: "results", results }
 }
 
 const getMentionRequest = (
