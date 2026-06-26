@@ -22,10 +22,17 @@ import { openExternalUrl } from "./electron-shell"
 
 type ConvexDogfoodError = {
   readonly message: string
+  readonly diagnostic?: DogfoodDiagnostic
 }
 
 type DogfoodOperation = "send" | "edit" | "delete" | "react" | "attach"
 type DogfoodMessageReactionEmoji = "👍" | "🎉" | "👀"
+type DogfoodDiagnostic = {
+  readonly code: string
+  readonly at: string
+  readonly source: "auth" | "viewer" | "channel" | "mutation" | "render"
+  readonly retry: "sign-in" | "try-again" | "automatic" | "message-action"
+}
 const dogfoodMessageReactionEmojis = new Set<string>(["👍", "🎉", "👀"])
 
 const dogfoodShellClassName =
@@ -177,7 +184,11 @@ function ConvexDogfoodChat() {
         })
       })
       .catch((cause: unknown) => {
-        if (!cancelled) setError({ message: dogfoodAccessErrorMessage(cause) })
+        if (!cancelled) {
+          const diagnostic = dogfoodDiagnostic("channel", "try-again", cause)
+          logDogfoodDiagnostic("channel", cause, diagnostic)
+          setError({ message: dogfoodAccessErrorMessage(cause), diagnostic })
+        }
       })
 
     return () => {
@@ -219,7 +230,11 @@ function ConvexDogfoodChat() {
         }
       })
       .catch((cause: unknown) => {
-        if (!cancelled) setError({ message: dogfoodAccessErrorMessage(cause) })
+        if (!cancelled) {
+          const diagnostic = dogfoodDiagnostic("viewer", "try-again", cause)
+          logDogfoodDiagnostic("viewer", cause, diagnostic)
+          setError({ message: dogfoodAccessErrorMessage(cause), diagnostic })
+        }
       })
 
     return () => {
@@ -283,6 +298,7 @@ function ConvexDogfoodChat() {
     return (
       <DogfoodShell title="Could Not Join">
         <p className="errorText max-w-[min(720px,calc(100vw-48px))] [overflow-wrap:anywhere] text-destructive-text">{error.message}</p>
+        {error.diagnostic === undefined ? null : <DogfoodDiagnosticDetails diagnostic={error.diagnostic} />}
         <button
           type="button"
           className={dogfoodPrimaryButtonClassName}
@@ -338,10 +354,31 @@ const signInInDefaultBrowser = async (
     const url = await auth.getSignInUrl()
     await openExternalUrl(url)
   } catch (cause) {
-    setError({ message: signInErrorMessage(cause) })
+    const diagnostic = dogfoodDiagnostic("auth", "sign-in", cause)
+    logDogfoodDiagnostic("auth", cause, diagnostic)
+    setError({ message: signInErrorMessage(cause), diagnostic })
   } finally {
     setSignInOpening(false)
   }
+}
+
+function DogfoodDiagnosticDetails(props: { readonly diagnostic: DogfoodDiagnostic }) {
+  return (
+    <dl className="grid gap-1 rounded-panel border border-border bg-surface-muted p-3 text-xs leading-[1.4] text-foreground-muted">
+      <div className="flex flex-wrap gap-x-2 gap-y-1">
+        <dt className="font-bold text-foreground">Diagnostic</dt>
+        <dd className="font-mono">{props.diagnostic.code}</dd>
+      </div>
+      <div className="flex flex-wrap gap-x-2 gap-y-1">
+        <dt>When</dt>
+        <dd>{props.diagnostic.at}</dd>
+      </div>
+      <div className="flex flex-wrap gap-x-2 gap-y-1">
+        <dt>Recovery</dt>
+        <dd>{dogfoodDiagnosticRecovery(props.diagnostic.retry)}</dd>
+      </div>
+    </dl>
+  )
 }
 
 function DogfoodShell(props: {
@@ -379,6 +416,7 @@ class DogfoodErrorBoundary extends Component<
       return (
         <DogfoodShell title="Chat Failed">
           <p className="errorText max-w-[min(720px,calc(100vw-48px))] [overflow-wrap:anywhere] text-destructive-text">{this.state.message}</p>
+          <DogfoodDiagnosticDetails diagnostic={dogfoodDiagnostic("render", "try-again", this.state.message)} />
         </DogfoodShell>
       )
     }
@@ -517,7 +555,7 @@ export const dogfoodChatToChatData = (input: {
         messageId: toConvexMessageId(messageId),
         emoji: toDogfoodMessageReactionEmoji(emoji)
       }),
-    operationErrorMessage: (operation) => dogfoodOperationErrorMessage(operation),
+    operationErrorMessage: (operation, cause) => dogfoodOperationErrorMessage(operation, cause),
     canEditMessage: (message) => message.authorId === currentUserId,
     canDeleteMessage: (message) => message.authorId === currentUserId
   }
@@ -610,6 +648,53 @@ const latestMessageCreatedAt = (messages: ReadonlyArray<DogfoodChannelMessageVie
 const errorMessage = (cause: unknown): string =>
   cause instanceof Error ? cause.message : "Something went wrong."
 
+const dogfoodDiagnostic = (
+  source: DogfoodDiagnostic["source"],
+  retry: DogfoodDiagnostic["retry"],
+  cause: unknown
+): DogfoodDiagnostic => ({
+  code: `${source.toUpperCase()}-${safeErrorFingerprint(cause)}`,
+  at: new Date().toISOString(),
+  source,
+  retry
+})
+
+const safeErrorFingerprint = (cause: unknown): string => {
+  const message = errorMessage(cause)
+    .replace(/https?:\/\/\S+/g, "[url]")
+    .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/g, "[email]")
+  let hash = 0
+  for (let index = 0; index < message.length; index += 1) {
+    hash = (Math.imul(31, hash) + message.charCodeAt(index)) | 0
+  }
+  return Math.abs(hash).toString(36).padStart(6, "0").slice(0, 6).toUpperCase()
+}
+
+const logDogfoodDiagnostic = (
+  context: string,
+  cause: unknown,
+  diagnostic: DogfoodDiagnostic
+) => {
+  console.warn("Dogfood chat diagnostic", {
+    context,
+    diagnostic,
+    message: errorMessage(cause)
+  })
+}
+
+const dogfoodDiagnosticRecovery = (retry: DogfoodDiagnostic["retry"]): string => {
+  switch (retry) {
+    case "sign-in":
+      return "Try sign-in again or sign out and start over."
+    case "try-again":
+      return "Use Try again after checking the connection or allowlist."
+    case "automatic":
+      return "The app will retry as realtime state reconnects."
+    case "message-action":
+      return "Keep the draft or dialog open, reconnect, then retry the action."
+  }
+}
+
 const dogfoodAccessErrorMessage = (cause: unknown): string => {
   const message = errorMessage(cause)
   if (
@@ -635,17 +720,19 @@ const mergeDogfoodChannels = (
   return Array.from(byId.values())
 }
 
-const dogfoodOperationErrorMessage = (operation: DogfoodOperation): string => {
+const dogfoodOperationErrorMessage = (operation: DogfoodOperation, cause: unknown): string => {
+  const diagnostic = dogfoodDiagnostic("mutation", "message-action", cause)
+  logDogfoodDiagnostic(operation, cause, diagnostic)
   switch (operation) {
     case "send":
-      return "Could not send message. Check your connection and try again."
+      return `Could not send message. Check your connection and try again. Diagnostic: ${diagnostic.code}.`
     case "edit":
-      return "Could not save edit. Check your connection and try again."
+      return `Could not save edit. Check your connection and try again. Diagnostic: ${diagnostic.code}.`
     case "delete":
-      return "Could not delete message. Check your connection and try again."
+      return `Could not delete message. Check your connection and try again. Diagnostic: ${diagnostic.code}.`
     case "react":
-      return "Could not update reaction. Check your connection and try again."
+      return `Could not update reaction. Check your connection and try again. Diagnostic: ${diagnostic.code}.`
     case "attach":
-      return "Could not upload attachment. Check your connection and try again."
+      return `Could not upload attachment. Check your connection and try again. Diagnostic: ${diagnostic.code}.`
   }
 }

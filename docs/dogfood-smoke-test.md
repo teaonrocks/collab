@@ -1,6 +1,7 @@
 # Dogfood Smoke Test
 
 Use this checklist for the Convex/AuthKit dogfood chat path. Keep secrets out of screenshots and notes.
+For failure capture and recovery, see [`docs/dogfood-debugging.md`](dogfood-debugging.md).
 
 ## Setup
 
@@ -49,7 +50,7 @@ Use this checklist for the Convex/AuthKit dogfood chat path. Keep secrets out of
 ## Common Failure States
 
 - `Waiting for your AuthKit session to reach Convex...`: AuthKit is signed in, but Convex has not received a valid auth token yet. Wait briefly, then retry sign-in if it does not recover.
-- `Could Not Join`: the viewer setup action failed. Check allowlist membership and local Convex/AuthKit environment configuration.
-- `Could not send message`: the mutation failed or the client lost connectivity. Keep the draft, reconnect, and send again.
-- `Could not save edit`: the edit did not persist. The editor stays open so the user can retry.
-- `Could not delete message`: the delete did not persist. The confirmation dialog stays open so the user can retry or cancel.
+- `Could Not Join`: the viewer setup action failed. Record the diagnostic code, then check allowlist membership and local Convex/AuthKit environment configuration.
+- `Could not send message`: the mutation failed or the client lost connectivity. Record the diagnostic code, keep the draft, reconnect, and send again.
+- `Could not save edit`: the edit did not persist. Record the diagnostic code; the editor stays open so the user can retry.
+- `Could not delete message`: the delete did not persist. Record the diagnostic code; the confirmation dialog stays open so the user can retry or cancel.

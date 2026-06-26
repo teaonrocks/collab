@@ -24,10 +24,36 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.restoreAllMocks()
   vi.unstubAllEnvs()
 })
 
 describe("dogfood channel memberships", () => {
+  it("logs sanitized Convex diagnostic context when a dogfood function fails", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+    const t = convexTest(schema, modules)
+    await t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: mayaIdentity.tokenIdentifier,
+      email: mayaIdentity.email,
+      displayName: mayaIdentity.name
+    })
+
+    await expect(t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design!" }))
+      .rejects.toThrow("Channel names can only use letters, numbers, dashes, and underscores")
+
+    expect(errorSpy).toHaveBeenCalledWith("Dogfood Convex function failed", expect.objectContaining({
+      operation: "createChannel",
+      context: expect.objectContaining({
+        nameLength: "7",
+        visibility: "public"
+      }),
+      error: "Channel names can only use letters, numbers, dashes, and underscores"
+    }))
+    const serializedLogs = JSON.stringify(errorSpy.mock.calls)
+    expect(serializedLogs).not.toContain(mayaIdentity.email)
+    expect(serializedLogs).not.toContain(mayaIdentity.tokenIdentifier)
+  })
+
   it("normalizes channel names and rejects empty, duplicate, and unsupported names", async () => {
     const t = convexTest(schema, modules)
     await t.mutation(internal.chat.ensureViewerForIdentity, {

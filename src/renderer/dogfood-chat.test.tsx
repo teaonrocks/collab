@@ -606,6 +606,8 @@ describe("ConvexDogfoodApp", () => {
 
     expect(await screen.findByRole("heading", { name: "Could Not Join" })).toBeTruthy()
     expect(screen.getByText("This email is not on the Aether dogfood allowlist")).toBeTruthy()
+    expect(screen.getByText(/^VIEWER-/)).toBeTruthy()
+    expect(screen.getByText("Use Try again after checking the connection or allowlist.")).toBeTruthy()
     expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy()
   })
 
@@ -872,7 +874,7 @@ describe("ConvexDogfoodApp", () => {
 
     render(<ConvexDogfoodApp />)
 
-    expect(await screen.findByText("Could not send message. Check your connection and try again.")).toBeTruthy()
+    expect(await screen.findByText(/^Could not send message\. Check your connection and try again\. Diagnostic: MUTATION-/)).toBeTruthy()
     expect(screen.queryByText(/secret mutation details/)).toBeNull()
   })
 

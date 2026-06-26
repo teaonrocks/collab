@@ -139,6 +139,29 @@ const workOsField = (body: unknown, key: string): string | undefined => {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined
 }
 
+type DogfoodDiagnosticContext = Record<string, string | number | boolean | null | undefined>
+
+const withDogfoodDiagnostics = async <Result>(
+  operation: string,
+  context: DogfoodDiagnosticContext,
+  run: () => Promise<Result>
+): Promise<Result> => {
+  try {
+    return await run()
+  } catch (cause) {
+    console.error("Dogfood Convex function failed", {
+      operation,
+      context: Object.fromEntries(
+        Object.entries(context)
+          .filter(([, value]) => value !== undefined)
+          .map(([key, value]) => [key, value === null ? null : String(value)])
+      ),
+      error: cause instanceof Error ? cause.message : "Unknown error"
+    })
+    throw cause
+  }
+}
+
 const resolveWorkOsViewer = async (identity: ViewerIdentity): Promise<{ readonly email: string; readonly displayName: string }> => {
   const identityEmail = emailFromIdentity(identity)
   if (identityEmail !== undefined && identityEmail.trim().length > 0) {
@@ -445,15 +468,15 @@ const validateMessageAttachments = async (
 
 export const generateAttachmentUploadUrl = mutation({
   args: {},
-  handler: async (ctx) => {
+  handler: (ctx) => withDogfoodDiagnostics("generateAttachmentUploadUrl", {}, async () => {
     await requireAllowedCurrentUser(ctx)
     return ctx.storage.generateUploadUrl()
-  }
+  })
 })
 
 export const ensureViewer = action({
   args: {},
-  handler: async (ctx) => {
+  handler: (ctx) => withDogfoodDiagnostics("ensureViewer", {}, async () => {
     const identity = await requireIdentity(ctx)
     const { email, displayName } = await resolveWorkOsViewer(identity)
     const result: {
@@ -468,7 +491,7 @@ export const ensureViewer = action({
     })
 
     return result
-  }
+  })
 })
 
 export const ensureViewerForIdentity = internalMutation({
@@ -514,15 +537,15 @@ export const ensureViewerForIdentity = internalMutation({
 
 export const viewer = query({
   args: {},
-  handler: async (ctx) => {
+  handler: (ctx) => withDogfoodDiagnostics("viewer", {}, async () => {
     const user = await requireAllowedCurrentUser(ctx)
     return { userId: user._id, displayName: user.displayName }
-  }
+  })
 })
 
 export const defaultWorkspace = query({
   args: {},
-  handler: async (ctx) => {
+  handler: (ctx) => withDogfoodDiagnostics("defaultWorkspace", {}, async () => {
     const user = await requireAllowedCurrentUser(ctx)
     const workspace = await getDefaultWorkspace(ctx)
 
@@ -538,28 +561,28 @@ export const defaultWorkspace = query({
       workspace: { id: workspace._id, name: workspace.name },
       channel: { id: channel._id, name: channel.name, visibility: channel.visibility }
     }
-  }
+  })
 })
 
 export const channels = query({
   args: {
     workspaceId: v.id("workspaces")
   },
-  handler: async (ctx, args) => {
+  handler: (ctx, args) => withDogfoodDiagnostics("channels", { workspaceId: args.workspaceId }, async () => {
     const user = await requireAllowedCurrentUser(ctx)
     const workspace = await ctx.db.get(args.workspaceId)
     if (workspace === null) return []
 
     await requireWorkspaceMember(ctx, { workspaceId: workspace._id, userId: user._id })
     return listVisibleWorkspaceChannels(ctx, { workspaceId: workspace._id, userId: user._id })
-  }
+  })
 })
 
 export const channelIndicators = query({
   args: {
     workspaceId: v.id("workspaces")
   },
-  handler: async (ctx, args) => {
+  handler: (ctx, args) => withDogfoodDiagnostics("channelIndicators", { workspaceId: args.workspaceId }, async () => {
     const user = await requireAllowedCurrentUser(ctx)
     const workspace = await ctx.db.get(args.workspaceId)
     if (workspace === null) return []
@@ -599,14 +622,14 @@ export const channelIndicators = query({
     }
 
     return indicators
-  }
+  })
 })
 
 export const ensureChannelMember = mutation({
   args: {
     channelId: v.id("channels")
   },
-  handler: async (ctx, args) => {
+  handler: (ctx, args) => withDogfoodDiagnostics("ensureChannelMember", { channelId: args.channelId }, async () => {
     const user = await requireAllowedCurrentUser(ctx)
     const channel = await ctx.db.get(args.channelId)
     if (channel === null) throw new Error("Channel not found")
@@ -619,7 +642,7 @@ export const ensureChannelMember = mutation({
 
     await ensureChannelMembership(ctx, { channelId: channel._id, userId: user._id, now: Date.now() })
     return toChannelView(channel)
-  }
+  })
 })
 
 export const markChannelRead = mutation({
@@ -627,7 +650,10 @@ export const markChannelRead = mutation({
     channelId: v.id("channels"),
     readThroughCreatedAt: v.number()
   },
-  handler: async (ctx, args) => {
+  handler: (ctx, args) => withDogfoodDiagnostics("markChannelRead", {
+    channelId: args.channelId,
+    readThroughCreatedAt: args.readThroughCreatedAt
+  }, async () => {
     if (!Number.isFinite(args.readThroughCreatedAt)) throw new Error("Read-through timestamp must be finite")
     const user = await requireAllowedCurrentUser(ctx)
     const channel = await ctx.db.get(args.channelId)
@@ -643,7 +669,7 @@ export const markChannelRead = mutation({
     if ((membership.lastReadAt ?? membership.createdAt) >= args.readThroughCreatedAt) return toChannelView(channel)
     await ctx.db.patch(membership._id, { lastReadAt: args.readThroughCreatedAt })
     return toChannelView(channel)
-  }
+  })
 })
 
 export const createChannel = mutation({
@@ -651,7 +677,10 @@ export const createChannel = mutation({
     name: v.string(),
     visibility: v.optional(v.union(v.literal("public"), v.literal("private")))
   },
-  handler: async (ctx, args) => {
+  handler: (ctx, args) => withDogfoodDiagnostics("createChannel", {
+    visibility: args.visibility ?? "public",
+    nameLength: args.name.trim().length
+  }, async () => {
     const user = await requireAllowedCurrentUser(ctx)
     const workspace = await getDefaultWorkspace(ctx)
     if (workspace === null) throw new Error("Workspace not found")
@@ -687,14 +716,14 @@ export const createChannel = mutation({
     const channel = await ctx.db.get(channelId)
     if (channel === null) throw new Error("Channel not found after insert")
     return toChannelView(channel)
-  }
+  })
 })
 
 export const channelMessages = query({
   args: {
     channelId: v.id("channels")
   },
-  handler: async (ctx, args) => {
+  handler: (ctx, args) => withDogfoodDiagnostics("channelMessages", { channelId: args.channelId }, async () => {
     const user = await requireAllowedCurrentUser(ctx)
 
     await requireChannelMember(ctx, { channelId: args.channelId, userId: user._id })
@@ -706,14 +735,14 @@ export const channelMessages = query({
       .take(200)
 
     return toMessageViews(ctx, [...messages].reverse(), user._id)
-  }
+  })
 })
 
 export const channelMembers = query({
   args: {
     channelId: v.id("channels")
   },
-  handler: async (ctx, args) => {
+  handler: (ctx, args) => withDogfoodDiagnostics("channelMembers", { channelId: args.channelId }, async () => {
     const user = await requireAllowedCurrentUser(ctx)
 
     const channel = await requireChannelMember(ctx, { channelId: args.channelId, userId: user._id })
@@ -723,7 +752,7 @@ export const channelMembers = query({
     }
 
     return listChannelMembers(ctx, args.channelId)
-  }
+  })
 })
 
 export const sendMessage = mutation({
@@ -733,7 +762,12 @@ export const sendMessage = mutation({
     parentMessageId: v.optional(v.id("messages")),
     attachments: v.optional(v.array(messageAttachmentInput))
   },
-  handler: async (ctx, args) => {
+  handler: (ctx, args) => withDogfoodDiagnostics("sendMessage", {
+    channelId: args.channelId,
+    parentMessageId: args.parentMessageId,
+    bodyLength: args.body.trim().length,
+    attachmentCount: args.attachments?.length ?? 0
+  }, async () => {
     const body = args.body.trim()
     const attachments = await validateMessageAttachments(ctx, args.attachments)
     if (body.length === 0 && attachments.length === 0) throw new Error("Message body or attachment is required")
@@ -766,7 +800,7 @@ export const sendMessage = mutation({
     const message = await ctx.db.get(messageId)
     if (message === null) throw new Error("Message not found after insert")
     return toMessageView(ctx, message, user._id)
-  }
+  })
 })
 
 export const editMessage = mutation({
@@ -775,7 +809,11 @@ export const editMessage = mutation({
     messageId: v.id("messages"),
     body: v.string()
   },
-  handler: async (ctx, args) => {
+  handler: (ctx, args) => withDogfoodDiagnostics("editMessage", {
+    channelId: args.channelId,
+    messageId: args.messageId,
+    bodyLength: args.body.trim().length
+  }, async () => {
     const body = args.body.trim()
     if (body.length === 0) throw new Error("Message body is required")
 
@@ -790,7 +828,7 @@ export const editMessage = mutation({
     const updated = await ctx.db.get(args.messageId)
     if (updated === null) throw new Error("Message not found after edit")
     return toMessageView(ctx, updated, user._id)
-  }
+  })
 })
 
 export const deleteMessage = mutation({
@@ -798,7 +836,10 @@ export const deleteMessage = mutation({
     channelId: v.id("channels"),
     messageId: v.id("messages")
   },
-  handler: async (ctx, args) => {
+  handler: (ctx, args) => withDogfoodDiagnostics("deleteMessage", {
+    channelId: args.channelId,
+    messageId: args.messageId
+  }, async () => {
     const user = await requireAllowedCurrentUser(ctx)
     const message = await ctx.db.get(args.messageId)
     if (message === null || message.channelId !== args.channelId) throw new Error("Message not found")
@@ -815,7 +856,7 @@ export const deleteMessage = mutation({
     }
     await ctx.db.delete(args.messageId)
     return { messageId: args.messageId }
-  }
+  })
 })
 
 export const toggleMessageReaction = mutation({
@@ -824,7 +865,11 @@ export const toggleMessageReaction = mutation({
     messageId: v.id("messages"),
     emoji: messageReactionEmoji
   },
-  handler: async (ctx, args) => {
+  handler: (ctx, args) => withDogfoodDiagnostics("toggleMessageReaction", {
+    channelId: args.channelId,
+    messageId: args.messageId,
+    emoji: args.emoji
+  }, async () => {
     const user = await requireAllowedCurrentUser(ctx)
     const message = await ctx.db.get(args.messageId)
     if (message === null || message.channelId !== args.channelId) throw new Error("Message not found")
@@ -853,7 +898,7 @@ export const toggleMessageReaction = mutation({
     }
 
     return toMessageView(ctx, message, user._id)
-  }
+  })
 })
 
 type MessageView = {

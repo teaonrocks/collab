@@ -194,6 +194,8 @@ and `@effect-atom/atom-react` 0.5.0. Built with Electron 41 and electron-vite 2.
   accepted decisions for that slice.
 - [`docs/dogfood-distribution.md`](docs/dogfood-distribution.md) records the current dev-only
   dogfood install/update path and reproducible build check.
+- [`docs/dogfood-debugging.md`](docs/dogfood-debugging.md) explains diagnostic codes, recovery, and
+  safe failure reports for dogfood users.
 - [`docs/message-replies-decision.md`](docs/message-replies-decision.md) records the human-chat
   reply behavior and data model impact for the Collaboration Depth milestone.
 - [`docs/message-attachments-upload-path.md`](docs/message-attachments-upload-path.md) records the
