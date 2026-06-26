@@ -1,6 +1,6 @@
 import { useAuth } from "@workos-inc/authkit-react"
 import { useAction, useConvexAuth, useMutation, useQuery } from "convex/react"
-import { Component, type ErrorInfo, type ReactNode, useEffect, useMemo, useState } from "react"
+import { Component, type ErrorInfo, type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import { api } from "../../convex/_generated/api"
 import type { Id } from "../../convex/_generated/dataModel"
 import type { ChatDataView } from "./chat-data"
@@ -68,6 +68,12 @@ export type DogfoodChannelMessageView = {
   readonly editedAt?: number | null
 }
 
+export type DogfoodChannelMemberView = {
+  readonly id: Id<"users">
+  readonly displayName: string
+  readonly joinedAt: number
+}
+
 export function ConvexDogfoodApp() {
   return (
     <DogfoodErrorBoundary>
@@ -84,12 +90,16 @@ function ConvexDogfoodChat() {
   const editMessage = useMutation(api.chat.editMessage)
   const deleteMessage = useMutation(api.chat.deleteMessage)
   const createChannel = useMutation(api.chat.createChannel)
+  const ensureChannelMember = useMutation(api.chat.ensureChannelMember)
+  const markChannelRead = useMutation(api.chat.markChannelRead)
   const [ensuredUserId, setEnsuredUserId] = useState<string | null>(null)
   const [selectedChannelId, setSelectedChannelId] = useState<Id<"channels"> | null>(null)
+  const [joinedChannelIds, setJoinedChannelIds] = useState<ReadonlySet<Id<"channels">>>(() => new Set())
   const [createdChannels, setCreatedChannels] = useState<ReadonlyArray<DogfoodChannelView>>([])
   const [error, setError] = useState<ConvexDogfoodError | null>(null)
   const [signInOpening, setSignInOpening] = useState(false)
   const [ensureAttempt, setEnsureAttempt] = useState(0)
+  const lastReadMarkerRef = useRef<string | null>(null)
   const authUserId = auth.user?.id ?? null
   const sessionReady = authUserId !== null && convexAuth.isAuthenticated
   const viewerReady = sessionReady && ensuredUserId === authUserId && error === null
@@ -103,10 +113,60 @@ function ConvexDogfoodChat() {
     [channels, createdChannels]
   )
   const activeChannelId = selectedChannelId ?? workspace?.channel.id
+  const activeChannelJoined = activeChannelId === undefined ? false : joinedChannelIds.has(activeChannelId)
   const messages = useQuery(
     api.chat.channelMessages,
-    activeChannelId === undefined ? "skip" : { channelId: activeChannelId }
+    activeChannelId === undefined || !activeChannelJoined ? "skip" : { channelId: activeChannelId }
   )
+  const members = useQuery(
+    api.chat.channelMembers,
+    activeChannelId === undefined || !activeChannelJoined ? "skip" : { channelId: activeChannelId }
+  )
+  const channelIndicators = useQuery(
+    api.chat.channelIndicators,
+    workspace === undefined || workspace === null ? "skip" : { workspaceId: workspace.workspace.id }
+  )
+
+  useEffect(() => {
+    if (workspace === undefined || workspace === null) return
+    setJoinedChannelIds((existing) => {
+      if (existing.has(workspace.channel.id)) return existing
+      return new Set([...existing, workspace.channel.id])
+    })
+  }, [workspace])
+
+  useEffect(() => {
+    if (!viewerReady || activeChannelId === undefined || activeChannelJoined) return
+
+    let cancelled = false
+    void ensureChannelMember({ channelId: activeChannelId })
+      .then(() => {
+        if (cancelled) return
+        setJoinedChannelIds((existing) => {
+          if (existing.has(activeChannelId)) return existing
+          return new Set([...existing, activeChannelId])
+        })
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) setError({ message: dogfoodAccessErrorMessage(cause) })
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeChannelId, activeChannelJoined, ensureChannelMember, viewerReady])
+
+  useEffect(() => {
+    if (!viewerReady || activeChannelId === undefined || !activeChannelJoined || messages === undefined) return
+    const readThroughCreatedAt = latestMessageCreatedAt(messages)
+    const readMarker = `${activeChannelId}:${readThroughCreatedAt}`
+    if (lastReadMarkerRef.current === readMarker) return
+    lastReadMarkerRef.current = readMarker
+
+    void markChannelRead({ channelId: activeChannelId, readThroughCreatedAt }).catch((cause: unknown) => {
+      console.warn("Could not mark channel read", cause)
+    })
+  }, [activeChannelId, activeChannelJoined, markChannelRead, messages, viewerReady])
 
   useEffect(() => {
     if (workspace === undefined || workspace === null || channelList === undefined) return
@@ -146,10 +206,14 @@ function ConvexDogfoodChat() {
         channels: channelList,
         selectedChannelId: activeChannelId,
         messages: messages ?? [],
+        members: members ?? [],
+        channelIndicators: channelIndicators ?? [],
         messagesLoading: messages === undefined,
+        membersLoading: members === undefined,
         createChannel: async (input) => {
           const channel = await createChannel(input)
           setCreatedChannels((existing) => mergeDogfoodChannels(existing, [channel]))
+          setJoinedChannelIds((existing) => new Set([...existing, channel.id]))
           setSelectedChannelId(channel.id)
           return channel
         },
@@ -158,7 +222,7 @@ function ConvexDogfoodChat() {
         editMessage,
         deleteMessage
       }),
-    [activeChannelId, channelList, createChannel, deleteMessage, editMessage, messages, sendMessage, workspace]
+    [activeChannelId, activeChannelJoined, channelIndicators, channelList, createChannel, deleteMessage, editMessage, members, messages, sendMessage, workspace]
   )
 
   if (auth.isLoading) {
@@ -297,7 +361,13 @@ export const dogfoodChatToChatData = (input: {
   readonly channels: ReadonlyArray<DogfoodChannelView>
   readonly selectedChannelId: Id<"channels">
   readonly messages: ReadonlyArray<DogfoodChannelMessageView>
+  readonly members?: ReadonlyArray<DogfoodChannelMemberView>
+  readonly channelIndicators?: ReadonlyArray<{
+    readonly channelId: Id<"channels">
+    readonly indicator: "unread" | "mentioned"
+  }>
   readonly messagesLoading?: boolean
+  readonly membersLoading?: boolean
   readonly createChannel?: (input: { readonly name: string }) => Promise<DogfoodChannelView>
   readonly selectChannel?: (channelId: Id<"channels">) => void
   readonly sendMessage: (input: { readonly channelId: Id<"channels">; readonly body: string }) => Promise<unknown>
@@ -354,6 +424,15 @@ export const dogfoodChatToChatData = (input: {
         createdAt: channel.createdAt
       })),
       channelMessages: input.messages.map(toLegacyChannelMessage),
+      channelMembers: input.members?.map((member) => ({
+        id: toHumanAccountId(member.id),
+        displayName: member.displayName
+      })),
+      channelIndicators: input.channelIndicators?.map((state) => ({
+        channelId: toChannelId(state.channelId),
+        indicator: state.indicator
+      })),
+      channelMembersLoading: input.membersLoading ?? false,
       channelMessagesLoading: input.messagesLoading ?? false
     },
     createChannel: input.createChannel === undefined
@@ -407,6 +486,9 @@ const toChannelMessageId = (id: Id<"messages">): ChannelMessageId => String(id) 
 const toConvexChannelId = (id: ChannelId): Id<"channels"> => String(id) as Id<"channels">
 
 const toConvexMessageId = (id: ChannelMessageId): Id<"messages"> => String(id) as Id<"messages">
+
+const latestMessageCreatedAt = (messages: ReadonlyArray<DogfoodChannelMessageView>): number =>
+  messages.reduce((latest, message) => Math.max(latest, message.createdAt), 0)
 
 const errorMessage = (cause: unknown): string =>
   cause instanceof Error ? cause.message : "Something went wrong."

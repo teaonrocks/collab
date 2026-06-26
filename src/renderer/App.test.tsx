@@ -278,10 +278,10 @@ describe("App", () => {
     expect(await screen.findByRole("dialog", { name: "Create Channel" })).toBeTruthy()
     const form = await screen.findByRole("form", { name: "Create channel" })
     expect(within(form).getByRole("status").className).toContain("min-h-[17px]")
-    fireEvent.change(within(form).getByLabelText("Channel name"), { target: { value: "  product  " } })
+    fireEvent.change(within(form).getByLabelText("Channel name"), { target: { value: "  #Product Team  " } })
     fireEvent.submit(form)
 
-    await waitFor(() => expect(calls).toEqual([{ name: "product" }]))
+    await waitFor(() => expect(calls).toEqual([{ name: "product-team" }]))
   })
 
   it("keeps the channel creation dialog state scoped to an open attempt", async () => {
@@ -346,6 +346,71 @@ describe("App", () => {
     expect(screen.queryByText(/raw backend details/)).toBeNull()
   })
 
+  it("rejects empty and invalid channel names before creating", async () => {
+    const calls: Array<{ readonly name: string }> = []
+
+    render(
+      <WorkspaceChat
+        model={makeChatModel()}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+        createChannel={(input) => {
+          calls.push(input)
+          return Promise.resolve(new Channel({
+            id: secondChannelId,
+            workspaceId,
+            name: input.name,
+            visibility: "public",
+            createdBy: userId,
+            createdAt: 4
+          }))
+        }}
+      />
+    )
+
+    fireEvent.click(await screen.findByRole("button", { name: "Add channel" }))
+    const form = await screen.findByRole("form", { name: "Create channel" })
+    const input = within(form).getByLabelText("Channel name")
+
+    fireEvent.change(input, { target: { value: "###" } })
+    fireEvent.submit(form)
+    expect(await within(form).findByText("Channel name is required.")).toBeTruthy()
+
+    fireEvent.change(input, { target: { value: "design!" } })
+    fireEvent.submit(form)
+    expect(await within(form).findByText("Use letters, numbers, dashes, or underscores.")).toBeTruthy()
+    expect(calls).toEqual([])
+  })
+
+  it("shows compact duplicate channel errors and keeps the dialog usable", async () => {
+    const calls: Array<{ readonly name: string }> = []
+
+    render(
+      <WorkspaceChat
+        model={makeChatModel()}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+        createChannel={(input) => {
+          calls.push(input)
+          return Promise.reject(new Error("Channel already exists"))
+        }}
+      />
+    )
+
+    fireEvent.click(await screen.findByRole("button", { name: "Add channel" }))
+    const form = await screen.findByRole("form", { name: "Create channel" })
+    const input = within(form).getByLabelText("Channel name")
+    fireEvent.change(input, { target: { value: "design" } })
+    fireEvent.submit(form)
+
+    expect(await within(form).findByText("Channel already exists.")).toBeTruthy()
+    expect(within(form).getByRole("button", { name: "Create" })).toBeTruthy()
+
+    fireEvent.change(input, { target: { value: "product" } })
+    expect(within(form).queryByText("Channel already exists.")).toBeNull()
+    expect(calls).toEqual([{ name: "design" }])
+  })
+
   it("opens profile settings from the rail avatar", async () => {
     let signOuts = 0
     render(
@@ -367,20 +432,28 @@ describe("App", () => {
     expect(screen.queryByRole("menu", { name: "Profile settings" })).toBeNull()
   })
 
-  it("uses a dot instead of a count for channel unread state", async () => {
-    renderApp(makeSnapshot([
-      ...makeSnapshot().channelMessages,
-      new ChannelMessage({
-        id: "message-2" as ChannelMessageId,
-        channelId,
-        authorType: "human",
-        authorId: "human-2",
-        authorDisplayName: "Lee Chen",
-        body: "I pulled the incidents into the notes.",
-        createdAt: 3,
-        deletedAt: null
-      })
-    ]))
+  it("uses a dot instead of a count for inactive channel unread state", async () => {
+    const base = makeChatModel()
+    const secondChannel = new Channel({
+      id: secondChannelId,
+      workspaceId,
+      name: "design",
+      visibility: "public",
+      createdBy: userId,
+      createdAt: 3
+    })
+
+    render(
+      <WorkspaceChat
+        model={{
+          ...base,
+          channels: [base.channel, secondChannel],
+          channelIndicators: [{ channelId: secondChannelId, indicator: "unread" }]
+        }}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+      />
+    )
 
     const channels = await screen.findByRole("navigation", { name: "Channels" })
 
@@ -388,24 +461,52 @@ describe("App", () => {
     expect(within(channels).queryByText("2")).toBeNull()
   })
 
-  it("prioritizes mention state over unread state in the channel indicator", async () => {
-    renderApp(makeSnapshot([
-      ...makeSnapshot().channelMessages,
-      new ChannelMessage({
-        id: "message-2" as ChannelMessageId,
-        channelId,
-        authorType: "human",
-        authorId: "human-2",
-        authorDisplayName: "Lee Chen",
-        body: "@Maya can you check this?",
-        createdAt: 3,
-        deletedAt: null
-      })
-    ]))
+  it("prioritizes mention state over unread state in inactive channel indicators", async () => {
+    const base = makeChatModel()
+    const secondChannel = new Channel({
+      id: secondChannelId,
+      workspaceId,
+      name: "design",
+      visibility: "public",
+      createdBy: userId,
+      createdAt: 3
+    })
+
+    render(
+      <WorkspaceChat
+        model={{
+          ...base,
+          channels: [base.channel, secondChannel],
+          channelIndicators: [{ channelId: secondChannelId, indicator: "mentioned" }]
+        }}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+      />
+    )
 
     const channels = await screen.findByRole("navigation", { name: "Channels" })
 
     expect(within(channels).getByLabelText("Mentioned")).toBeTruthy()
+    expect(within(channels).queryByLabelText("Unread messages")).toBeNull()
+  })
+
+  it("does not show stale unread state on the current channel", async () => {
+    const base = makeChatModel()
+
+    render(
+      <WorkspaceChat
+        model={{
+          ...base,
+          channelIndicators: [{ channelId, indicator: "mentioned" }]
+        }}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+      />
+    )
+
+    const channels = await screen.findByRole("navigation", { name: "Channels" })
+
+    expect(within(channels).queryByLabelText("Mentioned")).toBeNull()
     expect(within(channels).queryByLabelText("Unread messages")).toBeNull()
   })
 
@@ -559,6 +660,44 @@ describe("App", () => {
     expect((screen.getByPlaceholderText("Message origination") as HTMLTextAreaElement).disabled).toBe(true)
   })
 
+  it("shows membership-backed channel members before they post", async () => {
+    render(
+      <WorkspaceChat
+        model={{
+          ...makeChatModel([]),
+          channelMembers: [
+            { id: "human-2", displayName: "Lee Chen" },
+            { id: userId, displayName: "Maya Patel" }
+          ]
+        }}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+      />
+    )
+
+    const members = await screen.findByLabelText("Channel members")
+    expect(within(members).getByText("Lee Chen")).toBeTruthy()
+    expect(within(members).getByText("Maya Patel")).toBeTruthy()
+    expect(within(members).getByText("You")).toBeTruthy()
+
+    const globalNavigation = screen.getByLabelText("Global navigation")
+    const directMessages = within(globalNavigation).getByRole("navigation", { name: "Direct messages" })
+    expect(within(directMessages).queryByRole("button", { name: "Lee Chen" })).toBeNull()
+    expect(within(directMessages).queryByRole("button", { name: "Maya Patel" })).toBeNull()
+  })
+
+  it("shows an empty channel members state", async () => {
+    render(
+      <WorkspaceChat
+        model={{ ...makeChatModel([]), channelMembers: [] }}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+      />
+    )
+
+    expect(await screen.findByText("No members yet")).toBeTruthy()
+  })
+
   it("shows a compact send failure when an operation formatter is provided", async () => {
     render(
       <WorkspaceChat
@@ -577,7 +716,7 @@ describe("App", () => {
     expect(screen.queryByText(/backend token details/)).toBeNull()
   })
 
-  it("uses row-wide checkboxes for multi-select mode", async () => {
+  it("places multi-select checkboxes before the avatar column", async () => {
     renderApp(makeSnapshot([
       ...makeSnapshot().channelMessages,
       new ChannelMessage({
@@ -594,12 +733,41 @@ describe("App", () => {
 
     fireEvent.click(within(await openMessageMenu("Maya Patel")).getByRole("menuitem", { name: "Select" }))
 
-    expect(await screen.findByRole("checkbox", { name: "Deselect message from Maya Patel" })).toBeTruthy()
+    const mayaCheckbox = await screen.findByRole("checkbox", { name: "Deselect message from Maya Patel" })
+    const mayaRow = mayaCheckbox.closest("article")
+    expect(mayaRow).not.toBeNull()
+    const mayaAvatar = within(mayaRow!).getByText("MP")
+    expect(mayaCheckbox.compareDocumentPosition(mayaAvatar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.getByRole("checkbox", { name: "Select message from Lee Chen" })).toBeTruthy()
 
     fireEvent.click(screen.getByText(/partner brief/))
 
     await waitFor(() => expect(screen.queryByRole("checkbox", { name: "Deselect message from Maya Patel" })).toBeNull())
+  })
+
+  it("aligns compact message checkboxes with the message body", async () => {
+    renderApp(makeSnapshot([
+      ...makeSnapshot().channelMessages,
+      new ChannelMessage({
+        id: "message-2" as ChannelMessageId,
+        channelId,
+        authorType: "human",
+        authorId: userId,
+        authorDisplayName: "Maya Patel",
+        body: "Follow-up without a repeated avatar.",
+        createdAt: 3,
+        deletedAt: null
+      })
+    ]))
+
+    fireEvent.click((await screen.findAllByLabelText("More actions for message from Maya Patel"))[0]!)
+    fireEvent.click(within(await screen.findByRole("menu", { name: /message from Maya Patel/ })).getByRole("menuitem", { name: "Select" }))
+
+    const compactRow = (await screen.findByText("Follow-up without a repeated avatar.")).closest("article")
+    expect(compactRow).not.toBeNull()
+    expect(compactRow!.classList.contains("compact")).toBe(true)
+    const compactCheckbox = within(compactRow!).getByRole("checkbox", { name: "Select message from Maya Patel" })
+    expect(compactCheckbox.closest("label")?.classList.contains("mt-[5px]")).toBe(true)
   })
 
   it("pins the selection action bar to the top-most selected message", async () => {

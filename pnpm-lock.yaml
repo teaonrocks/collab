@@ -60,9 +60,12 @@ importers:
         specifier: ^3.6.0
         version: 3.6.0
     devDependencies:
+      '@edge-runtime/vm':
+        specifier: ^5.0.0
+        version: 5.0.0
       '@effect/vitest':
         specifier: 0.29.0
-        version: 0.29.0(effect@3.21.3)(vitest@3.2.6(@types/node@22.19.21)(happy-dom@16.8.1)(lightningcss@1.32.0))
+        version: 0.29.0(effect@3.21.3)(vitest@3.2.6(@edge-runtime/vm@5.0.0)(@types/node@22.19.21)(happy-dom@16.8.1)(lightningcss@1.32.0))
       '@tailwindcss/postcss':
         specifier: ^4.3.1
         version: 4.3.1
@@ -81,6 +84,9 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^4.3.4
         version: 4.7.0(vite@5.4.21(@types/node@22.19.21)(lightningcss@1.32.0))
+      convex-test:
+        specifier: ^0.0.53
+        version: 0.0.53(convex@1.42.0(react@19.2.7))
       electron:
         specifier: ^41.0.0
         version: 41.7.2
@@ -104,7 +110,7 @@ importers:
         version: 5.4.21(@types/node@22.19.21)(lightningcss@1.32.0)
       vitest:
         specifier: ^3.2.4
-        version: 3.2.6(@types/node@22.19.21)(happy-dom@16.8.1)(lightningcss@1.32.0)
+        version: 3.2.6(@edge-runtime/vm@5.0.0)(@types/node@22.19.21)(happy-dom@16.8.1)(lightningcss@1.32.0)
 
 packages:
 
@@ -237,6 +243,14 @@ packages:
     peerDependencies:
       convex: ^1.39.1
       react: ^18.0.0 || ^19.0.0-0 || ^19.0.0
+
+  '@edge-runtime/primitives@6.0.0':
+    resolution: {integrity: sha512-FqoxaBT+prPBHBwE1WXS1ocnu/VLTQyZ6NMUBAdbP7N2hsFTTxMC/jMu2D/8GAlMQfxeuppcPuCUk/HO3fpIvA==}
+    engines: {node: '>=18'}
+
+  '@edge-runtime/vm@5.0.0':
+    resolution: {integrity: sha512-NKBGBSIKUG584qrS1tyxVpX/AKJKQw5HgjYEnPLC0QsTw79JrGn+qUr8CXFb955Iy7GUdiiUv1rJ6JBGvaKb6w==}
+    engines: {node: '>=18'}
 
   '@effect-atom/atom-react@0.5.0':
     resolution: {integrity: sha512-aFfjWi4rEJCqfM12Oi36/EKaDm/W6n4/N6yM5vL0t/QozKhJhK05rQL/GY4XMxlH2eqkQ4ih8jBQa3Yyp0Fiqw==}
@@ -1162,6 +1176,11 @@ packages:
   convert-source-map@2.0.0:
     resolution: {integrity: sha512-Kvp459HrV2FEJ1CAsi1Ku+MY3kasH19TFykTz2xWmMeq6bk2NU3XXvfJ+Q61m0xktWwt+1HSYf3JZsTms3aRJg==}
 
+  convex-test@0.0.53:
+    resolution: {integrity: sha512-bouZQTnTvZi8IHljHL++yClj1vcV+/9ZxEcd8JZz7RDxOfPkRKrkMgkk/xlX4M1EAiwcEJPNiQE7VJFvDM3lCQ==}
+    peerDependencies:
+      convex: ^1.32.0
+
   convex@1.42.0:
     resolution: {integrity: sha512-KS1U+YkE7N7jDfucPW28iNehnb9/N5n9RJmdAFNdPIHTeNpbLKNqk1pJHp4ajHyMBAhGmri8Z4S1lc1LjliZWQ==}
     engines: {node: '>=18.0.0', npm: '>=7.0.0'}
@@ -1847,6 +1866,12 @@ snapshots:
       convex: 1.42.0(react@19.2.7)
       react: 19.2.7
 
+  '@edge-runtime/primitives@6.0.0': {}
+
+  '@edge-runtime/vm@5.0.0':
+    dependencies:
+      '@edge-runtime/primitives': 6.0.0
+
   '@effect-atom/atom-react@0.5.0(@effect/experimental@0.60.0(@effect/platform@0.96.1(effect@3.21.3))(effect@3.21.3))(@effect/platform@0.96.1(effect@3.21.3))(@effect/rpc@0.75.1(@effect/platform@0.96.1(effect@3.21.3))(effect@3.21.3))(effect@3.21.3)(react@19.2.7)(scheduler@0.27.0)':
     dependencies:
       '@effect-atom/atom': 0.5.3(@effect/experimental@0.60.0(@effect/platform@0.96.1(effect@3.21.3))(effect@3.21.3))(@effect/platform@0.96.1(effect@3.21.3))(@effect/rpc@0.75.1(@effect/platform@0.96.1(effect@3.21.3))(effect@3.21.3))(effect@3.21.3)
@@ -1929,10 +1954,10 @@ snapshots:
       effect: 3.21.3
       uuid: 11.1.1
 
-  '@effect/vitest@0.29.0(effect@3.21.3)(vitest@3.2.6(@types/node@22.19.21)(happy-dom@16.8.1)(lightningcss@1.32.0))':
+  '@effect/vitest@0.29.0(effect@3.21.3)(vitest@3.2.6(@edge-runtime/vm@5.0.0)(@types/node@22.19.21)(happy-dom@16.8.1)(lightningcss@1.32.0))':
     dependencies:
       effect: 3.21.3
-      vitest: 3.2.6(@types/node@22.19.21)(happy-dom@16.8.1)(lightningcss@1.32.0)
+      vitest: 3.2.6(@edge-runtime/vm@5.0.0)(@types/node@22.19.21)(happy-dom@16.8.1)(lightningcss@1.32.0)
 
   '@effect/workflow@0.18.2(@effect/experimental@0.60.0(@effect/platform@0.96.1(effect@3.21.3))(effect@3.21.3))(@effect/platform@0.96.1(effect@3.21.3))(@effect/rpc@0.75.1(@effect/platform@0.96.1(effect@3.21.3))(effect@3.21.3))(effect@3.21.3)':
     dependencies:
@@ -2537,6 +2562,10 @@ snapshots:
 
   convert-source-map@2.0.0: {}
 
+  convex-test@0.0.53(convex@1.42.0(react@19.2.7)):
+    dependencies:
+      convex: 1.42.0(react@19.2.7)
+
   convex@1.42.0(react@19.2.7):
     dependencies:
       esbuild: 0.27.0
@@ -2962,7 +2991,7 @@ snapshots:
       fsevents: 2.3.3
       lightningcss: 1.32.0
 
-  vitest@3.2.6(@types/node@22.19.21)(happy-dom@16.8.1)(lightningcss@1.32.0):
+  vitest@3.2.6(@edge-runtime/vm@5.0.0)(@types/node@22.19.21)(happy-dom@16.8.1)(lightningcss@1.32.0):
     dependencies:
       '@types/chai': 5.2.3
       '@vitest/expect': 3.2.6
@@ -2988,6 +3017,7 @@ snapshots:
       vite-node: 3.2.4(@types/node@22.19.21)(lightningcss@1.32.0)
       why-is-node-running: 2.3.0
     optionalDependencies:
+      '@edge-runtime/vm': 5.0.0
       '@types/node': 22.19.21
       happy-dom: 16.8.1
     transitivePeerDependencies:

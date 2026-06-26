@@ -12,8 +12,23 @@ import type {
 } from "../shared/collab-rpc"
 import { CollabApi } from "./collab-api"
 
+export type ChatChannelMember = {
+  readonly id: string
+  readonly displayName: string
+}
+
+export type ChatChannelIndicator = "unread" | "mentioned"
+
+export type ChatChannelIndicatorState = {
+  readonly channelId: ChannelId
+  readonly indicator: ChatChannelIndicator
+}
+
 export type ChatDataModel = Pick<CollabSnapshot, "currentUser" | "workspace" | "channel" | "channelMessages"> & {
   readonly channels: ReadonlyArray<Channel>
+  readonly channelMembers?: ReadonlyArray<ChatChannelMember>
+  readonly channelIndicators?: ReadonlyArray<ChatChannelIndicatorState>
+  readonly channelMembersLoading?: boolean
   readonly channelMessagesLoading?: boolean
 }
 

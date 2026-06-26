@@ -2,6 +2,7 @@ import { Result } from "@effect-atom/atom"
 import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
 import { Cause } from "effect"
 import {
+  Check,
   Copy,
   Ellipsis,
   Hash,
@@ -19,6 +20,8 @@ import { type FormEvent, useEffect, useMemo, useRef, useState } from "react"
 import type { Channel, ChannelId, ChannelMessage, ChannelMessageId } from "../shared/collab-rpc"
 import "./App.css"
 import type {
+  ChatChannelIndicator,
+  ChatChannelMember,
   ChatDataModel,
   ChatDataView,
   ChatMessageGuard,
@@ -43,17 +46,14 @@ import {
   Textarea
 } from "./ui"
 
-type ChannelIndicator = "unread" | "mentioned"
-
-type ChannelMember = {
-  readonly id: string
-  readonly displayName: string
-}
-
 type ChannelViewModel = {
-  readonly members: ReadonlyArray<ChannelMember>
-  readonly channelIndicator: ChannelIndicator | null
+  readonly members: ReadonlyArray<ChatChannelMember>
+  readonly channelIndicators: ReadonlyMap<ChannelId, ChatChannelIndicator>
 }
+
+type ChannelNameValidation =
+  | { readonly valid: true; readonly name: string }
+  | { readonly valid: false; readonly message: string }
 
 type ChannelMessageGroup = {
   readonly id: ChannelMessageId
@@ -73,12 +73,34 @@ const MESSAGE_CONTEXT_MENU_OFFSET = 6
 const COMPOSER_MIN_HEIGHT = 22
 const COMPOSER_MAX_HEIGHT = 140
 const MESSAGE_EDIT_MAX_HEIGHT = 180
+const normalizeChannelName = (name: string): string =>
+  name.trim().replace(/^#+/, "").replace(/\s+/g, "-").toLowerCase()
+
+const validateChannelName = (rawName: string): ChannelNameValidation => {
+  const name = normalizeChannelName(rawName)
+  if (name.length === 0) return { valid: false, message: "Channel name is required." }
+  if (!/^[a-z0-9_-]+$/.test(name)) {
+    return { valid: false, message: "Use letters, numbers, dashes, or underscores." }
+  }
+  return { valid: true, name }
+}
+
+const channelCreateErrorMessage = (cause: unknown): string => {
+  const message = cause instanceof Error ? cause.message : String(cause)
+  if (/already exists/i.test(message)) return "Channel already exists."
+  if (/channel name is required/i.test(message)) return "Channel name is required."
+  if (/letters, numbers, dashes, and underscores/i.test(message)) {
+    return "Use letters, numbers, dashes, or underscores."
+  }
+  return "Could not create channel. Check your connection and try again."
+}
+
 const chatTimelineClassName =
-  "chatTimeline flex min-h-0 list-none flex-col gap-0.5 overflow-auto px-4 pb-[18px] pt-3.5 [--chat-timeline-x:16px] [--message-avatar-column:40px] [--message-column-gap:10px] [--message-group-x:10px] [--message-row-left-bleed:calc(var(--chat-timeline-x)+var(--message-group-x)+var(--message-avatar-column)+var(--message-column-gap))] [--message-row-right-bleed:calc(var(--chat-timeline-x)+var(--message-group-x))]"
+  "chatTimeline flex min-h-0 list-none flex-col gap-0.5 overflow-auto px-4 pb-[18px] pt-3.5 [--message-avatar-column:40px] [--message-column-gap:10px] [--message-group-x:10px]"
 const channelMessageGroupClassName =
-  "channelMessageGroup grid min-w-0 grid-cols-[var(--message-avatar-column)_minmax(0,1fr)] items-start justify-start gap-[var(--message-column-gap)] px-[var(--message-group-x)]"
+  "channelMessageGroup min-w-0"
 const channelMessageClassName =
-  "channelMessage group/message relative grid min-w-0 w-[calc(100%+var(--message-row-left-bleed)+var(--message-row-right-bleed))] -ml-[var(--message-row-left-bleed)] grid-cols-[minmax(0,1fr)] items-start justify-start gap-2.5 border border-transparent bg-transparent py-2 pl-[var(--message-row-left-bleed)] pr-[var(--message-row-right-bleed)] hover:bg-surface-muted focus-within:bg-surface-muted"
+  "channelMessage group/message relative grid min-w-0 grid-cols-[var(--message-avatar-column)_minmax(0,1fr)] items-start justify-start gap-[var(--message-column-gap)] border border-transparent bg-transparent px-[var(--message-group-x)] py-2 hover:bg-surface-muted focus-within:bg-surface-muted"
 const messageContentClassName =
   "messageContent min-w-0 max-w-[820px]"
 const messageBodyClassName =
@@ -171,7 +193,11 @@ export function WorkspaceChat(props: {
     [model.channelMessages]
   )
   const channelMessagesLoading = model.channelMessagesLoading === true
-  const [directMessageMembers, setDirectMessageMembers] = useState<ReadonlyArray<ChannelMember>>([])
+  const channelMembersLoading = model.channelMembers === undefined
+    ? channelMessagesLoading
+    : model.channelMembersLoading === true
+  const [directMessageMembers, setDirectMessageMembers] = useState<ReadonlyArray<ChatChannelMember>>([])
+  const visibleMembers = model.channelMembers ?? directMessageMembers
   const messageInteractions = useMessageInteractions({
     channelId: model.channel.id,
     messages: model.channelMessages,
@@ -255,7 +281,7 @@ export function WorkspaceChat(props: {
         activeChannelId={model.channel.id}
         channelName={model.channel.name}
         channelVisibility={model.channel.visibility}
-        channelIndicator={view.channelIndicator}
+        channelIndicators={view.channelIndicators}
         channelOperationError={channelOperationError}
         createChannel={createChannel}
         onSelectChannel={selectChannel}
@@ -290,9 +316,9 @@ export function WorkspaceChat(props: {
       />
 
       <MembersPanel
-        members={view.members}
+        members={visibleMembers}
         currentUserId={model.currentUser.id}
-        loading={channelMessagesLoading}
+        loading={channelMembersLoading}
         open={membersOpen}
       />
 
@@ -331,7 +357,7 @@ export function WorkspaceChat(props: {
 function WorkspaceRail(props: {
   readonly workspaceName: string
   readonly currentUserName: string
-  readonly members: ReadonlyArray<ChannelMember>
+  readonly members: ReadonlyArray<ChatChannelMember>
   readonly profileMenuOpen: boolean
   readonly profileMenuActions: ReadonlyArray<ProfileMenuAction>
   readonly onToggleProfileMenu: () => void
@@ -427,7 +453,7 @@ function ChannelSidebar(props: {
   readonly activeChannelId: ChannelId
   readonly channelName: string
   readonly channelVisibility: Channel["visibility"]
-  readonly channelIndicator: ChannelIndicator | null
+  readonly channelIndicators: ReadonlyMap<ChannelId, ChatChannelIndicator>
   readonly channelOperationError: string | null
   readonly createChannel?: ChatDataView["createChannel"]
   readonly onSelectChannel?: SelectChatChannel
@@ -439,7 +465,7 @@ function ChannelSidebar(props: {
     activeChannelId,
     channelName,
     channelVisibility,
-    channelIndicator,
+    channelIndicators,
     channelOperationError,
     createChannel,
     onSelectChannel,
@@ -458,16 +484,20 @@ function ChannelSidebar(props: {
   }
   const submitChannel = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const name = draft.trim()
-    if (createChannel === undefined || name.length === 0 || saving) return
+    if (createChannel === undefined || saving) return
+    const validation = validateChannelName(draft)
+    if (!validation.valid) {
+      onChannelOperationError(validation.message)
+      return
+    }
     setSaving(true)
     onChannelOperationError(null)
-    void createChannel({ name })
+    void createChannel({ name: validation.name })
       .then(() => {
         setDraft("")
         setCreating(false)
       })
-      .catch(() => onChannelOperationError("Could not create channel. Check your connection and try again."))
+      .catch((cause: unknown) => onChannelOperationError(channelCreateErrorMessage(cause)))
       .finally(() => setSaving(false))
   }
 
@@ -498,6 +528,7 @@ function ChannelSidebar(props: {
           </div>
           {channels.map((channel) => {
             const active = channel.id === activeChannelId
+            const channelIndicator = active ? null : channelIndicators.get(channel.id) ?? null
             return (
               <button
                 key={channel.id}
@@ -514,7 +545,7 @@ function ChannelSidebar(props: {
                     <span className="channelNavText min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{channel.name}</span>
                   </span>
                 </span>
-                {active && channelIndicator !== null
+                {!active && channelIndicator !== null
                   ? (
                     <span
                       className={classNames(
@@ -558,7 +589,10 @@ function ChannelSidebar(props: {
             draft={draft}
             saving={saving}
             error={channelOperationError}
-            onDraftChange={setDraft}
+            onDraftChange={(nextDraft) => {
+              setDraft(nextDraft)
+              if (channelOperationError !== null) onChannelOperationError(null)
+            }}
             onSubmit={submitChannel}
             onCancel={closeCreateDialog}
           />
@@ -601,7 +635,9 @@ function CreateChannelDialog(props: {
             autoFocus
             aria-describedby="create-channel-error"
             aria-invalid={error !== null}
-            onChange={(event) => onDraftChange(event.target.value)}
+            onChange={(event) => {
+              onDraftChange(event.target.value)
+            }}
           />
           <p
             id="create-channel-error"
@@ -617,7 +653,7 @@ function CreateChannelDialog(props: {
             <Button type="button" variant="secondary" size="sm" disabled={saving} onClick={onCancel}>
               Cancel
             </Button>
-            <Button type="submit" size="sm" disabled={draft.trim().length === 0 || saving}>
+            <Button type="submit" size="sm" disabled={normalizeChannelName(draft).length === 0 || saving}>
               {saving ? "Creating..." : "Create"}
             </Button>
           </DialogFooter>
@@ -737,11 +773,6 @@ function ChatPane(props: {
           : null}
         {!loading && messageGroups.map((group) => (
           <li key={group.id} className={channelMessageGroupClassName}>
-            <Avatar
-              name={group.authorDisplayName}
-              className="messageAvatar messageRunAvatar sticky top-3.5 z-10 mt-2"
-              aria-hidden="true"
-            />
             <div className="messageRun flex min-w-0 flex-col gap-0.5">
               {group.messages.map((message, index) => {
                 const rowState = getMessageRowState(message)
@@ -845,7 +876,7 @@ function ChannelMessageRow(props: {
     deleted && "deleted text-foreground-placeholder",
     editing && "editing bg-surface-muted",
     selected && "selected border-border bg-surface-muted",
-    selectionMode && !deleted && "selecting grid-cols-[20px_minmax(0,1fr)] cursor-pointer"
+    selectionMode && !deleted && "selecting grid-cols-[20px_var(--message-avatar-column)_minmax(0,1fr)] cursor-pointer"
   )
 
   return (
@@ -862,39 +893,67 @@ function ChannelMessageRow(props: {
     >
       {selectionMode && !deleted
         ? (
-          <input
-            className="messageCheckbox mt-2.5 size-4 cursor-pointer accent-foreground-subtle"
-            type="checkbox"
-            checked={selected}
-            aria-label={`${selected ? "Deselect" : "Select"} message from ${message.authorDisplayName}`}
-            onChange={onToggle}
+          <label
+            className={classNames(
+              "messageCheckbox relative grid size-4 cursor-pointer place-items-center",
+              startsAuthorRun ? "mt-2.5" : "mt-[5px]"
+            )}
             onClick={(event) => event.stopPropagation()}
-          />
+          >
+            <input
+              className="peer sr-only"
+              type="checkbox"
+              checked={selected}
+              aria-label={`${selected ? "Deselect" : "Select"} message from ${message.authorDisplayName}`}
+              onChange={onToggle}
+            />
+            <span
+              className={classNames(
+                "grid size-4 place-items-center rounded-[3px] border border-border-strong bg-surface-canvas text-foreground transition-colors peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-ring",
+                selected && "border-foreground bg-foreground text-foreground-inverse"
+              )}
+              aria-hidden="true"
+            >
+              {selected ? <Check className="size-3 [stroke-width:3]" /> : null}
+            </span>
+          </label>
         )
         : null}
-      <div className={messageContentClassName}>
-        <div
-          className={classNames(
-            "messageMeta flex min-w-0 items-baseline gap-2",
-            !startsAuthorRun && "pointer-events-none absolute left-[calc(var(--chat-timeline-x)+var(--message-group-x))] top-2.5 w-[var(--message-avatar-column)] justify-center"
+      <div className="messageAvatarCell flex min-w-0 justify-center">
+        {startsAuthorRun
+          ? (
+            <Avatar
+              name={message.authorDisplayName}
+              className="messageAvatar messageRunAvatar sticky top-3.5 z-10"
+              aria-hidden="true"
+            />
+          )
+          : (
+            <time
+              className="messageTimestamp hidden whitespace-nowrap text-xs text-foreground-subtle [display:inline] opacity-0 group-hover/message:opacity-100 group-focus-within/message:opacity-100"
+              dateTime={toIso(message.createdAt)}
+            >
+              {formatTime(message.createdAt)}
+            </time>
           )}
-        >
-          {startsAuthorRun
-            ? <strong className="min-w-0 text-sm font-bold text-foreground [overflow-wrap:anywhere]">{message.authorDisplayName}</strong>
-            : null}
-          <time
-            className={classNames(
-              "messageTimestamp whitespace-nowrap text-xs text-foreground-subtle",
-              !startsAuthorRun && "hidden [display:inline] opacity-0 group-hover/message:opacity-100 group-focus-within/message:opacity-100"
-            )}
-            dateTime={toIso(message.createdAt)}
-          >
-            {formatTime(message.createdAt)}
-          </time>
-          {message.editedAt === null || !startsAuthorRun
-            ? null
-            : <span className="messageEdited whitespace-nowrap text-xs text-foreground-subtle" title={`Edited ${formatTime(message.editedAt)}`}>edited</span>}
-        </div>
+      </div>
+      <div className={messageContentClassName}>
+        {startsAuthorRun
+          ? (
+            <div className="messageMeta flex min-w-0 items-baseline gap-2">
+              <strong className="min-w-0 text-sm font-bold text-foreground [overflow-wrap:anywhere]">{message.authorDisplayName}</strong>
+              <time
+                className="messageTimestamp whitespace-nowrap text-xs text-foreground-subtle"
+                dateTime={toIso(message.createdAt)}
+              >
+                {formatTime(message.createdAt)}
+              </time>
+              {message.editedAt === null
+                ? null
+                : <span className="messageEdited whitespace-nowrap text-xs text-foreground-subtle" title={`Edited ${formatTime(message.editedAt)}`}>edited</span>}
+            </div>
+          )
+          : null}
         {editing
           ? (
             <MessageEditForm
@@ -912,7 +971,7 @@ function ChannelMessageRow(props: {
         ? null
         : (
           <span
-            className="messageEdited compactEdited absolute right-[var(--message-row-right-bleed)] top-2.5 whitespace-nowrap text-xs text-foreground-subtle"
+            className="messageEdited compactEdited absolute right-[var(--message-group-x)] top-2.5 whitespace-nowrap text-xs text-foreground-subtle"
             title={`Edited ${formatTime(message.editedAt)}`}
           >
             edited
@@ -1089,7 +1148,7 @@ function MessageComposer(props: {
 }
 
 function MembersPanel(props: {
-  readonly members: ReadonlyArray<ChannelMember>
+  readonly members: ReadonlyArray<ChatChannelMember>
   readonly currentUserId: string
   readonly loading: boolean
   readonly open: boolean
@@ -1101,7 +1160,9 @@ function MembersPanel(props: {
         <p className="m-0 text-xs font-bold leading-tight text-foreground-subtle">Online -- {loading ? "" : members.length}</p>
         {loading
           ? <MembersSkeleton />
-          : (
+          : members.length === 0
+            ? <p className="m-0 text-[13px] leading-[1.4] text-foreground-muted">No members yet</p>
+            : (
             <ol className={memberListClassName}>
               {members.map((member) => (
                 <li key={member.id} className={memberItemClassName}>
@@ -1254,15 +1315,18 @@ function DeleteMessageDialog(props: {
 }
 
 const createChannelViewModel = (model: ChatDataModel): ChannelViewModel => {
-  const liveMessages = model.channelMessages.filter((message) => message.deletedAt === null)
+  const channelIndicators = new Map<ChannelId, ChatChannelIndicator>()
+  model.channelIndicators?.forEach((state) => {
+    if (state.channelId !== model.channel.id) channelIndicators.set(state.channelId, state.indicator)
+  })
   return {
     members: uniqueMembers(model.channelMessages),
-    channelIndicator: getChannelIndicator(liveMessages, model.currentUser.id, model.currentUser.displayName)
+    channelIndicators
   }
 }
 
-const uniqueMembers = (messages: ReadonlyArray<ChannelMessage>): ReadonlyArray<ChannelMember> => {
-  const members = new Map<string, ChannelMember>()
+const uniqueMembers = (messages: ReadonlyArray<ChannelMessage>): ReadonlyArray<ChatChannelMember> => {
+  const members = new Map<string, ChatChannelMember>()
   messages.forEach((message) => {
     members.set(message.authorId, { id: message.authorId, displayName: message.authorDisplayName })
   })
@@ -1270,9 +1334,9 @@ const uniqueMembers = (messages: ReadonlyArray<ChannelMessage>): ReadonlyArray<C
 }
 
 const mergeChannelMembers = (
-  members: ReadonlyArray<ChannelMember>,
-  nextMembers: ReadonlyArray<ChannelMember>
-): ReadonlyArray<ChannelMember> => {
+  members: ReadonlyArray<ChatChannelMember>,
+  nextMembers: ReadonlyArray<ChatChannelMember>
+): ReadonlyArray<ChatChannelMember> => {
   if (nextMembers.length === 0) return members
   const byId = new Map(members.map((member) => [member.id, member]))
   let changed = false
@@ -1283,29 +1347,6 @@ const mergeChannelMembers = (
     }
   })
   return changed ? Array.from(byId.values()) : members
-}
-
-const getChannelIndicator = (
-  messages: ReadonlyArray<ChannelMessage>,
-  currentUserId: string,
-  currentUserDisplayName: string
-): ChannelIndicator | null => {
-  const incomingMessages = messages.filter((message) => message.authorId !== currentUserId)
-  if (incomingMessages.length === 0) return null
-  const mentionNeedles = mentionCandidates(currentUserDisplayName)
-  return incomingMessages.some((message) => {
-    const body = message.body.toLowerCase()
-    return mentionNeedles.some((needle) => body.includes(needle))
-  })
-    ? "mentioned"
-    : "unread"
-}
-
-const mentionCandidates = (displayName: string): ReadonlyArray<string> => {
-  const normalized = displayName.trim().toLowerCase()
-  const firstName = normalized.split(/\s+/)[0] ?? ""
-  return Array.from(new Set([`@${normalized}`, firstName.length === 0 ? "" : `@${firstName}`]))
-    .filter((value) => value.length > 1)
 }
 
 const resizeTextarea = (textarea: HTMLTextAreaElement | null, minHeight: number, maxHeight: number) => {

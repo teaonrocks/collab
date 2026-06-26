@@ -42,7 +42,8 @@ export default defineSchema({
     channelId: v.id("channels"),
     userId: v.id("users"),
     role: channelRole,
-    createdAt: v.number()
+    createdAt: v.number(),
+    lastReadAt: v.optional(v.number())
   }).index("by_channel", ["channelId"]).index("by_user", ["userId"]).index("by_channel_user", [
     "channelId",
     "userId"

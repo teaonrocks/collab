@@ -1,11 +1,13 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { getFunctionName } from "convex/server"
 import type { ComponentType } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Id } from "../../convex/_generated/dataModel"
 import { ChannelMessage } from "../shared/collab-rpc"
 import {
   dogfoodChatToChatData,
+  type DogfoodChannelMemberView,
   type DogfoodChannelMessageView,
   type DogfoodChannelView,
   type DogfoodWorkspaceView
@@ -27,11 +29,16 @@ const mocks = vi.hoisted(() => ({
   editMessage: vi.fn(),
   deleteMessage: vi.fn(),
   createChannel: vi.fn(),
+  ensureChannelMember: vi.fn(),
+  markChannelRead: vi.fn(),
   mutationCallCount: 0,
   workspace: undefined as DogfoodWorkspaceView | null | undefined,
   channels: undefined as ReadonlyArray<DogfoodChannelView> | undefined,
   messages: undefined as ReadonlyArray<DogfoodChannelMessageView> | undefined,
-  messagesByChannel: undefined as Record<string, ReadonlyArray<DogfoodChannelMessageView>> | undefined
+  messagesByChannel: undefined as Record<string, ReadonlyArray<DogfoodChannelMessageView>> | undefined,
+  members: undefined as ReadonlyArray<DogfoodChannelMemberView> | undefined,
+  membersByChannel: undefined as Record<string, ReadonlyArray<DogfoodChannelMemberView>> | undefined,
+  channelIndicators: undefined as ReadonlyArray<{ readonly channelId: string; readonly indicator: "unread" | "mentioned" }> | undefined
 }))
 
 vi.mock("@workos-inc/authkit-react", () => ({
@@ -42,16 +49,27 @@ vi.mock("convex/react", () => ({
   useConvexAuth: () => mocks.convexAuth,
   useAction: () => mocks.ensureViewer,
   useMutation: () => {
-    const mutation = [mocks.sendMessage, mocks.editMessage, mocks.deleteMessage, mocks.createChannel][mocks.mutationCallCount % 4]
+    const mutation = [
+      mocks.sendMessage,
+      mocks.editMessage,
+      mocks.deleteMessage,
+      mocks.createChannel,
+      mocks.ensureChannelMember,
+      mocks.markChannelRead
+    ][mocks.mutationCallCount % 6]
     mocks.mutationCallCount += 1
     return mutation
   },
-  useQuery: (_query: unknown, args: unknown) => {
+  useQuery: (query: unknown, args: unknown) => {
     if (args === "skip") return undefined
     if (typeof args === "object" && args !== null && "channelId" in args) {
       const channelId = String(args.channelId)
+      if (getFunctionName(query as never) === "chat:channelMembers") {
+        return mocks.membersByChannel?.[channelId] ?? mocks.members
+      }
       return mocks.messagesByChannel?.[channelId] ?? mocks.messages
     }
+    if (getFunctionName(query as never) === "chat:channelIndicators") return mocks.channelIndicators
     if (typeof args === "object" && args !== null && "workspaceId" in args) return mocks.channels
     return mocks.workspace
   }
@@ -64,6 +82,9 @@ vi.mock("./App", () => ({
       readonly channel: { readonly id: string }
       readonly channels: ReadonlyArray<{ readonly id: string; readonly name: string }>
       readonly channelMessages: ReadonlyArray<ChannelMessage>
+      readonly channelMembers?: ReadonlyArray<{ readonly id: string; readonly displayName: string }>
+      readonly channelIndicators?: ReadonlyArray<{ readonly channelId: string; readonly indicator: "unread" | "mentioned" }>
+      readonly channelMembersLoading?: boolean
       readonly channelMessagesLoading?: boolean
     }
   readonly createChannel?: (input: { readonly name: string }) => Promise<unknown>
@@ -82,12 +103,17 @@ vi.mock("./App", () => ({
       <section aria-label="mock workspace chat">
         <h2>{props.model.workspace.name}</h2>
         {props.model.channelMessagesLoading === true ? <p>messages loading</p> : null}
+        {props.model.channelMembersLoading === true ? <p>members loading</p> : null}
+        <ul aria-label="mock members">
+          {props.model.channelMembers?.map((member) => <li key={member.id}>{member.displayName}</li>)}
+        </ul>
         <ul aria-label="mock channels">
           {props.model.channels.map((channel) => (
             <li key={channel.id}>
               <button type="button" onClick={() => props.selectChannel?.(channel.id)}>
                 {channel.name}
               </button>
+              <span>{props.model.channelIndicators?.find((state) => state.channelId === channel.id)?.indicator}</span>
             </li>
           ))}
         </ul>
@@ -166,11 +192,16 @@ beforeEach(() => {
     visibility: "public",
     createdAt: 44
   })
+  mocks.ensureChannelMember.mockResolvedValue({})
+  mocks.markChannelRead.mockResolvedValue({})
   mocks.mutationCallCount = 0
   mocks.workspace = undefined
   mocks.channels = undefined
   mocks.messages = undefined
   mocks.messagesByChannel = undefined
+  mocks.members = undefined
+  mocks.membersByChannel = undefined
+  mocks.channelIndicators = undefined
 })
 
 const workspace: DogfoodWorkspaceView = {
@@ -240,6 +271,19 @@ const designMessages: ReadonlyArray<DogfoodChannelMessageView> = [
   }
 ]
 
+const members: ReadonlyArray<DogfoodChannelMemberView> = [
+  {
+    id: "user-2" as Id<"users">,
+    displayName: "Lee Chen",
+    joinedAt: 40
+  },
+  {
+    id: "user-1" as Id<"users">,
+    displayName: "Maya Patel",
+    joinedAt: 39
+  }
+]
+
 describe("dogfoodChatToChatData", () => {
   it("adapts the Convex dogfood chat view into the chat data interface", () => {
     const chatData = dogfoodChatToChatData({
@@ -247,6 +291,7 @@ describe("dogfoodChatToChatData", () => {
       channels,
       selectedChannelId: workspace.channel.id,
       messages,
+      members,
       sendMessage: mocks.sendMessage,
       editMessage: mocks.editMessage,
       deleteMessage: mocks.deleteMessage
@@ -256,6 +301,7 @@ describe("dogfoodChatToChatData", () => {
     expect(chatData.model.workspace.name).toBe("Aether Dogfood")
     expect(chatData.model.channel.name).toBe("general")
     expect(chatData.model.channels.map((channel) => channel.name)).toEqual(["general", "design"])
+    expect(chatData.model.channelMembers?.map((member) => member.displayName)).toEqual(["Lee Chen", "Maya Patel"])
     expect(chatData.model.channel.createdBy).toBe(chatData.model.currentUser.id)
     expect(chatData.model.channelMessages).toHaveLength(1)
     expect(chatData.model.channelMessages[0]).toBeInstanceOf(ChannelMessage)
@@ -288,7 +334,9 @@ describe("dogfoodChatToChatData", () => {
       channels,
       selectedChannelId: channels[1]!.id,
       messages: [],
+      members: [],
       messagesLoading: true,
+      membersLoading: true,
       sendMessage: mocks.sendMessage,
       editMessage: mocks.editMessage,
       deleteMessage: mocks.deleteMessage
@@ -297,6 +345,23 @@ describe("dogfoodChatToChatData", () => {
     expect(chatData.model.channel.name).toBe("design")
     expect(chatData.model.channelMessages).toEqual([])
     expect(chatData.model.channelMessagesLoading).toBe(true)
+    expect(chatData.model.channelMembers).toEqual([])
+    expect(chatData.model.channelMembersLoading).toBe(true)
+  })
+
+  it("adapts per-channel unread and mention indicators", () => {
+    const chatData = dogfoodChatToChatData({
+      workspace,
+      channels,
+      selectedChannelId: workspace.channel.id,
+      messages,
+      channelIndicators: [{ channelId: channels[1]!.id, indicator: "mentioned" }],
+      sendMessage: mocks.sendMessage,
+      editMessage: mocks.editMessage,
+      deleteMessage: mocks.deleteMessage
+    })
+
+    expect(chatData.model.channelIndicators).toEqual([{ channelId: channels[1]!.id, indicator: "mentioned" }])
   })
 
   it("uses Convex ids for chat commands without exposing snapshot-era fields", async () => {
@@ -426,18 +491,36 @@ describe("ConvexDogfoodApp", () => {
     )
   })
 
-  it("keeps the workspace shell mounted while selected channel messages load", async () => {
+  it("passes membership-backed channel members to the reused chat surface", async () => {
+    const { ConvexDogfoodApp } = await import("./dogfood-chat")
+    mocks.auth.user = { id: "user-1" }
+    mocks.convexAuth.isAuthenticated = true
+    mocks.workspace = workspace
+    mocks.channels = channels
+    mocks.messages = messages
+    mocks.members = members
+
+    render(<ConvexDogfoodApp />)
+
+    const memberList = await screen.findByRole("list", { name: "mock members" })
+    expect(await within(memberList).findByText("Lee Chen")).toBeTruthy()
+    expect(within(memberList).getByText("Maya Patel")).toBeTruthy()
+  })
+
+  it("keeps the workspace shell mounted while selected channel messages and members load", async () => {
     const { ConvexDogfoodApp } = await import("./dogfood-chat")
     mocks.auth.user = { id: "user-1" }
     mocks.convexAuth.isAuthenticated = true
     mocks.workspace = workspace
     mocks.channels = channels
     mocks.messages = undefined
+    mocks.members = undefined
 
     render(<ConvexDogfoodApp />)
 
     expect(await screen.findByRole("heading", { name: "Aether Dogfood" })).toBeTruthy()
     expect(screen.getByText("messages loading")).toBeTruthy()
+    expect(screen.getByText("members loading")).toBeTruthy()
     expect(screen.queryByRole("heading", { name: "Loading Chat" })).toBeNull()
   })
 
@@ -455,6 +538,7 @@ describe("ConvexDogfoodApp", () => {
     render(<ConvexDogfoodApp />)
 
     fireEvent.click(await screen.findByRole("button", { name: "design" }))
+    await waitFor(() => expect(mocks.ensureChannelMember).toHaveBeenCalledWith({ channelId: channels[1]!.id }))
     expect(await screen.findByText("Design kickoff is scoped here.")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Send mock message" }))
 
@@ -464,6 +548,62 @@ describe("ConvexDogfoodApp", () => {
         body: "Hello from dogfood"
       })
     )
+  })
+
+  it("marks the active channel read after its messages load", async () => {
+    const { ConvexDogfoodApp } = await import("./dogfood-chat")
+    mocks.auth.user = { id: "user-1" }
+    mocks.convexAuth.isAuthenticated = true
+    mocks.workspace = workspace
+    mocks.channels = channels
+    mocks.messages = messages
+
+    render(<ConvexDogfoodApp />)
+
+    await waitFor(() =>
+      expect(mocks.markChannelRead).toHaveBeenCalledWith({
+        channelId: workspace.channel.id,
+        readThroughCreatedAt: 42
+      })
+    )
+  })
+
+  it("marks the active channel read through the newest loaded message without repeating the same marker", async () => {
+    const { ConvexDogfoodApp } = await import("./dogfood-chat")
+    mocks.auth.user = { id: "user-1" }
+    mocks.convexAuth.isAuthenticated = true
+    mocks.workspace = workspace
+    mocks.channels = channels
+    mocks.messages = messagesWithAnotherAuthor
+
+    const { rerender } = render(<ConvexDogfoodApp />)
+
+    await waitFor(() =>
+      expect(mocks.markChannelRead).toHaveBeenCalledWith({
+        channelId: workspace.channel.id,
+        readThroughCreatedAt: 43
+      })
+    )
+    expect(mocks.markChannelRead).toHaveBeenCalledTimes(1)
+
+    rerender(<ConvexDogfoodApp />)
+
+    await waitFor(() => expect(mocks.markChannelRead).toHaveBeenCalledTimes(1))
+  })
+
+  it("passes per-channel indicators through to the reused chat surface", async () => {
+    const { ConvexDogfoodApp } = await import("./dogfood-chat")
+    mocks.auth.user = { id: "user-1" }
+    mocks.convexAuth.isAuthenticated = true
+    mocks.workspace = workspace
+    mocks.channels = channels
+    mocks.messages = messages
+    mocks.channelIndicators = [{ channelId: channels[1]!.id, indicator: "unread" }]
+
+    render(<ConvexDogfoodApp />)
+
+    const channelList = await screen.findByRole("list", { name: "mock channels" })
+    expect(within(channelList).getByText("unread")).toBeTruthy()
   })
 
   it("creates channels through the Convex mutation", async () => {
@@ -479,6 +619,29 @@ describe("ConvexDogfoodApp", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Create design channel" }))
 
     await waitFor(() => expect(mocks.createChannel).toHaveBeenCalledWith({ name: "design" }))
+  })
+
+  it("joins a selected shared channel before loading its messages", async () => {
+    const { ConvexDogfoodApp } = await import("./dogfood-chat")
+    mocks.auth.user = { id: "user-1" }
+    mocks.convexAuth.isAuthenticated = true
+    mocks.workspace = workspace
+    mocks.channels = channels
+    mocks.messagesByChannel = {
+      "channel-1": messages,
+      "channel-2": designMessages
+    }
+    mocks.ensureChannelMember.mockImplementation(async () => {
+      await Promise.resolve()
+    })
+
+    render(<ConvexDogfoodApp />)
+
+    fireEvent.click(await screen.findByRole("button", { name: "design" }))
+
+    expect(screen.getByText("messages loading")).toBeTruthy()
+    await waitFor(() => expect(mocks.ensureChannelMember).toHaveBeenCalledWith({ channelId: channels[1]!.id }))
+    expect(await screen.findByText("Design kickoff is scoped here.")).toBeTruthy()
   })
 
   it("wires edit and hard delete mutations for the current author only", async () => {
