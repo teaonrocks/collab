@@ -34,6 +34,7 @@ export type ChatDataModel = Pick<CollabSnapshot, "currentUser" | "workspace" | "
 
 export type CreateChatChannel = (input: {
   readonly name: string
+  readonly visibility?: Channel["visibility"]
 }) => Promise<Channel>
 
 export type SelectChatChannel = (channelId: ChannelId) => void

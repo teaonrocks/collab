@@ -201,6 +201,7 @@ describe("App", () => {
     expect(within(directMessages).getByRole("button", { name: "Maya Patel" })).toBeTruthy()
     expect(within(directMessages).getByRole("tooltip", { name: "Maya Patel" })).toBeTruthy()
     expect(screen.getByLabelText("Channel members").querySelector("[aria-busy='true']")).toBeTruthy()
+    expect(document.querySelector(".chatTimeline [class*='skeletonPulse']")).toBeTruthy()
     expect(document.querySelector("[class*='skeletonPulse']")).toBeTruthy()
   })
 
@@ -253,7 +254,7 @@ describe("App", () => {
   })
 
   it("creates a channel from the add channel dialog", async () => {
-    const calls: Array<{ readonly name: string }> = []
+    const calls: Array<{ readonly name: string; readonly visibility?: "public" | "private" }> = []
 
     render(
       <WorkspaceChat
@@ -266,7 +267,7 @@ describe("App", () => {
             id: secondChannelId,
             workspaceId,
             name: input.name,
-            visibility: "public",
+            visibility: input.visibility ?? "public",
             createdBy: userId,
             createdAt: 4
           }))
@@ -281,7 +282,38 @@ describe("App", () => {
     fireEvent.change(within(form).getByLabelText("Channel name"), { target: { value: "  #Product Team  " } })
     fireEvent.submit(form)
 
-    await waitFor(() => expect(calls).toEqual([{ name: "product-team" }]))
+    await waitFor(() => expect(calls).toEqual([{ name: "product-team", visibility: "public" }]))
+  })
+
+  it("creates a private channel when the private switch is enabled", async () => {
+    const calls: Array<{ readonly name: string; readonly visibility?: "public" | "private" }> = []
+
+    render(
+      <WorkspaceChat
+        model={makeChatModel()}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+        createChannel={(input) => {
+          calls.push(input)
+          return Promise.resolve(new Channel({
+            id: secondChannelId,
+            workspaceId,
+            name: input.name,
+            visibility: input.visibility ?? "public",
+            createdBy: userId,
+            createdAt: 4
+          }))
+        }}
+      />
+    )
+
+    fireEvent.click(await screen.findByRole("button", { name: "Add channel" }))
+    const form = await screen.findByRole("form", { name: "Create channel" })
+    fireEvent.change(within(form).getByLabelText("Channel name"), { target: { value: "ops" } })
+    fireEvent.click(within(form).getByRole("switch", { name: "Private channel" }))
+    fireEvent.submit(form)
+
+    await waitFor(() => expect(calls).toEqual([{ name: "ops", visibility: "private" }]))
   })
 
   it("keeps the channel creation dialog state scoped to an open attempt", async () => {
@@ -305,6 +337,7 @@ describe("App", () => {
     const form = await screen.findByRole("form", { name: "Create channel" })
     const channelName = within(form).getByLabelText("Channel name") as HTMLInputElement
     const createButton = within(form).getByRole("button", { name: "Create" }) as HTMLButtonElement
+    const privateSwitch = within(form).getByRole("switch", { name: "Private channel" }) as HTMLButtonElement
     expect(createButton.disabled).toBe(true)
 
     fireEvent.change(channelName, { target: { value: "   " } })
@@ -312,6 +345,8 @@ describe("App", () => {
 
     fireEvent.change(channelName, { target: { value: "ops" } })
     expect(createButton.disabled).toBe(false)
+    fireEvent.click(privateSwitch)
+    expect(privateSwitch.getAttribute("aria-checked")).toBe("true")
     fireEvent.click(within(form).getByRole("button", { name: "Cancel" }))
 
     expect(screen.queryByRole("dialog", { name: "Create Channel" })).toBeNull()
@@ -319,6 +354,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add channel" }))
     const nextForm = await screen.findByRole("form", { name: "Create channel" })
     expect((within(nextForm).getByLabelText("Channel name") as HTMLInputElement).value).toBe("")
+    expect((within(nextForm).getByRole("switch", { name: "Private channel" }) as HTMLButtonElement).getAttribute("aria-checked")).toBe("false")
     expect((within(nextForm).getByRole("button", { name: "Create" }) as HTMLButtonElement).disabled).toBe(true)
   })
 
@@ -408,7 +444,7 @@ describe("App", () => {
 
     fireEvent.change(input, { target: { value: "product" } })
     expect(within(form).queryByText("Channel already exists.")).toBeNull()
-    expect(calls).toEqual([{ name: "design" }])
+    expect(calls).toEqual([{ name: "design", visibility: "public" }])
   })
 
   it("opens profile settings from the rail avatar", async () => {
@@ -510,7 +546,7 @@ describe("App", () => {
     expect(within(channels).queryByLabelText("Unread messages")).toBeNull()
   })
 
-  it("shows an edited marker when a channel message has an edited timestamp", async () => {
+  it("shows edited message time with a trailing marker in the timestamp", async () => {
     renderApp(makeSnapshot([
       new ChannelMessage({
         id: messageId,
@@ -525,7 +561,12 @@ describe("App", () => {
       })
     ]))
 
-    expect(await screen.findByText("edited")).toBeTruthy()
+    expect(await screen.findByText("The partner brief is ready.")).toBeTruthy()
+    const timestamp = document.querySelector(".chatTimeline .messageMeta .messageTimestamp")
+    expect(timestamp?.getAttribute("dateTime")).toBe(new Date(4).toISOString())
+    expect(timestamp?.textContent).toMatch(/^\d{2}\/\d{2} \d{2}:\d{2}\*$/)
+    expect(timestamp?.textContent?.endsWith("*")).toBe(true)
+    expect(document.querySelector(".chatTimeline .messageEdited")).toBeNull()
   })
 
   it("sends a channel message from the bottom composer with Enter", async () => {
@@ -640,8 +681,22 @@ describe("App", () => {
     expect(Array.from(container.querySelectorAll(".chatTimeline .messageRunAvatar")).map((avatar) => avatar.textContent)).toEqual(["MP", "LC", "MP"])
     expect(container.querySelectorAll(".chatTimeline .messageRun").item(0).querySelectorAll(".channelMessage")).toHaveLength(2)
     expect(Array.from(container.querySelectorAll(".chatTimeline .messageMeta strong")).map((name) => name.textContent)).toEqual(["Maya Patel", "Lee Chen", "Maya Patel"])
-    expect(Array.from(container.querySelectorAll(".chatTimeline .messageTimestamp")).map((timestamp) => timestamp.classList.contains("hidden"))).toEqual([false, true, false, false])
-    expect(container.querySelector(".chatTimeline .channelMessage.compact .compactEdited")?.textContent).toBe("edited")
+    const compactTimestamp = container.querySelector(".chatTimeline .channelMessage.compact .messageAvatarCell .messageTimestamp")
+    expect(compactTimestamp?.closest("article")?.className).toContain("items-center")
+    expect(compactTimestamp).not.toBeNull()
+    expect(compactTimestamp?.classList.contains("hidden")).toBe(false)
+    expect(compactTimestamp?.className).toContain("mt-[3px]")
+    expect(compactTimestamp?.className).toContain("inline-flex")
+    expect(compactTimestamp?.className).toContain("flex-col")
+    expect(compactTimestamp?.className).toContain("opacity-0")
+    expect(compactTimestamp?.className).toContain("group-hover/message:opacity-100")
+    expect(compactTimestamp?.getAttribute("dateTime")).toBe(new Date(6).toISOString())
+    expect(Array.from(compactTimestamp?.querySelectorAll("span") ?? []).map((part) => part.textContent)).toEqual([
+      expect.stringMatching(/^\d{2}\/\d{2}$/),
+      expect.stringMatching(/^\d{2}:\d{2}\*$/)
+    ])
+    expect(compactTimestamp?.textContent?.endsWith("*")).toBe(true)
+    expect(container.querySelector(".chatTimeline .channelMessage.compact .messageEdited")).toBeNull()
   })
 
   it("shows channel skeletons while selected channel messages load", async () => {
@@ -656,6 +711,7 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: "Aether Labs" })).toBeTruthy()
     expect(screen.queryByText("No messages yet")).toBeNull()
     expect(container.querySelectorAll(".channelMessageSkeleton")).toHaveLength(7)
+    expect(container.querySelectorAll(".chatTimeline [class*='skeletonPulse']")).toHaveLength(21)
     expect(screen.getByLabelText("Channel members").querySelectorAll("[class*='skeletonPulse']")).toHaveLength(12)
     expect((screen.getByPlaceholderText("Message origination") as HTMLTextAreaElement).disabled).toBe(true)
   })

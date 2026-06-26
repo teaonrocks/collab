@@ -368,7 +368,7 @@ export const dogfoodChatToChatData = (input: {
   }>
   readonly messagesLoading?: boolean
   readonly membersLoading?: boolean
-  readonly createChannel?: (input: { readonly name: string }) => Promise<DogfoodChannelView>
+  readonly createChannel?: (input: { readonly name: string; readonly visibility?: "public" | "private" }) => Promise<DogfoodChannelView>
   readonly selectChannel?: (channelId: Id<"channels">) => void
   readonly sendMessage: (input: { readonly channelId: Id<"channels">; readonly body: string }) => Promise<unknown>
   readonly editMessage: (input: {
@@ -437,8 +437,8 @@ export const dogfoodChatToChatData = (input: {
     },
     createChannel: input.createChannel === undefined
       ? undefined
-      : async ({ name }) => {
-        const channel = await input.createChannel!({ name })
+      : async ({ name, visibility }) => {
+        const channel = await input.createChannel!({ name, visibility })
         return new Channel({
           id: toChannelId(channel.id),
           workspaceId,

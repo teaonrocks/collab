@@ -43,6 +43,7 @@ import {
   DialogFooter,
   DialogTitle,
   Input,
+  Switch,
   Textarea
 } from "./ui"
 
@@ -100,11 +101,11 @@ const chatTimelineClassName =
 const channelMessageGroupClassName =
   "channelMessageGroup min-w-0"
 const channelMessageClassName =
-  "channelMessage group/message relative grid min-w-0 grid-cols-[var(--message-avatar-column)_minmax(0,1fr)] items-start justify-start gap-[var(--message-column-gap)] border border-transparent bg-transparent px-[var(--message-group-x)] py-2 hover:bg-surface-muted focus-within:bg-surface-muted"
+  "channelMessage group/message relative grid min-w-0 grid-cols-[var(--message-avatar-column)_minmax(0,1fr)] items-start gap-[var(--message-column-gap)] border border-transparent bg-transparent px-[var(--message-group-x)] py-2 hover:bg-surface-muted focus-within:bg-surface-muted"
 const messageContentClassName =
-  "messageContent min-w-0 max-w-[820px]"
+  "messageContent min-w-0 w-full"
 const messageBodyClassName =
-  "mb-0 mt-[3px] text-sm leading-[1.42] text-foreground [overflow-wrap:anywhere]"
+  "mb-0 mt-[3px] w-full text-sm leading-[1.42] text-foreground break-words"
 const iconClassName =
   "size-4 [stroke-width:2]"
 const messageActionButtonClassName =
@@ -473,6 +474,7 @@ function ChannelSidebar(props: {
   } = props
   const [creating, setCreating] = useState(false)
   const [draft, setDraft] = useState("")
+  const [privateChannel, setPrivateChannel] = useState(false)
   const [saving, setSaving] = useState(false)
   const showAgentParkedPanel = import.meta.env.VITE_AETHER_SHOW_AGENT_UI === "true"
   const canCreate = createChannel !== undefined
@@ -480,6 +482,7 @@ function ChannelSidebar(props: {
     if (saving) return
     setCreating(false)
     setDraft("")
+    setPrivateChannel(false)
     onChannelOperationError(null)
   }
   const submitChannel = (event: FormEvent<HTMLFormElement>) => {
@@ -492,9 +495,13 @@ function ChannelSidebar(props: {
     }
     setSaving(true)
     onChannelOperationError(null)
-    void createChannel({ name: validation.name })
+    void createChannel({
+      name: validation.name,
+      visibility: privateChannel ? "private" : "public"
+    })
       .then(() => {
         setDraft("")
+        setPrivateChannel(false)
         setCreating(false)
       })
       .catch((cause: unknown) => onChannelOperationError(channelCreateErrorMessage(cause)))
@@ -587,12 +594,14 @@ function ChannelSidebar(props: {
         ? (
           <CreateChannelDialog
             draft={draft}
+            privateChannel={privateChannel}
             saving={saving}
             error={channelOperationError}
             onDraftChange={(nextDraft) => {
               setDraft(nextDraft)
               if (channelOperationError !== null) onChannelOperationError(null)
             }}
+            onPrivateChannelChange={setPrivateChannel}
             onSubmit={submitChannel}
             onCancel={closeCreateDialog}
           />
@@ -604,13 +613,15 @@ function ChannelSidebar(props: {
 
 function CreateChannelDialog(props: {
   readonly draft: string
+  readonly privateChannel: boolean
   readonly saving: boolean
   readonly error: string | null
   readonly onDraftChange: (draft: string) => void
+  readonly onPrivateChannelChange: (privateChannel: boolean) => void
   readonly onSubmit: (event: FormEvent<HTMLFormElement>) => void
   readonly onCancel: () => void
 }) {
-  const { draft, saving, error, onDraftChange, onSubmit, onCancel } = props
+  const { draft, privateChannel, saving, error, onDraftChange, onPrivateChannelChange, onSubmit, onCancel } = props
 
   const handleOpenChange = (open: boolean) => {
     if (!open) onCancel()
@@ -623,8 +634,8 @@ function CreateChannelDialog(props: {
         <DialogDescription id="create-channel-description" className="sr-only">
           Name the channel to add it to this workspace.
         </DialogDescription>
-        <form className="mt-3 flex flex-col gap-2.5" aria-label="Create channel" onSubmit={onSubmit}>
-          <label className="text-[13px] font-bold text-foreground-muted" htmlFor="new-channel-name">
+        <form className="mt-3 flex flex-col gap-3" aria-label="Create channel" onSubmit={onSubmit}>
+          <label className="sr-only" htmlFor="new-channel-name">
             Channel name
           </label>
           <Input
@@ -639,6 +650,23 @@ function CreateChannelDialog(props: {
               onDraftChange(event.target.value)
             }}
           />
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p id="create-channel-private-label" className="m-0 text-[13px] font-bold text-foreground">
+                Private channel
+              </p>
+              <p className="m-0 mt-0.5 text-xs leading-[1.35] text-foreground-subtle">
+                Only invited members can see this channel.
+              </p>
+            </div>
+            <Switch
+              id="create-channel-private"
+              checked={privateChannel}
+              disabled={saving}
+              aria-labelledby="create-channel-private-label"
+              onCheckedChange={onPrivateChannelChange}
+            />
+          </div>
           <p
             id="create-channel-error"
             className={classNames(
@@ -818,17 +846,18 @@ function ChannelMessagesSkeleton() {
       {Array.from({ length: 7 }, (_, index) => (
         <li
           key={index}
-          className="channelMessageSkeleton grid min-w-0 grid-cols-[40px_minmax(0,760px)] items-start gap-2.5 px-2.5 py-2"
+          className="channelMessageSkeleton grid min-w-0 grid-cols-[var(--message-avatar-column)_minmax(0,1fr)] items-start gap-[var(--message-column-gap)] px-[var(--message-group-x)] py-2"
           aria-hidden="true"
         >
-          <span className="skeletonAvatar" />
-          <span className="skeletonMessageContent flex min-w-0 flex-col gap-2 pt-[3px]">
-            <span className="skeletonLine meta h-3 w-[min(220px,45%)]" />
+          <span className={classNames(skeletonBlockClassName, "mx-auto size-9 rounded-card")} />
+          <span className="flex min-w-0 flex-col gap-2 pt-[3px]">
+            <span className={classNames(skeletonBlockClassName, "h-3 w-[min(220px,45%)]")} />
             <span
               className={classNames(
-                "skeletonLine body h-3.5 w-[min(680px,88%)]",
-                index % 3 === 0 && "short w-[min(420px,58%)]",
-                index % 3 === 1 && "medium w-[min(560px,72%)]"
+                skeletonBlockClassName,
+                "h-3.5 w-[min(680px,88%)]",
+                index % 3 === 0 && "w-[min(420px,58%)]",
+                index % 3 === 1 && "w-[min(560px,72%)]"
               )}
             />
           </span>
@@ -870,9 +899,11 @@ function ChannelMessageRow(props: {
   } = props
   const deleted = message.deletedAt !== null
   const editing = editingDraft !== null
+  const displayTimestamp = message.editedAt ?? message.createdAt
+  const edited = message.editedAt !== null
   const className = classNames(
     channelMessageClassName,
-    !startsAuthorRun && "compact",
+    !startsAuthorRun && "compact items-center",
     deleted && "deleted text-foreground-placeholder",
     editing && "editing bg-surface-muted",
     selected && "selected border-border bg-surface-muted",
@@ -930,10 +961,13 @@ function ChannelMessageRow(props: {
           )
           : (
             <time
-              className="messageTimestamp hidden whitespace-nowrap text-xs text-foreground-subtle [display:inline] opacity-0 group-hover/message:opacity-100 group-focus-within/message:opacity-100"
-              dateTime={toIso(message.createdAt)}
+              className="messageTimestamp mt-[3px] inline-flex flex-col items-center whitespace-nowrap text-[11px] leading-tight text-foreground-subtle opacity-0 group-hover/message:opacity-100 group-focus-within/message:opacity-100"
+              dateTime={toIso(displayTimestamp)}
+              title={edited ? `Edited ${formatTime(displayTimestamp)}` : undefined}
+              aria-label={`${formatTime(displayTimestamp)}${edited ? " edited" : ""}`}
             >
-              {formatTime(message.createdAt)}
+              <span>{formatDatePart(displayTimestamp)}</span>
+              <span>{formatClockPart(displayTimestamp)}{edited ? "*" : ""}</span>
             </time>
           )}
       </div>
@@ -944,13 +978,11 @@ function ChannelMessageRow(props: {
               <strong className="min-w-0 text-sm font-bold text-foreground [overflow-wrap:anywhere]">{message.authorDisplayName}</strong>
               <time
                 className="messageTimestamp whitespace-nowrap text-xs text-foreground-subtle"
-                dateTime={toIso(message.createdAt)}
+                dateTime={toIso(displayTimestamp)}
+                title={edited ? `Edited ${formatTime(displayTimestamp)}` : undefined}
               >
-                {formatTime(message.createdAt)}
+                {formatTime(displayTimestamp)}{edited ? "*" : ""}
               </time>
-              {message.editedAt === null
-                ? null
-                : <span className="messageEdited whitespace-nowrap text-xs text-foreground-subtle" title={`Edited ${formatTime(message.editedAt)}`}>edited</span>}
             </div>
           )
           : null}
@@ -967,16 +999,6 @@ function ChannelMessageRow(props: {
           )
           : <p className={classNames(messageBodyClassName, deleted && "text-foreground-placeholder italic")}>{deleted ? "Message deleted" : message.body}</p>}
       </div>
-      {message.editedAt === null || startsAuthorRun
-        ? null
-        : (
-          <span
-            className="messageEdited compactEdited absolute right-[var(--message-group-x)] top-2.5 whitespace-nowrap text-xs text-foreground-subtle"
-            title={`Edited ${formatTime(message.editedAt)}`}
-          >
-            edited
-          </span>
-        )}
       {deleted || editing || !actionsAvailable
         ? null
         : (
@@ -1357,10 +1379,22 @@ const resizeTextarea = (textarea: HTMLTextAreaElement | null, minHeight: number,
   textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden"
 }
 
-const messageTimeFormatter = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" })
+const formatTime = (timestamp: number): string => {
+  const date = new Date(timestamp)
+  return `${formatDatePart(timestamp)} ${formatClockPart(timestamp)}`
+}
 
-const formatTime = (timestamp: number): string =>
-  messageTimeFormatter.format(new Date(timestamp))
+const formatDatePart = (timestamp: number): string => {
+  const date = new Date(timestamp)
+  return `${padTimePart(date.getDate())}/${padTimePart(date.getMonth() + 1)}`
+}
+
+const formatClockPart = (timestamp: number): string => {
+  const date = new Date(timestamp)
+  return `${padTimePart(date.getHours())}:${padTimePart(date.getMinutes())}`
+}
+
+const padTimePart = (value: number): string => value.toString().padStart(2, "0")
 
 const toIso = (timestamp: number): string => new Date(timestamp).toISOString()
 

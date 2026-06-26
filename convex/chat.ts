@@ -177,6 +177,60 @@ const listVisibleWorkspaceChannels = async (
   return channels.filter((channel) => channel.visibility === "public" || memberChannelIds.has(channel.id))
 }
 
+const listChannelMembers = async (
+  ctx: QueryCtx | MutationCtx,
+  channelId: Id<"channels">
+) => {
+  const memberships = await ctx.db
+    .query("channelMemberships")
+    .withIndex("by_channel", (q) => q.eq("channelId", channelId))
+    .collect()
+
+  const members: Array<{
+    readonly id: Id<"users">
+    readonly displayName: string
+    readonly joinedAt: number
+  }> = []
+  for (const membership of memberships) {
+    const member = await ctx.db.get(membership.userId)
+    if (member === null) continue
+    members.push({
+      id: member._id,
+      displayName: member.displayName,
+      joinedAt: membership.createdAt
+    })
+  }
+
+  return members.sort((left, right) => left.displayName.localeCompare(right.displayName) || left.joinedAt - right.joinedAt)
+}
+
+const listWorkspaceMembers = async (
+  ctx: QueryCtx | MutationCtx,
+  workspaceId: Id<"workspaces">
+) => {
+  const memberships = await ctx.db
+    .query("workspaceMemberships")
+    .withIndex("by_workspace", (q) => q.eq("workspaceId", workspaceId))
+    .collect()
+
+  const members: Array<{
+    readonly id: Id<"users">
+    readonly displayName: string
+    readonly joinedAt: number
+  }> = []
+  for (const membership of memberships) {
+    const member = await ctx.db.get(membership.userId)
+    if (member === null) continue
+    members.push({
+      id: member._id,
+      displayName: member.displayName,
+      joinedAt: membership.createdAt
+    })
+  }
+
+  return members.sort((left, right) => left.displayName.localeCompare(right.displayName) || left.joinedAt - right.joinedAt)
+}
+
 const listPublicWorkspaceChannelIds = async (ctx: QueryCtx | MutationCtx, workspaceId: Id<"workspaces">) => {
   const channels = await ctx.db
     .query("channels")
@@ -524,7 +578,8 @@ export const markChannelRead = mutation({
 
 export const createChannel = mutation({
   args: {
-    name: v.string()
+    name: v.string(),
+    visibility: v.optional(v.union(v.literal("public"), v.literal("private")))
   },
   handler: async (ctx, args) => {
     const user = await requireAllowedCurrentUser(ctx)
@@ -547,7 +602,7 @@ export const createChannel = mutation({
       workspaceId: workspace._id,
       key,
       name,
-      visibility: "public",
+      visibility: args.visibility ?? "public",
       createdAt: now
     })
 
@@ -591,29 +646,13 @@ export const channelMembers = query({
   handler: async (ctx, args) => {
     const user = await requireAllowedCurrentUser(ctx)
 
-    await requireChannelMember(ctx, { channelId: args.channelId, userId: user._id })
+    const channel = await requireChannelMember(ctx, { channelId: args.channelId, userId: user._id })
 
-    const memberships = await ctx.db
-      .query("channelMemberships")
-      .withIndex("by_channel", (q) => q.eq("channelId", args.channelId))
-      .collect()
-
-    const members: Array<{
-      readonly id: Id<"users">
-      readonly displayName: string
-      readonly joinedAt: number
-    }> = []
-    for (const membership of memberships) {
-      const member = await ctx.db.get(membership.userId)
-      if (member === null) continue
-      members.push({
-        id: member._id,
-        displayName: member.displayName,
-        joinedAt: membership.createdAt
-      })
+    if (channel.visibility === "public") {
+      return listWorkspaceMembers(ctx, channel.workspaceId)
     }
 
-    return members.sort((left, right) => left.displayName.localeCompare(right.displayName) || left.joinedAt - right.joinedAt)
+    return listChannelMembers(ctx, args.channelId)
   }
 })
 

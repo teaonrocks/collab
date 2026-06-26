@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
   Input,
   ScrollArea,
+  Switch,
   Textarea,
   Tooltip,
   TooltipContent,
@@ -38,10 +39,13 @@ describe("renderer UI foundation", () => {
         <Textarea aria-label="Message" />
         <Badge>Beta</Badge>
         <Avatar name="Maya Patel" />
+        <Switch aria-label="Enable notifications" />
       </section>
     )
 
     expect(screen.getByRole("button", { name: "Send" })).toBeTruthy()
+    expect(screen.getByRole("switch", { name: "Enable notifications" })).toBeTruthy()
+    expect(screen.getByRole("switch", { name: "Enable notifications" }).className).toContain("rounded-full")
     expect(screen.getByRole("button", { name: "Send" }).className).toContain("bg-foreground")
     expect(screen.getByRole("textbox", { name: "Channel name" })).toBeTruthy()
     expect(screen.getByRole("textbox", { name: "Channel name" }).className).toContain("border-border-strong")

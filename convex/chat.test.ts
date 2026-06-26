@@ -50,6 +50,16 @@ describe("dogfood channel memberships", () => {
 
     await expect(t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "product team" }))
       .rejects.toThrow("Channel already exists")
+
+    const privateChannel = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, {
+      name: "leadership",
+      visibility: "private"
+    })
+    expect(privateChannel).toMatchObject({
+      key: "leadership",
+      name: "leadership",
+      visibility: "private"
+    })
   })
 
   it("lets allowlisted users idempotently join created shared channels before reading messages", async () => {
@@ -322,5 +332,34 @@ describe("dogfood channel memberships", () => {
 
     await expect(t.withIdentity(leeIdentity).query(api.chat.channelIndicators, { workspaceId }))
       .resolves.toEqual([{ channelId: design.id, indicator: "mentioned" }])
+  })
+
+  it("lists every workspace member for public channels and only channel members for private channels", async () => {
+    const t = convexTest(schema, modules)
+    await t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: mayaIdentity.tokenIdentifier,
+      email: mayaIdentity.email,
+      displayName: mayaIdentity.name
+    })
+    await t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: leeIdentity.tokenIdentifier,
+      email: leeIdentity.email,
+      displayName: leeIdentity.name
+    })
+
+    const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design" })
+    const leadership = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, {
+      name: "leadership",
+      visibility: "private"
+    })
+
+    await expect(t.withIdentity(mayaIdentity).query(api.chat.channelMembers, { channelId: design.id }))
+      .resolves.toEqual([
+        expect.objectContaining({ displayName: "Lee Chen" }),
+        expect.objectContaining({ displayName: "Maya Patel" })
+      ])
+
+    await expect(t.withIdentity(mayaIdentity).query(api.chat.channelMembers, { channelId: leadership.id }))
+      .resolves.toEqual([expect.objectContaining({ displayName: "Maya Patel" })])
   })
 })
