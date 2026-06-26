@@ -81,6 +81,14 @@ const mentionCandidates = (displayName: string): ReadonlyArray<string> => {
     .filter((value) => value.length > 1)
 }
 
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+const mentionsDisplayName = (body: string, displayName: string): boolean =>
+  mentionCandidates(displayName).some((candidate) => {
+    const mention = new RegExp(`(^|[^A-Za-z0-9_])${escapeRegExp(candidate)}($|[^A-Za-z0-9_])`, "i")
+    return mention.test(body)
+  })
+
 const displayNameFromIdentity = (identity: ViewerIdentity, email: string): string => {
   const name = (identity.name ?? stringClaim(identity, "properties.name"))?.trim()
   if (name !== undefined && name.length > 0) return name
@@ -563,7 +571,6 @@ export const channelIndicators = query({
       .withIndex("by_user", (q) => q.eq("userId", user._id))
       .collect()
     const membershipsByChannelId = new Map(memberships.map((membership) => [membership.channelId, membership]))
-    const needles = mentionCandidates(user.displayName)
     const indicators: Array<{
       readonly channelId: Id<"channels">
       readonly indicator: "unread" | "mentioned"
@@ -582,8 +589,7 @@ export const channelIndicators = query({
       for await (const message of messages) {
         if (message.authorUserId === user._id) continue
         hasUnread = true
-        const body = message.body.toLowerCase()
-        if (needles.some((needle) => body.includes(needle))) {
+        if (mentionsDisplayName(message.body, user.displayName)) {
           mentioned = true
           break
         }

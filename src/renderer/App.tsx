@@ -158,6 +158,11 @@ const memberRoleClassName =
 const skeletonBlockClassName =
   "block overflow-hidden rounded-panel bg-[linear-gradient(90deg,var(--aether-color-surface-muted-hover)_0%,var(--aether-color-surface-shimmer)_48%,var(--aether-color-surface-muted-hover)_100%)] bg-[length:220%_100%] motion-safe:animate-[skeletonPulse_1.15s_ease-in-out_infinite]"
 
+const channelIndicatorDescription = (indicator: ChatChannelIndicator, channelName: string): string =>
+  indicator === "mentioned"
+    ? `Mention in #${channelName} since you last opened it. No native push is sent.`
+    : `Unread messages in #${channelName} since you last opened it. No native push is sent.`
+
 export function App() {
   const snapshot = useAtomValue(atoms.snapshot)
   const createChannelMessage = useAtomSet(atoms.createChannelMessage, { mode: "promise" })
@@ -686,6 +691,7 @@ function ChannelSidebar(props: {
           {channels.map((channel) => {
             const active = channel.id === activeChannelId
             const channelIndicator = active ? null : channelIndicators.get(channel.id) ?? null
+            const indicatorLabel = channelIndicator === null ? null : channelIndicatorDescription(channelIndicator, channel.name)
             return (
               <button
                 key={channel.id}
@@ -709,7 +715,8 @@ function ChannelSidebar(props: {
                         "channelIndicator size-2 shrink-0 rounded-full",
                         channelIndicator === "mentioned" ? "mentioned bg-signal-mentioned" : "unread bg-signal-unread"
                       )}
-                      aria-label={channelIndicator === "mentioned" ? "Mentioned" : "Unread messages"}
+                      aria-label={indicatorLabel ?? undefined}
+                      title={indicatorLabel ?? undefined}
                     />
                   )
                   : null}

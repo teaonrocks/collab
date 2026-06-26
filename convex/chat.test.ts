@@ -334,6 +334,50 @@ describe("dogfood channel memberships", () => {
       .resolves.toEqual([{ channelId: design.id, indicator: "mentioned" }])
   })
 
+  it("keeps near-match mention text as unread instead of mentioned", async () => {
+    const t = convexTest(schema, modules)
+    await t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: mayaIdentity.tokenIdentifier,
+      email: mayaIdentity.email,
+      displayName: mayaIdentity.name
+    })
+    await t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: leeIdentity.tokenIdentifier,
+      email: leeIdentity.email,
+      displayName: leeIdentity.name
+    })
+
+    const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design" })
+    await t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: design.id })
+
+    const workspaceId = await t.run(async (ctx) => {
+      const workspace = await ctx.db.query("workspaces").withIndex("by_key", (q) => q.eq("key", "aether-dogfood")).unique()
+      const maya = await ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", mayaIdentity.email)).unique()
+      const lee = await ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", leeIdentity.email)).unique()
+      if (workspace === null || maya === null || lee === null) throw new Error("Seed records not found")
+      const membership = await ctx.db
+        .query("channelMemberships")
+        .withIndex("by_channel_user", (q) => q.eq("channelId", design.id).eq("userId", lee._id))
+        .unique()
+      if (membership === null) throw new Error("Membership not found")
+      await ctx.db.patch(membership._id, { lastReadAt: 1 })
+
+      await ctx.db.insert("messages", {
+        workspaceId: workspace._id,
+        channelId: design.id,
+        authorUserId: maya._id,
+        authorDisplayName: maya.displayName,
+        body: "Could @Leeland review lee@example.com before launch?",
+        createdAt: 100
+      })
+
+      return workspace._id
+    })
+
+    await expect(t.withIdentity(leeIdentity).query(api.chat.channelIndicators, { workspaceId }))
+      .resolves.toEqual([{ channelId: design.id, indicator: "unread" }])
+  })
+
   it("lists every workspace member for public channels and only channel members for private channels", async () => {
     const t = convexTest(schema, modules)
     await t.mutation(internal.chat.ensureViewerForIdentity, {

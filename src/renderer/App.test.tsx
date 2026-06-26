@@ -505,7 +505,9 @@ describe("App", () => {
 
     const channels = await screen.findByRole("navigation", { name: "Channels" })
 
-    expect(within(channels).getByLabelText("Unread messages")).toBeTruthy()
+    const indicator = within(channels).getByLabelText("Unread messages in #design since you last opened it. No native push is sent.")
+    expect(indicator).toBeTruthy()
+    expect(indicator.getAttribute("title")).toBe("Unread messages in #design since you last opened it. No native push is sent.")
     expect(within(channels).queryByText("2")).toBeNull()
   })
 
@@ -534,8 +536,10 @@ describe("App", () => {
 
     const channels = await screen.findByRole("navigation", { name: "Channels" })
 
-    expect(within(channels).getByLabelText("Mentioned")).toBeTruthy()
-    expect(within(channels).queryByLabelText("Unread messages")).toBeNull()
+    const indicator = within(channels).getByLabelText("Mention in #design since you last opened it. No native push is sent.")
+    expect(indicator).toBeTruthy()
+    expect(indicator.getAttribute("title")).toBe("Mention in #design since you last opened it. No native push is sent.")
+    expect(within(channels).queryByLabelText("Unread messages in #design since you last opened it. No native push is sent.")).toBeNull()
   })
 
   it("does not show stale unread state on the current channel", async () => {
@@ -554,8 +558,8 @@ describe("App", () => {
 
     const channels = await screen.findByRole("navigation", { name: "Channels" })
 
-    expect(within(channels).queryByLabelText("Mentioned")).toBeNull()
-    expect(within(channels).queryByLabelText("Unread messages")).toBeNull()
+    expect(within(channels).queryByLabelText("Mention in #origination since you last opened it. No native push is sent.")).toBeNull()
+    expect(within(channels).queryByLabelText("Unread messages in #origination since you last opened it. No native push is sent.")).toBeNull()
   })
 
   it("shows edited message time with a trailing marker in the timestamp", async () => {
