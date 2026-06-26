@@ -134,13 +134,20 @@ const openMessageMenu = async (authorDisplayName: string) => {
   return screen.findByRole("menu", { name: new RegExp(`message from ${authorDisplayName}`) })
 }
 
+const openMessageSearch = async () => {
+  fireEvent.click(await screen.findByRole("button", { name: "Show search" }))
+  return screen.findByPlaceholderText("Search origination")
+}
+
 describe("App", () => {
   it("renders the chat workspace from CollabApi", async () => {
     renderApp(makeSnapshot())
 
     expect(await screen.findByRole("heading", { name: "Aether Labs" })).toBeTruthy()
     expect(await screen.findByText(/partner brief/)).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Show search" })).toBeTruthy()
     expect(screen.getByRole("button", { name: "Hide members" })).toBeTruthy()
+    expect(document.querySelector(".channelMessageSearch")?.className).toContain("hidden")
     expect(screen.getByRole("tooltip", { name: "Aether Labs" })).toBeTruthy()
     const members = screen.getByLabelText("Channel members")
     expect(members).toBeTruthy()
@@ -614,7 +621,7 @@ describe("App", () => {
       />
     )
 
-    const search = await screen.findByPlaceholderText("Search origination")
+    const search = await openMessageSearch()
     fireEvent.change(search, { target: { value: "risk" } })
 
     const results = await screen.findByRole("region", { name: "Message search results" })
@@ -623,13 +630,158 @@ describe("App", () => {
     expect(within(results).getByText("#origination")).toBeTruthy()
     expect(within(results).queryByText("Mina Rao")).toBeNull()
 
-    fireEvent.click(within(results).getByRole("button", { name: /Risk summary needs one more pass/ }))
+    const resultOption = within(results).getByRole("option", { name: /Risk summary needs one more pass/ })
+    expect(resultOption.getAttribute("aria-selected")).toBe("true")
+    fireEvent.click(resultOption)
 
     await waitFor(() => {
       const message = screen.getAllByText("Risk summary needs one more pass.")
         .find((element) => element.closest(".chatTimeline") !== null)
       expect(message!.closest("article")?.className).toContain("searchHighlighted")
     })
+
+    expect(resultOption.getAttribute("aria-pressed")).toBe("true")
+    fireEvent.click(resultOption)
+
+    await waitFor(() => {
+      const message = screen.getAllByText("Risk summary needs one more pass.")
+        .find((element) => element.closest(".chatTimeline") !== null)
+      expect(message!.closest("article")?.className).not.toContain("searchHighlighted")
+    })
+    expect(resultOption.getAttribute("aria-pressed")).toBe("false")
+  })
+
+  it("navigates message search results with the keyboard", async () => {
+    render(
+      <WorkspaceChat
+        model={makeChatModel([
+          new ChannelMessage({
+            id: "message-1" as ChannelMessageId,
+            channelId,
+            authorType: "human",
+            authorId: userId,
+            authorDisplayName: "Maya Patel",
+            body: "The launch memo is ready for review.",
+            createdAt: 2,
+            deletedAt: null
+          }),
+          new ChannelMessage({
+            id: "message-2" as ChannelMessageId,
+            channelId,
+            authorType: "human",
+            authorId: "human-2",
+            authorDisplayName: "Lee Chen",
+            body: "Risk summary needs one more pass.",
+            createdAt: 4,
+            deletedAt: null
+          }),
+          new ChannelMessage({
+            id: "message-4" as ChannelMessageId,
+            channelId,
+            authorType: "human",
+            authorId: "human-4",
+            authorDisplayName: "Alex Kim",
+            body: "Another risk review is scheduled.",
+            createdAt: 6,
+            deletedAt: null
+          })
+        ])}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+      />
+    )
+
+    const search = await openMessageSearch()
+    fireEvent.change(search, { target: { value: "risk" } })
+
+    const listbox = await screen.findByRole("listbox", { name: "Message search matches" })
+    const options = within(listbox).getAllByRole("option")
+    expect(options).toHaveLength(2)
+    expect(options[0]!.getAttribute("aria-selected")).toBe("true")
+    expect(options[1]!.getAttribute("aria-selected")).toBe("false")
+
+    fireEvent.keyDown(search, { key: "ArrowDown", code: "ArrowDown" })
+    expect(options[0]!.getAttribute("aria-selected")).toBe("false")
+    expect(options[1]!.getAttribute("aria-selected")).toBe("true")
+
+    fireEvent.keyDown(search, { key: "Enter", code: "Enter" })
+
+    await waitFor(() => {
+      const message = screen.getAllByText("Another risk review is scheduled.")
+        .find((element) => element.closest(".chatTimeline") !== null)
+      expect(message!.closest("article")?.className).toContain("searchHighlighted")
+    })
+    expect(options[1]!.getAttribute("aria-pressed")).toBe("true")
+
+    fireEvent.keyDown(search, { key: "ArrowUp", code: "ArrowUp" })
+    expect(options[0]!.getAttribute("aria-selected")).toBe("true")
+
+    fireEvent.keyDown(search, { key: "Enter", code: "Enter" })
+
+    await waitFor(() => {
+      const message = screen.getAllByText("Risk summary needs one more pass.")
+        .find((element) => element.closest(".chatTimeline") !== null)
+      expect(message!.closest("article")?.className).toContain("searchHighlighted")
+    })
+    expect(options[0]!.getAttribute("aria-pressed")).toBe("true")
+    expect(options[1]!.getAttribute("aria-pressed")).toBe("false")
+  })
+
+  it("keeps keyboard navigation in search after Escape clears a selected result", async () => {
+    render(
+      <WorkspaceChat
+        model={makeChatModel([
+          new ChannelMessage({
+            id: "message-1" as ChannelMessageId,
+            channelId,
+            authorType: "human",
+            authorId: userId,
+            authorDisplayName: "Maya Patel",
+            body: "The launch memo is ready for review.",
+            createdAt: 2,
+            deletedAt: null
+          }),
+          new ChannelMessage({
+            id: "message-2" as ChannelMessageId,
+            channelId,
+            authorType: "human",
+            authorId: "human-2",
+            authorDisplayName: "Lee Chen",
+            body: "Risk summary needs one more pass.",
+            createdAt: 4,
+            deletedAt: null
+          }),
+          new ChannelMessage({
+            id: "message-4" as ChannelMessageId,
+            channelId,
+            authorType: "human",
+            authorId: "human-4",
+            authorDisplayName: "Alex Kim",
+            body: "Another risk review is scheduled.",
+            createdAt: 6,
+            deletedAt: null
+          })
+        ])}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+      />
+    )
+
+    const search = await openMessageSearch()
+    fireEvent.change(search, { target: { value: "risk" } })
+
+    const listbox = await screen.findByRole("listbox", { name: "Message search matches" })
+    const options = within(listbox).getAllByRole("option")
+
+    fireEvent.keyDown(search, { key: "Enter", code: "Enter" })
+    await waitFor(() => expect(options[0]!.getAttribute("aria-pressed")).toBe("true"))
+
+    fireEvent.keyDown(window, { key: "Escape", code: "Escape" })
+    await waitFor(() => expect(options[0]!.getAttribute("aria-pressed")).toBe("false"))
+    expect(search).toBe(document.activeElement)
+
+    fireEvent.keyDown(search, { key: "ArrowDown", code: "ArrowDown" })
+    expect(options[1]!.getAttribute("aria-selected")).toBe("true")
   })
 
   it("shows message search empty and error states", async () => {
@@ -641,7 +793,7 @@ describe("App", () => {
       />
     )
 
-    const search = await screen.findByPlaceholderText("Search origination")
+    const search = await openMessageSearch()
     fireEvent.change(search, { target: { value: "nonexistent" } })
 
     expect((await screen.findByRole("status")).textContent).toBe("No matching messages.")
@@ -1489,5 +1641,29 @@ describe("App", () => {
     fireEvent.click(showMembersButton)
 
     expect(screen.getByRole("button", { name: "Hide members" }).getAttribute("aria-pressed")).toBe("true")
+  })
+
+  it("opens and closes message search from the header toggle and keyboard shortcut", async () => {
+    renderApp(makeSnapshot())
+
+    const showSearchButton = await screen.findByRole("button", { name: "Show search" })
+    expect(showSearchButton.getAttribute("aria-pressed")).toBe("false")
+    expect(document.querySelector(".channelMessageSearch")?.className).toContain("hidden")
+
+    fireEvent.click(showSearchButton)
+
+    const searchInput = await screen.findByPlaceholderText("Search origination")
+    expect(document.querySelector(".channelMessageSearch")?.className).not.toContain("hidden")
+    expect(searchInput).toBe(document.activeElement)
+    expect(screen.getByRole("button", { name: "Hide search" }).getAttribute("aria-pressed")).toBe("true")
+
+    fireEvent.keyDown(window, { key: "Escape", code: "Escape" })
+    expect(document.querySelector(".channelMessageSearch")?.className).toContain("hidden")
+    expect(screen.getByRole("button", { name: "Show search" }).getAttribute("aria-pressed")).toBe("false")
+
+    fireEvent.keyDown(window, { key: "f", code: "KeyF", metaKey: true })
+    const reopenedSearchInput = await screen.findByPlaceholderText("Search origination")
+    expect(document.querySelector(".channelMessageSearch")?.className).not.toContain("hidden")
+    expect(reopenedSearchInput).toBe(document.activeElement)
   })
 })

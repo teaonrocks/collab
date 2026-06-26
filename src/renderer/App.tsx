@@ -20,7 +20,7 @@ import {
   X,
   Users
 } from "lucide-react"
-import { type FormEvent, useEffect, useMemo, useRef, useState } from "react"
+import { type FormEvent, type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react"
 import type { Channel, ChannelId, ChannelMessage, ChannelMessageId } from "../shared/collab-rpc"
 import "./App.css"
 import type {
@@ -117,7 +117,7 @@ const channelCreateErrorMessage = (cause: unknown): string => {
 }
 
 const chatTimelineClassName =
-  "chatTimeline flex min-h-0 list-none flex-col gap-0.5 overflow-auto px-4 pb-[18px] pt-3.5 [--message-avatar-column:40px] [--message-column-gap:10px] [--message-group-x:10px]"
+  "chatTimeline row-start-2 flex min-h-0 list-none flex-col gap-0.5 overflow-auto px-4 pb-[18px] pt-3.5 [--message-avatar-column:40px] [--message-column-gap:10px] [--message-group-x:10px]"
 const channelMessageGroupClassName =
   "channelMessageGroup min-w-0"
 const channelMessageClassName =
@@ -211,6 +211,7 @@ export function WorkspaceChat(props: {
   const [operationError, setOperationError] = useState<string | null>(null)
   const [channelOperationError, setChannelOperationError] = useState<string | null>(null)
   const [membersOpen, setMembersOpen] = useState(true)
+  const [searchOpen, setSearchOpen] = useState(false)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [messageSearchQuery, setMessageSearchQuery] = useState("")
   const [activeSearchMessageId, setActiveSearchMessageId] = useState<ChannelMessageId | null>(null)
@@ -245,6 +246,7 @@ export function WorkspaceChat(props: {
     setMessageDraft("")
     setOperationError(null)
     setChannelOperationError(null)
+    setSearchOpen(false)
     setMessageSearchQuery("")
     setActiveSearchMessageId(null)
     setReplyParent(null)
@@ -271,6 +273,31 @@ export function WorkspaceChat(props: {
     window.addEventListener("keydown", closeMenuOnEscape)
     return () => window.removeEventListener("keydown", closeMenuOnEscape)
   }, [profileMenuOpen])
+
+  useEffect(() => {
+    const openSearchOnHotkey = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== "f") return
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return
+      event.preventDefault()
+      setSearchOpen(true)
+    }
+    window.addEventListener("keydown", openSearchOnHotkey)
+    return () => window.removeEventListener("keydown", openSearchOnHotkey)
+  }, [])
+
+  useEffect(() => {
+    if (!searchOpen) return
+    const closeSearchOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return
+      if (activeSearchMessageId !== null) {
+        setActiveSearchMessageId(null)
+        return
+      }
+      setSearchOpen(false)
+    }
+    window.addEventListener("keydown", closeSearchOnEscape)
+    return () => window.removeEventListener("keydown", closeSearchOnEscape)
+  }, [searchOpen, activeSearchMessageId])
 
   const copyMessage = (message: ChannelMessage) => {
     if (typeof navigator !== "undefined" && navigator.clipboard !== undefined) {
@@ -367,7 +394,14 @@ export function WorkspaceChat(props: {
 
       <ChannelHeader
         channelName={model.channel.name}
+        searchOpen={searchOpen}
         membersOpen={membersOpen}
+        onToggleSearch={() => {
+          setSearchOpen((open) => {
+            if (open) setActiveSearchMessageId(null)
+            return !open
+          })
+        }}
         onToggleMembers={() => setMembersOpen((open) => !open)}
       />
 
@@ -376,6 +410,7 @@ export function WorkspaceChat(props: {
         messageGroups={messageGroups}
         loading={channelMessagesLoading}
         messageDraft={messageDraft}
+        searchOpen={searchOpen}
         searchQuery={messageSearchQuery}
         searchState={messageSearchState}
         activeSearchMessageId={activeSearchMessageId}
@@ -385,7 +420,9 @@ export function WorkspaceChat(props: {
           setMessageSearchQuery(query)
           setActiveSearchMessageId(null)
         }}
-        onSelectSearchResult={(messageId) => setActiveSearchMessageId(messageId)}
+        onSelectSearchResult={(messageId) =>
+          setActiveSearchMessageId((active) => active === messageId ? null : messageId)
+        }
         onSendMessage={sendChannelMessage}
         onToggleMessage={messageInteractions.toggleMessageSelection}
         onCopyMessage={copyMessage}
@@ -818,10 +855,13 @@ function ChannelGlyph(props: { readonly visibility?: Channel["visibility"] }) {
 
 function ChannelHeader(props: {
   readonly channelName: string
+  readonly searchOpen: boolean
   readonly membersOpen: boolean
+  readonly onToggleSearch: () => void
   readonly onToggleMembers: () => void
 }) {
-  const { channelName, membersOpen, onToggleMembers } = props
+  const { channelName, searchOpen, membersOpen, onToggleSearch, onToggleMembers } = props
+  const searchToggleLabel = searchOpen ? "Hide search" : "Show search"
   const membersToggleLabel = membersOpen ? "Hide members" : "Show members"
   return (
     <header className="chatHeader flex min-h-0 min-w-0 items-center justify-between gap-3 border-b border-border bg-surface-canvas px-4 py-2 [grid-area:header]">
@@ -830,6 +870,19 @@ function ChannelHeader(props: {
         <h2 className="m-0 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-lg leading-tight tracking-normal text-foreground">{channelName}</h2>
       </div>
       <div className="chatHeaderActions flex items-center justify-end gap-2 text-xs text-foreground-subtle" aria-label="Channel actions">
+        <button
+          type="button"
+          className={classNames(
+            "searchToggle grid min-h-[30px] w-8 cursor-pointer place-items-center rounded-control border border-border-strong bg-surface-canvas p-0 font-[inherit] text-ring hover:border-ring hover:bg-surface-muted hover:text-foreground-subtle focus-visible:border-ring focus-visible:bg-surface-muted focus-visible:text-foreground-subtle",
+            searchOpen && "active text-foreground hover:text-foreground focus-visible:text-foreground"
+          )}
+          aria-label={searchToggleLabel}
+          aria-pressed={searchOpen}
+          title={searchToggleLabel}
+          onClick={onToggleSearch}
+        >
+          <Search className={iconClassName} aria-hidden="true" />
+        </button>
         <button
           type="button"
           className={classNames(
@@ -853,6 +906,7 @@ function ChatPane(props: {
   readonly messageGroups: ReadonlyArray<ChannelMessageGroup>
   readonly loading: boolean
   readonly messageDraft: string
+  readonly searchOpen: boolean
   readonly searchQuery: string
   readonly searchState: ChannelMessageSearchState
   readonly activeSearchMessageId: ChannelMessageId | null
@@ -888,6 +942,7 @@ function ChatPane(props: {
     messageGroups,
     loading,
     messageDraft,
+    searchOpen,
     searchQuery,
     searchState,
     activeSearchMessageId,
@@ -924,15 +979,16 @@ function ChatPane(props: {
     if (activeSearchMessageId === null) return
     const row = messageRowRefs.current.get(activeSearchMessageId)
     row?.scrollIntoView?.({ block: "center" })
-    row?.focus({ preventScroll: true })
   }, [activeSearchMessageId])
 
   return (
     <section className="chatPane grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-surface-canvas [grid-area:chat]" aria-label={`${channelName} chat`}>
       <ChannelMessageSearch
         channelName={channelName}
+        open={searchOpen}
         query={searchQuery}
         state={searchState}
+        activeSearchMessageId={activeSearchMessageId}
         disabled={loading}
         onQueryChange={onSearchQueryChange}
         onSelectResult={onSelectSearchResult}
@@ -1019,38 +1075,112 @@ function ChatPane(props: {
 
 function ChannelMessageSearch(props: {
   readonly channelName: string
+  readonly open: boolean
   readonly query: string
   readonly state: ChannelMessageSearchState
+  readonly activeSearchMessageId: ChannelMessageId | null
   readonly disabled: boolean
   readonly onQueryChange: (query: string) => void
   readonly onSelectResult: (messageId: ChannelMessageId) => void
 }) {
-  const { channelName, query, state, disabled, onQueryChange, onSelectResult } = props
+  const { channelName, open, query, state, activeSearchMessageId, disabled, onQueryChange, onSelectResult } = props
+  const inputRef = useRef<HTMLInputElement>(null)
+  const resultRefs = useRef(new Map<number, HTMLButtonElement>())
+  const [activeResultIndex, setActiveResultIndex] = useState(0)
   const showResults = query.trim().length > 0
+  const navigableResults = state.status === "results" ? state.results : []
+  const hasNavigableResults = showResults && navigableResults.length > 0
+  const activeResultId = hasNavigableResults
+    ? navigableResults[activeResultIndex]?.message.id ?? navigableResults[0]?.message.id
+    : undefined
+
+  useEffect(() => {
+    if (!open) return
+    inputRef.current?.focus()
+  }, [open])
+
+  useEffect(() => {
+    setActiveResultIndex(0)
+  }, [query])
+
+  useEffect(() => {
+    if (state.status !== "results") return
+    setActiveResultIndex((index) => Math.min(index, Math.max(0, state.results.length - 1)))
+  }, [state])
+
+  useEffect(() => {
+    if (activeSearchMessageId === null || state.status !== "results") return
+    const index = state.results.findIndex((result) => result.message.id === activeSearchMessageId)
+    if (index >= 0) setActiveResultIndex(index)
+  }, [activeSearchMessageId, state])
+
+  useEffect(() => {
+    if (!open || activeSearchMessageId !== null) return
+    inputRef.current?.focus()
+  }, [activeSearchMessageId, open])
+
+  useEffect(() => {
+    if (!hasNavigableResults) return
+    resultRefs.current.get(activeResultIndex)?.scrollIntoView({ block: "nearest" })
+  }, [activeResultIndex, hasNavigableResults])
+
+  const handleInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (hasNavigableResults && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+      event.preventDefault()
+      setActiveResultIndex((index) =>
+        event.key === "ArrowDown"
+          ? (index + 1) % navigableResults.length
+          : (index - 1 + navigableResults.length) % navigableResults.length
+      )
+      return
+    }
+    if (hasNavigableResults && event.key === "Enter") {
+      event.preventDefault()
+      const result = navigableResults[activeResultIndex]
+      if (result !== undefined) onSelectResult(result.message.id)
+    }
+  }
 
   return (
-    <div className="channelMessageSearch border-b border-border bg-surface-canvas px-4 py-2.5">
+    <div className={classNames("channelMessageSearch relative z-30 row-start-1 border-b border-border bg-surface-canvas px-4 py-2.5", !open && "hidden")}>
       <label className="sr-only" htmlFor="channel-message-search">Search messages</label>
       <div className="relative">
         <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-foreground-subtle" aria-hidden="true" />
         <Input
+          ref={inputRef}
           id="channel-message-search"
           className="h-9 pl-9 text-sm"
           value={query}
           disabled={disabled}
           placeholder={`Search ${channelName}`}
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded={hasNavigableResults}
           aria-controls="channel-message-search-results"
+          aria-activedescendant={activeResultId === undefined ? undefined : `channel-message-search-option-${activeResultId}`}
           aria-invalid={state.status === "error"}
           onChange={(event) => onQueryChange(event.target.value)}
+          onKeyDown={handleInputKeyDown}
         />
-      </div>
-      <div
-        id="channel-message-search-results"
-        className={classNames("messageSearchResults mt-2", !showResults && "sr-only")}
-        role={showResults ? "region" : undefined}
-        aria-label="Message search results"
-      >
-        {renderChannelMessageSearchState(channelName, state, onSelectResult)}
+        <div
+          id="channel-message-search-results"
+          className={classNames(
+            "messageSearchResults absolute inset-x-0 top-[calc(100%+8px)] z-20 overflow-hidden rounded-panel border border-border-strong bg-surface-raised px-2 py-2 shadow-popover",
+            !showResults && "sr-only"
+          )}
+          role={showResults ? "region" : undefined}
+          aria-label="Message search results"
+        >
+          {renderChannelMessageSearchState(
+            channelName,
+            state,
+            activeSearchMessageId,
+            activeResultIndex,
+            resultRefs,
+            setActiveResultIndex,
+            onSelectResult
+          )}
+        </div>
       </div>
     </div>
   )
@@ -1059,6 +1189,10 @@ function ChannelMessageSearch(props: {
 function renderChannelMessageSearchState(
   channelName: string,
   state: ChannelMessageSearchState,
+  activeSearchMessageId: ChannelMessageId | null,
+  activeResultIndex: number,
+  resultRefs: { readonly current: Map<number, HTMLButtonElement> },
+  onActiveResultIndexChange: (index: number) => void,
   onSelectResult: (messageId: ChannelMessageId) => void
 ) {
   if (state.status === "idle") {
@@ -1071,12 +1205,32 @@ function renderChannelMessageSearchState(
     return <p className="m-0 text-xs text-foreground-subtle" role="status">No matching messages.</p>
   }
   return (
-    <ol className="m-0 flex max-h-[220px] list-none flex-col gap-1 overflow-auto p-0" aria-label="Message search matches">
-      {state.results.map((result) => (
+    <ol className="m-0 flex max-h-[220px] list-none flex-col gap-1 overflow-auto p-0" role="listbox" aria-label="Message search matches">
+      {state.results.map((result, index) => {
+        const highlighted = activeSearchMessageId === result.message.id
+        const active = index === activeResultIndex
+        return (
         <li key={result.message.id}>
           <button
+            ref={(element) => {
+              if (element === null) {
+                resultRefs.current.delete(index)
+              } else {
+                resultRefs.current.set(index, element)
+              }
+            }}
+            id={`channel-message-search-option-${result.message.id}`}
             type="button"
-            className="messageSearchResult grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-3 rounded-control border border-transparent bg-transparent px-2 py-1.5 text-left hover:border-border hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            className={classNames(
+              "messageSearchResult grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-3 rounded-control border border-transparent bg-transparent px-2 py-1.5 text-left hover:border-border hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+              active && "border-border bg-surface-muted",
+              highlighted && "border-border-strong"
+            )}
+            role="option"
+            aria-selected={active}
+            aria-pressed={highlighted}
+            onMouseEnter={() => onActiveResultIndexChange(index)}
+            onMouseDown={(event) => event.preventDefault()}
             onClick={() => onSelectResult(result.message.id)}
           >
             <span className="min-w-0">
@@ -1093,7 +1247,8 @@ function renderChannelMessageSearchState(
             </span>
           </button>
         </li>
-      ))}
+        )
+      })}
     </ol>
   )
 }
@@ -1635,7 +1790,7 @@ function MessageComposer(props: {
   }
 
   return (
-    <div className="composerDock border-t border-border bg-surface-canvas px-4 pb-3 pt-2.5">
+    <div className="composerDock row-start-3 border-t border-border bg-surface-canvas px-4 pb-3 pt-2.5">
       {operationError === null
         ? null
         : <p className="composerError mb-2 mt-0 text-[13px] leading-[1.35] text-destructive-text" role="status">{operationError}</p>}
