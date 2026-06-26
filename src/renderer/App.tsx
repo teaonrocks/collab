@@ -221,16 +221,11 @@ export function WorkspaceChat(props: {
 
   useEffect(() => {
     if (!profileMenuOpen) return
-    const closeMenu = () => setProfileMenuOpen(false)
     const closeMenuOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeMenu()
+      if (event.key === "Escape") setProfileMenuOpen(false)
     }
-    window.addEventListener("click", closeMenu)
     window.addEventListener("keydown", closeMenuOnEscape)
-    return () => {
-      window.removeEventListener("click", closeMenu)
-      window.removeEventListener("keydown", closeMenuOnEscape)
-    }
+    return () => window.removeEventListener("keydown", closeMenuOnEscape)
   }, [profileMenuOpen])
 
   const copyMessage = (message: ChannelMessage) => {
@@ -272,7 +267,7 @@ export function WorkspaceChat(props: {
         members={directMessageMembers}
         profileMenuOpen={profileMenuOpen}
         profileMenuActions={profileMenuActions}
-        onToggleProfileMenu={() => setProfileMenuOpen((open) => !open)}
+        onOpenProfileMenu={() => setProfileMenuOpen(true)}
         onCloseProfileMenu={() => setProfileMenuOpen(false)}
       />
 
@@ -361,7 +356,7 @@ function WorkspaceRail(props: {
   readonly members: ReadonlyArray<ChatChannelMember>
   readonly profileMenuOpen: boolean
   readonly profileMenuActions: ReadonlyArray<ProfileMenuAction>
-  readonly onToggleProfileMenu: () => void
+  readonly onOpenProfileMenu: () => void
   readonly onCloseProfileMenu: () => void
 }) {
   const {
@@ -370,7 +365,7 @@ function WorkspaceRail(props: {
     members,
     profileMenuOpen,
     profileMenuActions,
-    onToggleProfileMenu,
+    onOpenProfileMenu,
     onCloseProfileMenu
   } = props
   const hasProfileActions = profileMenuActions.length > 0
@@ -404,25 +399,37 @@ function WorkspaceRail(props: {
         ))}
       </nav>
       <div className="railSpacer flex-1" />
-      <div className="railProfile relative">
+      <div
+        className="railProfile relative"
+        onMouseEnter={() => {
+          if (hasProfileActions) onOpenProfileMenu()
+        }}
+        onMouseLeave={() => {
+          if (hasProfileActions) onCloseProfileMenu()
+        }}
+        onFocusCapture={() => {
+          if (hasProfileActions) onOpenProfileMenu()
+        }}
+        onBlurCapture={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) onCloseProfileMenu()
+        }}
+      >
         <button
           type="button"
           className="railUser grid size-8 cursor-pointer place-items-center rounded-full border-0 bg-surface-muted p-0 text-[11px] font-extrabold text-foreground disabled:cursor-default"
           title={currentUserName}
-          aria-label={hasProfileActions ? `Open profile menu for ${currentUserName}` : currentUserName}
+          aria-label={hasProfileActions ? `Profile menu for ${currentUserName}` : currentUserName}
           aria-haspopup={hasProfileActions ? "menu" : undefined}
           aria-expanded={hasProfileActions ? profileMenuOpen : undefined}
           disabled={!hasProfileActions}
-          onClick={(event) => {
-            event.stopPropagation()
-            if (hasProfileActions) onToggleProfileMenu()
-          }}
         >
           {initials(currentUserName)}
         </button>
         {profileMenuOpen && hasProfileActions
           ? (
-            <div className="profileMenu absolute bottom-0 left-[calc(100%+10px)] z-40 w-[180px] overflow-hidden rounded-panel border border-border-strong bg-surface-canvas shadow-popover" role="menu" aria-label="Profile settings" onClick={(event) => event.stopPropagation()}>
+            <>
+              <div className="profileMenuBridge absolute bottom-0 left-full z-30 h-8 w-2.5" aria-hidden="true" />
+              <div className="profileMenu absolute bottom-0 left-[calc(100%+10px)] z-40 w-[180px] overflow-hidden rounded-panel border border-border-strong bg-surface-canvas shadow-popover" role="menu" aria-label="Profile settings">
               <div className="profileMenuHeader border-b border-surface-rail p-2.5">
                 <strong className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[13px] leading-tight text-foreground">{currentUserName}</strong>
               </div>
@@ -440,7 +447,8 @@ function WorkspaceRail(props: {
                   {action.label}
                 </button>
               ))}
-            </div>
+              </div>
+            </>
           )
           : null}
       </div>

@@ -447,9 +447,9 @@ describe("App", () => {
     expect(calls).toEqual([{ name: "design", visibility: "public" }])
   })
 
-  it("opens profile settings from the rail avatar", async () => {
+  it("opens profile settings when hovering the rail avatar", async () => {
     let signOuts = 0
-    render(
+    const { container } = render(
       <WorkspaceChat
         model={makeChatModel()}
         createChannelMessage={() => Promise.resolve()}
@@ -458,7 +458,9 @@ describe("App", () => {
       />
     )
 
-    fireEvent.click(await screen.findByRole("button", { name: "Open profile menu for Maya Patel" }))
+    const profileRail = container.querySelector(".railProfile")
+    expect(profileRail).toBeTruthy()
+    fireEvent.mouseEnter(profileRail!)
 
     const menu = await screen.findByRole("menu", { name: "Profile settings" })
     expect(within(menu).getByText("Maya Patel")).toBeTruthy()
