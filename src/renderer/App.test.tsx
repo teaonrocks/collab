@@ -618,6 +618,95 @@ describe("App", () => {
     expect((input as HTMLTextAreaElement).value).toBe("First line")
   })
 
+  it("filters and inserts mention suggestions from the composer with the keyboard", async () => {
+    const calls: Array<{ readonly channelId: ChannelId; readonly body: string }> = []
+    render(
+      <WorkspaceChat
+        model={{
+          ...makeChatModel([]),
+          channelMembers: [
+            { id: "human-2", displayName: "Lee Chen" },
+            { id: "human-3", displayName: "Mina Rao" }
+          ]
+        }}
+        createChannelMessage={(input) => {
+          calls.push(input)
+          return Promise.resolve()
+        }}
+        deleteChannelMessage={() => Promise.resolve()}
+      />
+    )
+    const input = await screen.findByPlaceholderText("Message origination")
+
+    fireEvent.change(input, { target: { value: "Thanks @le" } })
+
+    const suggestions = await screen.findByRole("listbox", { name: "Mention suggestions" })
+    expect(within(suggestions).getByRole("option", { name: "Lee Chen" })).toBeTruthy()
+    expect(within(suggestions).queryByRole("option", { name: "Mina Rao" })).toBeNull()
+
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" })
+
+    await waitFor(() => expect((input as HTMLTextAreaElement).value).toBe("Thanks @Lee Chen "))
+    expect(screen.queryByRole("listbox", { name: "Mention suggestions" })).toBeNull()
+
+    fireEvent.change(input, { target: { value: "Thanks @Lee Chen for the pass." } })
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" })
+
+    await waitFor(() =>
+      expect(calls).toEqual([{
+        channelId,
+        body: "Thanks @Lee Chen for the pass."
+      }])
+    )
+  })
+
+  it("inserts mention suggestions from the composer with the mouse", async () => {
+    render(
+      <WorkspaceChat
+        model={{
+          ...makeChatModel([]),
+          channelMembers: [
+            { id: "human-2", displayName: "Lee Chen" },
+            { id: "human-3", displayName: "Mina Rao" }
+          ]
+        }}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+      />
+    )
+    const input = await screen.findByPlaceholderText("Message origination")
+
+    fireEvent.change(input, { target: { value: "@mi" } })
+    fireEvent.click(await screen.findByRole("option", { name: "Mina Rao" }))
+
+    await waitFor(() => expect((input as HTMLTextAreaElement).value).toBe("@Mina Rao "))
+    expect(screen.queryByRole("listbox", { name: "Mention suggestions" })).toBeNull()
+  })
+
+  it("dismisses mention suggestions from the composer without changing the draft", async () => {
+    render(
+      <WorkspaceChat
+        model={{
+          ...makeChatModel([]),
+          channelMembers: [{ id: "human-2", displayName: "Lee Chen" }]
+        }}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+      />
+    )
+    const input = await screen.findByPlaceholderText("Message origination")
+
+    fireEvent.change(input, { target: { value: "Loop in @zz" } })
+
+    expect(await screen.findByRole("listbox", { name: "Mention suggestions" })).toBeTruthy()
+    expect(screen.getByText("No matching members")).toBeTruthy()
+
+    fireEvent.keyDown(input, { key: "Escape", code: "Escape" })
+
+    await waitFor(() => expect(screen.queryByRole("listbox", { name: "Mention suggestions" })).toBeNull())
+    expect((input as HTMLTextAreaElement).value).toBe("Loop in @zz")
+  })
+
   it("shows an empty chat state before the first channel message", async () => {
     renderApp(makeSnapshot([]))
 

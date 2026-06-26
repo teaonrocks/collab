@@ -74,6 +74,7 @@ const MESSAGE_CONTEXT_MENU_OFFSET = 6
 const COMPOSER_MIN_HEIGHT = 44
 const COMPOSER_MAX_HEIGHT = 140
 const MESSAGE_EDIT_MAX_HEIGHT = 180
+const MENTION_SUGGESTION_LIMIT = 6
 const normalizeChannelName = (name: string): string =>
   name.trim().replace(/^#+/, "").replace(/\s+/g, "-").toLowerCase()
 
@@ -305,6 +306,8 @@ export function WorkspaceChat(props: {
         onCancelEditMessage={messageInteractions.cancelEditingMessage}
         onSaveEditMessage={messageInteractions.saveEditingMessage}
         onDeleteMessage={messageInteractions.requestDeleteMessage}
+        mentionMembers={visibleMembers}
+        mentionMembersLoading={channelMembersLoading}
         canDeleteMessage={messageCanDelete}
         canEditMessage={messageCanEdit}
         getMessageRowState={messageInteractions.getRowState}
@@ -763,6 +766,8 @@ function ChatPane(props: {
   readonly onCancelEditMessage: () => void
   readonly onSaveEditMessage: () => void
   readonly onDeleteMessage: (messageId: ChannelMessageId) => void
+  readonly mentionMembers: ReadonlyArray<ChatChannelMember>
+  readonly mentionMembersLoading: boolean
   readonly canDeleteMessage: ChatMessageGuard
   readonly canEditMessage: ChatMessageGuard
   readonly getMessageRowState: (message: ChannelMessage) => MessageRowState
@@ -783,6 +788,8 @@ function ChatPane(props: {
     onCancelEditMessage,
     onSaveEditMessage,
     onDeleteMessage,
+    mentionMembers,
+    mentionMembersLoading,
     canDeleteMessage,
     canEditMessage,
     getMessageRowState,
@@ -841,6 +848,8 @@ function ChatPane(props: {
         draft={messageDraft}
         operationError={operationError}
         disabled={loading}
+        members={mentionMembers}
+        membersLoading={mentionMembersLoading}
         onDraftChange={onMessageDraftChange}
         onSend={onSendMessage}
       />
@@ -1105,21 +1114,64 @@ function MessageComposer(props: {
   readonly draft: string
   readonly operationError: string | null
   readonly disabled: boolean
+  readonly members: ReadonlyArray<ChatChannelMember>
+  readonly membersLoading: boolean
   readonly onDraftChange: (draft: string) => void
   readonly onSend: () => void
 }) {
-  const { channelName, draft, operationError, disabled, onDraftChange, onSend } = props
+  const { channelName, draft, operationError, disabled, members, membersLoading, onDraftChange, onSend } = props
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const [cursorIndex, setCursorIndex] = useState(draft.length)
+  const [activeMentionIndex, setActiveMentionIndex] = useState(0)
+  const [dismissedMentionKey, setDismissedMentionKey] = useState<string | null>(null)
   const canSend = draft.trim().length > 0 && !disabled
+  const mentionRequest = useMemo(() => getMentionRequest(draft, cursorIndex), [cursorIndex, draft])
+  const mentionKey = mentionRequest === null ? null : `${mentionRequest.triggerIndex}:${mentionRequest.query}`
+  const mentionSuggestions = useMemo(
+    () => filterMentionMembers(members, mentionRequest?.query ?? ""),
+    [members, mentionRequest?.query]
+  )
+  const mentionMenuOpen = !disabled && mentionRequest !== null && mentionKey !== dismissedMentionKey
+  const activeMention = membersLoading ? null : mentionSuggestions[activeMentionIndex] ?? mentionSuggestions[0] ?? null
 
   useEffect(() => {
     resizeTextarea(textareaRef.current, COMPOSER_MIN_HEIGHT, COMPOSER_MAX_HEIGHT)
   }, [draft])
 
+  useEffect(() => {
+    setActiveMentionIndex(0)
+  }, [mentionRequest?.query])
+
+  useEffect(() => {
+    if (mentionKey === null) setDismissedMentionKey(null)
+  }, [mentionKey])
+
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (disabled) return
     onSend()
+  }
+
+  const updateDraft = (value: string, nextCursorIndex: number) => {
+    setCursorIndex(nextCursorIndex)
+    if (mentionKey !== null && nextCursorIndex <= (mentionRequest?.triggerIndex ?? -1)) {
+      setDismissedMentionKey(null)
+    }
+    onDraftChange(value)
+  }
+
+  const selectMention = (member: ChatChannelMember) => {
+    if (mentionRequest === null) return
+    const mentionText = `@${member.displayName} `
+    const nextDraft = `${draft.slice(0, mentionRequest.triggerIndex)}${mentionText}${draft.slice(mentionRequest.cursorIndex)}`
+    const nextCursorIndex = mentionRequest.triggerIndex + mentionText.length
+    setDismissedMentionKey(`${mentionRequest.triggerIndex}:`)
+    setCursorIndex(nextCursorIndex)
+    onDraftChange(nextDraft)
+    window.setTimeout(() => {
+      textareaRef.current?.focus()
+      textareaRef.current?.setSelectionRange(nextCursorIndex, nextCursorIndex)
+    }, 0)
   }
 
   return (
@@ -1146,22 +1198,58 @@ function MessageComposer(props: {
           <Paperclip className={iconClassName} aria-hidden="true" />
         </Button>
         <label className="sr-only" htmlFor="channel-message">Message</label>
-        <Textarea
-          ref={textareaRef}
-          id="channel-message"
-          rows={1}
-          value={draft}
-          disabled={disabled}
-          className="block max-h-[140px] min-h-11 resize-none overflow-hidden rounded-none border-0 bg-surface-canvas px-3 py-3 text-sm leading-5 focus-visible:border-transparent focus-visible:ring-0 focus-visible:ring-offset-0 disabled:bg-surface-sunken"
-          placeholder={`Message ${channelName}`}
-          onChange={(event) => onDraftChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault()
-              if (!disabled) onSend()
-            }
-          }}
-        />
+        <div className="relative min-w-0">
+          {mentionMenuOpen
+            ? (
+              <MentionSuggestionMenu
+                members={mentionSuggestions}
+                loading={membersLoading}
+                activeIndex={activeMentionIndex}
+                query={mentionRequest.query}
+                onSelect={selectMention}
+                onActiveIndexChange={setActiveMentionIndex}
+              />
+            )
+            : null}
+          <Textarea
+            ref={textareaRef}
+            id="channel-message"
+            rows={1}
+            value={draft}
+            disabled={disabled}
+            className="block max-h-[140px] min-h-11 resize-none overflow-hidden rounded-none border-0 bg-surface-canvas px-3 py-3 text-sm leading-5 focus-visible:border-transparent focus-visible:ring-0 focus-visible:ring-offset-0 disabled:bg-surface-sunken"
+            placeholder={`Message ${channelName}`}
+            onChange={(event) => updateDraft(event.target.value, event.currentTarget.selectionStart ?? event.target.value.length)}
+            onClick={(event) => setCursorIndex(event.currentTarget.selectionStart ?? draft.length)}
+            onKeyUp={(event) => setCursorIndex(event.currentTarget.selectionStart ?? draft.length)}
+            onKeyDown={(event) => {
+              if (mentionMenuOpen && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+                event.preventDefault()
+                if (mentionSuggestions.length === 0) return
+                setActiveMentionIndex((index) =>
+                  event.key === "ArrowDown"
+                    ? (index + 1) % mentionSuggestions.length
+                    : (index - 1 + mentionSuggestions.length) % mentionSuggestions.length
+                )
+                return
+              }
+              if (mentionMenuOpen && event.key === "Escape") {
+                event.preventDefault()
+                setDismissedMentionKey(mentionKey)
+                return
+              }
+              if (mentionMenuOpen && (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey))) {
+                event.preventDefault()
+                if (activeMention !== null) selectMention(activeMention)
+                return
+              }
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault()
+                if (!disabled) onSend()
+              }
+            }}
+          />
+        </div>
         <Button
           type="submit"
           variant="ghost"
@@ -1173,6 +1261,51 @@ function MessageComposer(props: {
           <SendHorizontal className={iconClassName} aria-hidden="true" />
         </Button>
       </form>
+    </div>
+  )
+}
+
+function MentionSuggestionMenu(props: {
+  readonly members: ReadonlyArray<ChatChannelMember>
+  readonly loading: boolean
+  readonly activeIndex: number
+  readonly query: string
+  readonly onSelect: (member: ChatChannelMember) => void
+  readonly onActiveIndexChange: (index: number) => void
+}) {
+  const { members, loading, activeIndex, query, onSelect, onActiveIndexChange } = props
+  const emptyMessage = loading
+    ? "Loading members..."
+    : query.length === 0
+      ? "No members available"
+      : "No matching members"
+
+  return (
+    <div
+      className="mentionMenu absolute bottom-[calc(100%+6px)] left-0 z-20 w-[min(320px,calc(100vw-120px))] overflow-hidden rounded-panel border border-border-strong bg-surface-raised py-1 shadow-popover"
+      role="listbox"
+      aria-label="Mention suggestions"
+    >
+      {loading || members.length === 0
+        ? <p className="m-0 px-3 py-2 text-[13px] leading-[1.35] text-foreground-subtle">{emptyMessage}</p>
+        : members.map((member, index) => (
+          <button
+            key={member.id}
+            type="button"
+            className={classNames(
+              "flex min-h-9 w-full cursor-pointer items-center gap-2 border-0 bg-transparent px-2.5 py-1.5 text-left font-[inherit] text-foreground hover:bg-surface-muted",
+              index === activeIndex && "bg-surface-muted"
+            )}
+            role="option"
+            aria-selected={index === activeIndex}
+            onMouseEnter={() => onActiveIndexChange(index)}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => onSelect(member)}
+          >
+            <Avatar name={member.displayName} aria-hidden="true" className="size-7" />
+            <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-sm font-bold">{member.displayName}</span>
+          </button>
+        ))}
     </div>
   )
 }
@@ -1377,6 +1510,31 @@ const mergeChannelMembers = (
     }
   })
   return changed ? Array.from(byId.values()) : members
+}
+
+const getMentionRequest = (
+  draft: string,
+  cursorIndex: number
+): { readonly triggerIndex: number; readonly cursorIndex: number; readonly query: string } | null => {
+  const safeCursorIndex = Math.min(Math.max(cursorIndex, 0), draft.length)
+  const beforeCursor = draft.slice(0, safeCursorIndex)
+  const triggerIndex = beforeCursor.lastIndexOf("@")
+  if (triggerIndex === -1) return null
+  if (triggerIndex > 0 && /\S/.test(draft.charAt(triggerIndex - 1))) return null
+  const query = draft.slice(triggerIndex + 1, safeCursorIndex)
+  if (/\s/.test(query)) return null
+  return { triggerIndex, cursorIndex: safeCursorIndex, query }
+}
+
+const filterMentionMembers = (
+  members: ReadonlyArray<ChatChannelMember>,
+  query: string
+): ReadonlyArray<ChatChannelMember> => {
+  const normalizedQuery = query.trim().toLowerCase()
+  const matches = normalizedQuery.length === 0
+    ? members
+    : members.filter((member) => member.displayName.toLowerCase().includes(normalizedQuery))
+  return matches.slice(0, MENTION_SUGGESTION_LIMIT)
 }
 
 const resizeTextarea = (textarea: HTMLTextAreaElement | null, minHeight: number, maxHeight: number) => {
