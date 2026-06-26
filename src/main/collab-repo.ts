@@ -16,6 +16,7 @@ import {
   ChannelAgentEnablement,
   type ChannelId,
   ChannelMessage,
+  type ChannelMessageAttachment,
   type ChannelMessageId,
   ChannelMessageParent,
   CollabError,
@@ -246,7 +247,12 @@ export class CollabRepo extends Effect.Service<CollabRepo>()("main/CollabRepo", 
       )
 
     const createChannelMessage = Effect.fn("CollabRepo.createChannelMessage")(
-      (input: { readonly channelId: ChannelId; readonly body: string; readonly parentMessageId?: ChannelMessageId | null }) =>
+      (input: {
+        readonly channelId: ChannelId
+        readonly body: string
+        readonly parentMessageId?: ChannelMessageId | null
+        readonly attachments?: ReadonlyArray<ChannelMessageAttachment>
+      }) =>
         SubscriptionRef.modifyEffect(ref, (state) =>
           Effect.gen(function*() {
             if (state.channel.id !== input.channelId) {
@@ -276,7 +282,8 @@ export class CollabRepo extends Effect.Service<CollabRepo>()("main/CollabRepo", 
               createdAt,
               deletedAt: null,
               parentMessageId: input.parentMessageId ?? null,
-              parentMessage: parentMessage === null ? null : parentPreview(parentMessage)
+              parentMessage: parentMessage === null ? null : parentPreview(parentMessage),
+              attachments: input.attachments ?? []
             })
             const next = new CollabSnapshot({
               ...state,

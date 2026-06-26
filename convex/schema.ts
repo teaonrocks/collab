@@ -3,6 +3,14 @@ import { v } from "convex/values"
 
 const workspaceRole = v.union(v.literal("owner"), v.literal("admin"), v.literal("member"), v.literal("guest"))
 const channelRole = v.union(v.literal("admin"), v.literal("member"), v.literal("guest"))
+const messageAttachmentKind = v.union(v.literal("file"), v.literal("image"))
+const messageAttachment = v.object({
+  storageId: v.id("_storage"),
+  name: v.string(),
+  contentType: v.string(),
+  size: v.number(),
+  kind: messageAttachmentKind
+})
 
 export default defineSchema({
   users: defineTable({
@@ -56,6 +64,7 @@ export default defineSchema({
     authorDisplayName: v.optional(v.string()),
     body: v.string(),
     parentMessageId: v.optional(v.id("messages")),
+    attachments: v.optional(v.array(messageAttachment)),
     createdAt: v.number(),
     editedAt: v.optional(v.number())
   }).index("by_channel_created_at", ["channelId", "createdAt"]).index("by_workspace_created_at", [

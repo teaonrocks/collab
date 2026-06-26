@@ -89,6 +89,19 @@ export class ChannelMessageReaction extends Schema.Class<ChannelMessageReaction>
   reactedByCurrentUser: Schema.Boolean
 }) {}
 
+export const ChannelMessageAttachmentKind = Schema.Literal("file", "image")
+export type ChannelMessageAttachmentKind = typeof ChannelMessageAttachmentKind.Type
+
+export class ChannelMessageAttachment extends Schema.Class<ChannelMessageAttachment>("ChannelMessageAttachment")({
+  id: Schema.String,
+  storageId: Schema.String,
+  name: NonEmptyText,
+  contentType: Schema.String,
+  size: Schema.Number,
+  kind: ChannelMessageAttachmentKind,
+  url: Schema.NullOr(Schema.String)
+}) {}
+
 export class ChannelMessageParent extends Schema.Class<ChannelMessageParent>("ChannelMessageParent")({
   id: ChannelMessageId,
   authorDisplayName: NonEmptyText,
@@ -102,13 +115,14 @@ export class ChannelMessage extends Schema.Class<ChannelMessage>("ChannelMessage
   authorType: ActorType,
   authorId: Schema.String,
   authorDisplayName: NonEmptyText,
-  body: NonEmptyText,
+  body: Schema.String,
   createdAt: Schema.Number,
   editedAt: Schema.optionalWith(Schema.NullOr(Schema.Number), { default: () => null }),
   deletedAt: Schema.NullOr(Schema.Number),
   parentMessageId: Schema.optionalWith(Schema.NullOr(ChannelMessageId), { default: () => null }),
   parentMessage: Schema.optionalWith(Schema.NullOr(ChannelMessageParent), { default: () => null }),
-  reactions: Schema.optionalWith(Schema.Array(ChannelMessageReaction), { default: () => [] })
+  reactions: Schema.optionalWith(Schema.Array(ChannelMessageReaction), { default: () => [] }),
+  attachments: Schema.optionalWith(Schema.Array(ChannelMessageAttachment), { default: () => [] })
 }) {}
 
 export class WorkspaceAgent extends Schema.Class<WorkspaceAgent>("WorkspaceAgent")({
@@ -269,7 +283,8 @@ export class CollabRpcs extends RpcGroup.make(
     payload: {
       channelId: ChannelId,
       body: NonEmptyText,
-      parentMessageId: Schema.optional(Schema.NullOr(ChannelMessageId))
+      parentMessageId: Schema.optional(Schema.NullOr(ChannelMessageId)),
+      attachments: Schema.optional(Schema.Array(ChannelMessageAttachment))
     },
     success: ChannelMessage,
     error: Schema.Union(CollabNotFound, CollabPolicyDenied, CollabError)

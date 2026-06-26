@@ -3,11 +3,12 @@ import { Atom } from "@effect-atom/atom"
 import { RegistryProvider } from "@effect-atom/atom-react"
 import { cleanup, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { Effect, Layer, Stream } from "effect"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   Channel,
   type ChannelId,
   ChannelMessage,
+  ChannelMessageAttachment,
   ChannelMessageParent,
   type ChannelMessageId,
   ChannelMessageReaction,
@@ -767,6 +768,47 @@ describe("App", () => {
     expect(screen.getByText("Original message unavailable")).toBeTruthy()
   })
 
+  it("renders image thumbnails and file attachment links without trusting unsafe URLs", async () => {
+    renderApp(makeSnapshot([
+      new ChannelMessage({
+        id: messageId,
+        channelId,
+        authorType: "human",
+        authorId: userId,
+        authorDisplayName: "Maya Patel",
+        body: "Attachments for review.",
+        createdAt: 2,
+        deletedAt: null,
+        attachments: [
+          new ChannelMessageAttachment({
+            id: "attachment-1",
+            storageId: "storage-1",
+            name: "brief.png",
+            contentType: "image/png",
+            size: 4096,
+            kind: "image",
+            url: "https://files.example/brief.png"
+          }),
+          new ChannelMessageAttachment({
+            id: "attachment-2",
+            storageId: "storage-2",
+            name: "notes.pdf",
+            contentType: "application/pdf",
+            size: 2048,
+            kind: "file",
+            url: "javascript:alert(1)"
+          })
+        ]
+      })
+    ]))
+
+    const image = await screen.findByRole("img", { name: "brief.png" })
+    expect(image.getAttribute("src")).toBe("https://files.example/brief.png")
+    expect(screen.getByRole("link", { name: "Open image attachment brief.png" })).toBeTruthy()
+    expect(screen.getByText("notes.pdf")).toBeTruthy()
+    expect(screen.queryByRole("link", { name: /notes\.pdf/ })).toBeNull()
+  })
+
   it("keeps Shift+Enter inside the composer without sending", async () => {
     const calls = renderApp(makeSnapshot())
     const input = await screen.findByPlaceholderText("Message origination")
@@ -1022,6 +1064,58 @@ describe("App", () => {
 
     expect((await screen.findByRole("status")).textContent).toBe("Could not send message. Check your connection and try again.")
     expect(screen.queryByText(/backend token details/)).toBeNull()
+  })
+
+  it("shows attachment upload failures without clearing the draft and can send after retry", async () => {
+    const calls: Array<unknown> = []
+    const upload = vi.fn()
+      .mockRejectedValueOnce(new Error("upload token expired"))
+      .mockResolvedValueOnce(new ChannelMessageAttachment({
+        id: "storage-1",
+        storageId: "storage-1",
+        name: "brief.png",
+        contentType: "image/png",
+        size: 4096,
+        kind: "image",
+        url: null
+      }))
+
+    const { container } = render(
+      <WorkspaceChat
+        model={makeChatModel([])}
+        createChannelMessage={(input) => {
+          calls.push(input)
+          return Promise.resolve()
+        }}
+        uploadMessageAttachment={upload}
+        deleteChannelMessage={() => Promise.resolve()}
+        operationErrorMessage={(operation) =>
+          operation === "attach"
+            ? "Could not upload attachment. Check your connection and try again."
+            : "Could not send message. Check your connection and try again."}
+      />
+    )
+    const input = await screen.findByPlaceholderText("Message origination")
+    const fileInput = container.querySelector("input[type='file']") as HTMLInputElement
+    const file = new File(["image"], "brief.png", { type: "image/png" })
+
+    fireEvent.change(input, { target: { value: "Retry keeps this draft." } })
+    fireEvent.change(fileInput, { target: { files: [file] } })
+
+    expect(await screen.findByText("Could not upload attachment. Check your connection and try again.")).toBeTruthy()
+    expect((input as HTMLTextAreaElement).value).toBe("Retry keeps this draft.")
+
+    fireEvent.change(fileInput, { target: { files: [file] } })
+    expect(await screen.findByText("brief.png")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }))
+
+    await waitFor(() =>
+      expect(calls).toEqual([expect.objectContaining({
+        channelId,
+        body: "Retry keeps this draft.",
+        attachments: [expect.objectContaining({ storageId: "storage-1", name: "brief.png" })]
+      })])
+    )
   })
 
   it("places multi-select checkboxes before the avatar column", async () => {

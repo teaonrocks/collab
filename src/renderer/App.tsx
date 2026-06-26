@@ -5,6 +5,7 @@ import {
   Check,
   Copy,
   Ellipsis,
+  File as FileIcon,
   Hash,
   Lock,
   Paperclip,
@@ -16,6 +17,7 @@ import {
   Square,
   SquareCheck,
   Trash2,
+  X,
   Users
 } from "lucide-react"
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react"
@@ -26,6 +28,7 @@ import type {
   ChatChannelMember,
   ChatDataModel,
   ChatDataView,
+  ChatMessageAttachment,
   ChatMessageGuard,
   ChatOperationErrorMessage,
   SelectChatChannel
@@ -90,6 +93,7 @@ const MESSAGE_EDIT_MAX_HEIGHT = 180
 const MENTION_SUGGESTION_LIMIT = 6
 const MESSAGE_SEARCH_RESULT_LIMIT = 8
 const MESSAGE_SEARCH_MAX_QUERY_LENGTH = 120
+const MAX_COMPOSER_ATTACHMENTS = 4
 const normalizeChannelName = (name: string): string =>
   name.trim().replace(/^#+/, "").replace(/\s+/g, "-").toLowerCase()
 
@@ -176,6 +180,7 @@ export function App() {
 export function WorkspaceChat(props: {
   readonly model: ChatDataModel
   readonly createChannelMessage: ChatDataView["createChannelMessage"]
+  readonly uploadMessageAttachment?: ChatDataView["uploadMessageAttachment"]
   readonly deleteChannelMessage: ChatDataView["deleteChannelMessage"]
   readonly createChannel?: ChatDataView["createChannel"]
   readonly selectChannel?: SelectChatChannel
@@ -192,6 +197,7 @@ export function WorkspaceChat(props: {
     createChannel,
     selectChannel,
     createChannelMessage,
+    uploadMessageAttachment,
     deleteChannelMessage,
     editChannelMessage,
     toggleMessageReaction,
@@ -209,6 +215,8 @@ export function WorkspaceChat(props: {
   const [messageSearchQuery, setMessageSearchQuery] = useState("")
   const [activeSearchMessageId, setActiveSearchMessageId] = useState<ChannelMessageId | null>(null)
   const [replyParent, setReplyParent] = useState<ChannelMessage | null>(null)
+  const [pendingAttachments, setPendingAttachments] = useState<ReadonlyArray<ChatMessageAttachment>>([])
+  const [uploadingAttachment, setUploadingAttachment] = useState(false)
   const view = useMemo(() => createChannelViewModel(model), [model])
   const messageGroups = useMemo(
     () => groupConsecutiveMessages(model.channelMessages),
@@ -240,6 +248,8 @@ export function WorkspaceChat(props: {
     setMessageSearchQuery("")
     setActiveSearchMessageId(null)
     setReplyParent(null)
+    setPendingAttachments([])
+    setUploadingAttachment(false)
   }, [model.channel.id])
 
   useEffect(() => {
@@ -278,22 +288,46 @@ export function WorkspaceChat(props: {
   }
 
   const sendChannelMessage = () => {
-    if (channelMessagesLoading) return
+    if (channelMessagesLoading || uploadingAttachment) return
     const body = messageDraft.trim()
-    if (body.length === 0) return
+    if (body.length === 0 && pendingAttachments.length === 0) return
     setOperationError(null)
     void createChannelMessage({
       channelId: model.channel.id,
       body,
-      parentMessageId: replyParent?.id ?? null
+      parentMessageId: replyParent?.id ?? null,
+      ...(pendingAttachments.length === 0 ? {} : { attachments: pendingAttachments })
     })
       .then(() => {
         setMessageDraft("")
         setReplyParent(null)
+        setPendingAttachments([])
       })
       .catch((cause) => {
         if (operationErrorMessage !== undefined) setOperationError(operationErrorMessage("send", cause))
       })
+  }
+
+  const addAttachments = (files: ReadonlyArray<File>) => {
+    if (uploadMessageAttachment === undefined || files.length === 0) return
+    const slots = MAX_COMPOSER_ATTACHMENTS - pendingAttachments.length
+    const selectedFiles = files.slice(0, Math.max(0, slots))
+    if (selectedFiles.length === 0 || selectedFiles.length < files.length) {
+      setOperationError(`Messages can include at most ${MAX_COMPOSER_ATTACHMENTS} attachments.`)
+      if (selectedFiles.length === 0) return
+    } else {
+      setOperationError(null)
+    }
+    setUploadingAttachment(true)
+    void Promise.all(selectedFiles.map((file) => uploadMessageAttachment(file)))
+      .then((attachments) => {
+        setPendingAttachments((existing) => [...existing, ...attachments].slice(0, MAX_COMPOSER_ATTACHMENTS))
+        setOperationError(null)
+      })
+      .catch((cause: unknown) => {
+        setOperationError(operationErrorMessage?.("attach", cause) ?? "Could not upload attachment. Check your connection and try again.")
+      })
+      .finally(() => setUploadingAttachment(false))
   }
 
   const messageCanDelete = (message: ChannelMessage): boolean =>
@@ -361,7 +395,12 @@ export function WorkspaceChat(props: {
         onSaveEditMessage={messageInteractions.saveEditingMessage}
         onDeleteMessage={messageInteractions.requestDeleteMessage}
         replyParent={replyParent}
+        attachments={pendingAttachments}
+        attachmentUploadAvailable={uploadMessageAttachment !== undefined}
+        uploadingAttachment={uploadingAttachment}
         onCancelReply={() => setReplyParent(null)}
+        onChooseAttachments={addAttachments}
+        onRemoveAttachment={(attachmentId) => setPendingAttachments((attachments) => attachments.filter((attachment) => attachment.id !== attachmentId))}
         onToggleReaction={toggleMessageReaction === undefined ? undefined : toggleReaction}
         mentionMembers={visibleMembers}
         mentionMembersLoading={channelMembersLoading}
@@ -818,6 +857,9 @@ function ChatPane(props: {
   readonly searchState: ChannelMessageSearchState
   readonly activeSearchMessageId: ChannelMessageId | null
   readonly operationError: string | null
+  readonly attachments: ReadonlyArray<ChatMessageAttachment>
+  readonly attachmentUploadAvailable: boolean
+  readonly uploadingAttachment: boolean
   readonly onMessageDraftChange: (draft: string) => void
   readonly onSearchQueryChange: (query: string) => void
   readonly onSelectSearchResult: (messageId: ChannelMessageId) => void
@@ -830,6 +872,8 @@ function ChatPane(props: {
   readonly onSaveEditMessage: () => void
   readonly onDeleteMessage: (messageId: ChannelMessageId) => void
   readonly replyParent: ChannelMessage | null
+  readonly onChooseAttachments: (files: ReadonlyArray<File>) => void
+  readonly onRemoveAttachment: (attachmentId: string) => void
   readonly onCancelReply: () => void
   readonly onToggleReaction?: (message: ChannelMessage, emoji: string) => void
   readonly mentionMembers: ReadonlyArray<ChatChannelMember>
@@ -848,6 +892,9 @@ function ChatPane(props: {
     searchState,
     activeSearchMessageId,
     operationError,
+    attachments,
+    attachmentUploadAvailable,
+    uploadingAttachment,
     onMessageDraftChange,
     onSearchQueryChange,
     onSelectSearchResult,
@@ -860,6 +907,8 @@ function ChatPane(props: {
     onSaveEditMessage,
     onDeleteMessage,
     replyParent,
+    onChooseAttachments,
+    onRemoveAttachment,
     onCancelReply,
     onToggleReaction,
     mentionMembers,
@@ -953,10 +1002,15 @@ function ChatPane(props: {
         operationError={operationError}
         disabled={loading}
         replyParent={replyParent}
+        attachments={attachments}
+        attachmentUploadAvailable={attachmentUploadAvailable}
+        uploadingAttachment={uploadingAttachment}
         members={mentionMembers}
         membersLoading={mentionMembersLoading}
         onDraftChange={onMessageDraftChange}
         onSend={onSendMessage}
+        onChooseAttachments={onChooseAttachments}
+        onRemoveAttachment={onRemoveAttachment}
         onCancelReply={onCancelReply}
       />
     </section>
@@ -1217,7 +1271,16 @@ function ChannelMessageRow(props: {
               onCancel={onCancelEdit}
             />
           )
-          : <p className={classNames(messageBodyClassName, deleted && "text-foreground-placeholder italic")}>{deleted ? "Message deleted" : message.body}</p>}
+          : deleted
+            ? <p className={classNames(messageBodyClassName, "text-foreground-placeholder italic")}>Message deleted</p>
+            : (
+              <>
+                {message.body.trim().length === 0
+                  ? null
+                  : <p className={messageBodyClassName}>{message.body}</p>}
+                {message.attachments.length === 0 ? null : <MessageAttachmentList attachments={message.attachments} />}
+              </>
+            )}
         {!deleted && !editing && onToggleReaction !== undefined
           ? <MessageReactions message={message} onToggleReaction={onToggleReaction} />
           : null}
@@ -1291,6 +1354,93 @@ function MessageParentUnavailable() {
 }
 
 const reactionPalette = ["👍", "🎉", "👀"] as const
+
+function MessageAttachmentList(props: {
+  readonly attachments: ReadonlyArray<ChatMessageAttachment>
+}) {
+  return (
+    <div className="messageAttachments mt-2 flex min-w-0 flex-col gap-2" aria-label="Message attachments">
+      {props.attachments.map((attachment) => <MessageAttachment key={attachment.id} attachment={attachment} />)}
+    </div>
+  )
+}
+
+function MessageAttachment(props: {
+  readonly attachment: ChatMessageAttachment
+}) {
+  const { attachment } = props
+  const url = safeAttachmentUrl(attachment.url)
+  const size = formatAttachmentSize(attachment.size)
+  const isImage = attachment.kind === "image" && attachment.contentType.toLowerCase().startsWith("image/") && url !== null
+
+  if (isImage) {
+    return (
+      <a
+        className="messageImageAttachment block w-fit max-w-full overflow-hidden rounded-panel border border-border bg-surface-muted hover:border-border-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        href={url}
+        target="_blank"
+        rel="noreferrer"
+        aria-label={`Open image attachment ${attachment.name}`}
+      >
+        <img
+          className="block max-h-[320px] max-w-[min(520px,100%)] object-contain"
+          src={url}
+          alt={attachment.name}
+          loading="lazy"
+          decoding="async"
+        />
+      </a>
+    )
+  }
+
+  const content = (
+    <>
+      <span className="grid size-8 shrink-0 place-items-center rounded-control bg-surface-canvas text-foreground-subtle" aria-hidden="true">
+        <FileIcon className={iconClassName} />
+      </span>
+      <span className="min-w-0">
+        <span className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-sm font-bold text-foreground">{attachment.name}</span>
+        <span className="block text-xs text-foreground-subtle">{attachment.contentType || "file"} - {size}</span>
+      </span>
+    </>
+  )
+
+  if (url === null) {
+    return (
+      <span className="messageFileAttachment grid max-w-[min(420px,100%)] grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-panel border border-border bg-surface-muted px-2.5 py-2">
+        {content}
+      </span>
+    )
+  }
+
+  return (
+    <a
+      className="messageFileAttachment grid max-w-[min(420px,100%)] grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-panel border border-border bg-surface-muted px-2.5 py-2 no-underline hover:border-border-strong hover:bg-surface-muted-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+    >
+      {content}
+    </a>
+  )
+}
+
+const safeAttachmentUrl = (url: string | null): string | null => {
+  if (url === null) return null
+  try {
+    const parsed = new URL(url, window.location.href)
+    return parsed.protocol === "https:" || parsed.protocol === "http:" || parsed.protocol === "blob:" ? parsed.toString() : null
+  } catch {
+    return null
+  }
+}
+
+const formatAttachmentSize = (size: number): string => {
+  if (!Number.isFinite(size) || size < 0) return "Unknown size"
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(size < 10 * 1024 ? 1 : 0)} KB`
+  return `${(size / (1024 * 1024)).toFixed(size < 10 * 1024 * 1024 ? 1 : 0)} MB`
+}
 
 function MessageReactions(props: {
   readonly message: ChannelMessage
@@ -1400,18 +1550,41 @@ function MessageComposer(props: {
   readonly operationError: string | null
   readonly disabled: boolean
   readonly replyParent: ChannelMessage | null
+  readonly attachments: ReadonlyArray<ChatMessageAttachment>
+  readonly attachmentUploadAvailable: boolean
+  readonly uploadingAttachment: boolean
   readonly members: ReadonlyArray<ChatChannelMember>
   readonly membersLoading: boolean
   readonly onDraftChange: (draft: string) => void
   readonly onSend: () => void
+  readonly onChooseAttachments: (files: ReadonlyArray<File>) => void
+  readonly onRemoveAttachment: (attachmentId: string) => void
   readonly onCancelReply: () => void
 }) {
-  const { channelName, draft, operationError, disabled, replyParent, members, membersLoading, onDraftChange, onSend, onCancelReply } = props
+  const {
+    channelName,
+    draft,
+    operationError,
+    disabled,
+    replyParent,
+    attachments,
+    attachmentUploadAvailable,
+    uploadingAttachment,
+    members,
+    membersLoading,
+    onDraftChange,
+    onSend,
+    onChooseAttachments,
+    onRemoveAttachment,
+    onCancelReply
+  } = props
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [cursorIndex, setCursorIndex] = useState(draft.length)
   const [activeMentionIndex, setActiveMentionIndex] = useState(0)
   const [dismissedMentionKey, setDismissedMentionKey] = useState<string | null>(null)
-  const canSend = draft.trim().length > 0 && !disabled
+  const canAttach = attachmentUploadAvailable && !disabled && !uploadingAttachment && attachments.length < MAX_COMPOSER_ATTACHMENTS
+  const canSend = (draft.trim().length > 0 || attachments.length > 0) && !disabled && !uploadingAttachment
   const mentionRequest = useMemo(() => getMentionRequest(draft, cursorIndex), [cursorIndex, draft])
   const mentionKey = mentionRequest === null ? null : `${mentionRequest.triggerIndex}:${mentionRequest.query}`
   const mentionSuggestions = useMemo(
@@ -1435,7 +1608,7 @@ function MessageComposer(props: {
 
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (disabled) return
+    if (!canSend) return
     onSend()
   }
 
@@ -1479,6 +1652,32 @@ function MessageComposer(props: {
             </Button>
           </div>
         )}
+      {attachments.length === 0 && !uploadingAttachment
+        ? null
+        : (
+          <div className="composerAttachments mb-2 flex min-w-0 flex-wrap items-center gap-1.5" aria-label="Selected attachments">
+            {attachments.map((attachment) => (
+              <span
+                key={attachment.id}
+                className="composerAttachmentChip inline-flex max-w-full items-center gap-1.5 rounded-control border border-border bg-surface-muted px-2 py-1 text-xs text-foreground-muted"
+              >
+                <Paperclip className="size-3.5 shrink-0" aria-hidden="true" />
+                <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{attachment.name}</span>
+                <button
+                  type="button"
+                  className="grid size-5 shrink-0 place-items-center rounded-control border-0 bg-transparent p-0 text-foreground-subtle hover:bg-surface-muted-hover hover:text-foreground"
+                  aria-label={`Remove attachment ${attachment.name}`}
+                  onClick={() => onRemoveAttachment(attachment.id)}
+                >
+                  <X className="size-3.5" aria-hidden="true" />
+                </button>
+              </span>
+            ))}
+            {uploadingAttachment
+              ? <span className="text-xs text-foreground-subtle" role="status">Uploading attachment...</span>
+              : null}
+          </div>
+        )}
       <form
         className={classNames(
           "composer grid min-h-11 grid-cols-[48px_minmax(0,1fr)_44px] items-center overflow-hidden rounded-panel border border-border bg-surface-canvas",
@@ -1493,10 +1692,23 @@ function MessageComposer(props: {
           size="icon"
           className="composerAddButton h-full min-h-11 w-12 rounded-none border-0 border-r border-border bg-surface-canvas text-foreground-subtle hover:bg-surface-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
           aria-label="Add attachment"
-          disabled={disabled}
+          disabled={!canAttach}
+          onClick={() => fileInputRef.current?.click()}
         >
           <Paperclip className={iconClassName} aria-hidden="true" />
         </Button>
+        <input
+          ref={fileInputRef}
+          className="sr-only"
+          type="file"
+          multiple
+          tabIndex={-1}
+          onChange={(event) => {
+            const files = Array.from(event.currentTarget.files ?? [])
+            event.currentTarget.value = ""
+            onChooseAttachments(files)
+          }}
+        />
         <label className="sr-only" htmlFor="channel-message">Message</label>
         <div className="relative min-w-0">
           {mentionMenuOpen
@@ -1545,7 +1757,7 @@ function MessageComposer(props: {
               }
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault()
-                if (!disabled) onSend()
+                if (canSend) onSend()
               }
             }}
           />

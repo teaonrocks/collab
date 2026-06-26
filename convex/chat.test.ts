@@ -464,6 +464,43 @@ describe("dogfood channel memberships", () => {
       ])
   })
 
+  it("stores attachment metadata from Convex storage and hydrates signed URLs", async () => {
+    const t = convexTest(schema, modules)
+    await t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: mayaIdentity.tokenIdentifier,
+      email: mayaIdentity.email,
+      displayName: mayaIdentity.name
+    })
+
+    const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design" })
+    const storageId = await t.run((ctx) => ctx.storage.store(new Blob(["image"], { type: "image/png" })))
+    const message = await t.withIdentity(mayaIdentity).mutation(api.chat.sendMessage, {
+      channelId: design.id,
+      body: "",
+      attachments: [{ storageId, name: "  brief.png  " }]
+    })
+
+    expect(message).toMatchObject({
+      body: "",
+      attachments: [expect.objectContaining({
+        storageId,
+        name: "brief.png",
+        contentType: "application/octet-stream",
+        size: 5,
+        kind: "file"
+      })]
+    })
+    expect(message.attachments[0]?.url).toEqual(expect.any(String))
+
+    await expect(t.withIdentity(mayaIdentity).query(api.chat.channelMessages, { channelId: design.id }))
+      .resolves.toEqual([
+        expect.objectContaining({
+          id: message.id,
+          attachments: [expect.objectContaining({ storageId, url: expect.any(String) })]
+        })
+      ])
+  })
+
   it("rejects reply parents from another channel and keeps replies visible after parent deletion", async () => {
     const t = convexTest(schema, modules)
     await t.mutation(internal.chat.ensureViewerForIdentity, {

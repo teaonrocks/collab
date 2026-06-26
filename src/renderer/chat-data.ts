@@ -2,6 +2,7 @@ import type { RpcClientError } from "@effect/rpc/RpcClientError"
 import { Context, Effect, Layer, Stream } from "effect"
 import type {
   Channel,
+  ChannelMessageAttachment,
   ChannelId,
   ChannelMessage,
   ChannelMessageId,
@@ -24,6 +25,8 @@ export type ChatChannelIndicatorState = {
   readonly indicator: ChatChannelIndicator
 }
 
+export type ChatMessageAttachment = ChannelMessageAttachment
+
 export type ChatDataModel = Pick<CollabSnapshot, "currentUser" | "workspace" | "channel" | "channelMessages"> & {
   readonly channels: ReadonlyArray<Channel>
   readonly channelMembers?: ReadonlyArray<ChatChannelMember>
@@ -43,7 +46,10 @@ export type CreateChatMessage = (input: {
   readonly channelId: ChannelId
   readonly body: string
   readonly parentMessageId?: ChannelMessageId | null
+  readonly attachments?: ReadonlyArray<ChatMessageAttachment>
 }) => Promise<unknown>
+
+export type UploadChatMessageAttachment = (file: File) => Promise<ChatMessageAttachment>
 
 export type EditChatMessage = (input: {
   readonly channelId: ChannelId
@@ -63,7 +69,7 @@ export type ToggleChatMessageReaction = (input: {
 }) => Promise<unknown>
 
 export type ChatMessageGuard = (message: ChannelMessage) => boolean
-export type ChatOperation = "send" | "edit" | "delete" | "react"
+export type ChatOperation = "send" | "edit" | "delete" | "react" | "attach"
 export type ChatOperationErrorMessage = (operation: ChatOperation, cause: unknown) => string
 
 export type ChatDataView = {
@@ -71,6 +77,7 @@ export type ChatDataView = {
   readonly createChannel?: CreateChatChannel
   readonly selectChannel?: SelectChatChannel
   readonly createChannelMessage: CreateChatMessage
+  readonly uploadMessageAttachment?: UploadChatMessageAttachment
   readonly deleteChannelMessage: DeleteChatMessage
   readonly editChannelMessage?: EditChatMessage
   readonly toggleMessageReaction?: ToggleChatMessageReaction

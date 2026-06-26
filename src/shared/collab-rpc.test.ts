@@ -6,6 +6,7 @@ import {
   type AuditEventId,
   Channel,
   ChannelMessage,
+  ChannelMessageAttachment,
   type ChannelMessageId,
   CollabRpcs,
   CollabSnapshot,
@@ -51,7 +52,18 @@ const makeSnapshot = () =>
         authorDisplayName: "Maya Patel",
         body: "Summarize the handoff risks.",
         createdAt: 2,
-        deletedAt: null
+        deletedAt: null,
+        attachments: [
+          new ChannelMessageAttachment({
+            id: "attachment-1",
+            storageId: "storage-1",
+            name: "risk-summary.png",
+            contentType: "image/png",
+            size: 1234,
+            kind: "image",
+            url: "https://files.example/risk-summary.png"
+          })
+        ]
       })
     ],
     workspaceAgents: [],

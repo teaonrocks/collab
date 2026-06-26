@@ -8,6 +8,7 @@ import {
   Channel,
   type ChannelId,
   ChannelMessage,
+  ChannelMessageAttachment,
   type ChannelMessageId,
   ChannelMessageParent,
   ChannelMessageReaction,
@@ -23,7 +24,7 @@ type ConvexDogfoodError = {
   readonly message: string
 }
 
-type DogfoodOperation = "send" | "edit" | "delete" | "react"
+type DogfoodOperation = "send" | "edit" | "delete" | "react" | "attach"
 type DogfoodMessageReactionEmoji = "👍" | "🎉" | "👀"
 const dogfoodMessageReactionEmojis = new Set<string>(["👍", "🎉", "👀"])
 
@@ -82,6 +83,16 @@ export type DogfoodChannelMessageView = {
     readonly count: number
     readonly reactedByCurrentUser: boolean
   }>
+  readonly attachments?: ReadonlyArray<DogfoodMessageAttachmentView>
+}
+
+export type DogfoodMessageAttachmentView = {
+  readonly storageId: Id<"_storage">
+  readonly name: string
+  readonly contentType: string
+  readonly size: number
+  readonly kind: "file" | "image"
+  readonly url: string | null
 }
 
 export type DogfoodChannelMemberView = {
@@ -109,6 +120,7 @@ function ConvexDogfoodChat() {
   const createChannel = useMutation(api.chat.createChannel)
   const ensureChannelMember = useMutation(api.chat.ensureChannelMember)
   const markChannelRead = useMutation(api.chat.markChannelRead)
+  const generateAttachmentUploadUrl = useMutation(api.chat.generateAttachmentUploadUrl)
   const [ensuredUserId, setEnsuredUserId] = useState<string | null>(null)
   const [selectedChannelId, setSelectedChannelId] = useState<Id<"channels"> | null>(null)
   const [joinedChannelIds, setJoinedChannelIds] = useState<ReadonlySet<Id<"channels">>>(() => new Set())
@@ -236,6 +248,7 @@ function ConvexDogfoodChat() {
         },
         selectChannel: (channelId) => setSelectedChannelId(channelId),
         sendMessage,
+        uploadMessageAttachment: (file) => uploadDogfoodAttachment(generateAttachmentUploadUrl, file),
         editMessage,
         deleteMessage,
         toggleMessageReaction
@@ -392,7 +405,12 @@ export const dogfoodChatToChatData = (input: {
     readonly channelId: Id<"channels">
     readonly body: string
     readonly parentMessageId?: Id<"messages">
+    readonly attachments?: Array<{
+      readonly storageId: Id<"_storage">
+      readonly name: string
+    }>
   }) => Promise<unknown>
+  readonly uploadMessageAttachment?: (file: File) => Promise<ChannelMessageAttachment>
   readonly editMessage: (input: {
     readonly channelId: Id<"channels">
     readonly messageId: Id<"messages">
@@ -478,11 +496,16 @@ export const dogfoodChatToChatData = (input: {
     selectChannel: input.selectChannel === undefined
       ? undefined
       : (channelId) => input.selectChannel?.(toConvexChannelId(channelId)),
-    createChannelMessage: ({ channelId, body, parentMessageId }) => input.sendMessage({
+    createChannelMessage: ({ channelId, body, parentMessageId, attachments }) => input.sendMessage({
       channelId: toConvexChannelId(channelId),
       body,
-      parentMessageId: parentMessageId == null ? undefined : toConvexMessageId(parentMessageId)
+      parentMessageId: parentMessageId == null ? undefined : toConvexMessageId(parentMessageId),
+      attachments: attachments?.map((attachment) => ({
+        storageId: toConvexStorageId(attachment.storageId),
+        name: attachment.name
+      }))
     }),
+    uploadMessageAttachment: input.uploadMessageAttachment,
     editChannelMessage: ({ channelId, messageId, body }) =>
       input.editMessage({ channelId: toConvexChannelId(channelId), messageId: toConvexMessageId(messageId), body }),
     deleteChannelMessage: ({ channelId, messageId }) =>
@@ -520,7 +543,19 @@ const toLegacyChannelMessage = (message: DogfoodChannelMessageView): ChannelMess
         bodyPreview: message.parentMessage.bodyPreview,
         deleted: message.parentMessage.deleted
       }),
-    reactions: (message.reactions ?? []).map((reaction) => new ChannelMessageReaction(reaction))
+    reactions: (message.reactions ?? []).map((reaction) => new ChannelMessageReaction(reaction)),
+    attachments: (message.attachments ?? []).map(toLegacyMessageAttachment)
+  })
+
+const toLegacyMessageAttachment = (attachment: DogfoodMessageAttachmentView): ChannelMessageAttachment =>
+  new ChannelMessageAttachment({
+    id: String(attachment.storageId),
+    storageId: String(attachment.storageId),
+    name: attachment.name,
+    contentType: attachment.contentType,
+    size: attachment.size,
+    kind: attachment.kind,
+    url: attachment.url
   })
 
 const toHumanAccountId = (id: Id<"users">): HumanAccountId => String(id) as HumanAccountId
@@ -534,6 +569,35 @@ const toChannelMessageId = (id: Id<"messages">): ChannelMessageId => String(id) 
 const toConvexChannelId = (id: ChannelId): Id<"channels"> => String(id) as Id<"channels">
 
 const toConvexMessageId = (id: ChannelMessageId): Id<"messages"> => String(id) as Id<"messages">
+
+const toConvexStorageId = (id: string): Id<"_storage"> => String(id) as Id<"_storage">
+
+const uploadDogfoodAttachment = async (
+  generateAttachmentUploadUrl: (input: Record<string, never>) => Promise<string>,
+  file: File
+): Promise<ChannelMessageAttachment> => {
+  const uploadUrl = await generateAttachmentUploadUrl({})
+  const contentType = file.type.length === 0 ? "application/octet-stream" : file.type
+  const response = await fetch(uploadUrl, {
+    method: "POST",
+    headers: { "Content-Type": contentType },
+    body: file
+  })
+  if (!response.ok) throw new Error(`Attachment upload failed (${response.status})`)
+
+  const body = await response.json() as { readonly storageId?: string }
+  if (body.storageId === undefined || body.storageId.length === 0) throw new Error("Attachment upload did not return a storage id")
+
+  return new ChannelMessageAttachment({
+    id: body.storageId,
+    storageId: body.storageId,
+    name: file.name.trim().length === 0 ? "attachment" : file.name,
+    contentType,
+    size: file.size,
+    kind: contentType.toLowerCase().startsWith("image/") ? "image" : "file",
+    url: null
+  })
+}
 
 const toDogfoodMessageReactionEmoji = (emoji: string): DogfoodMessageReactionEmoji => {
   if (dogfoodMessageReactionEmojis.has(emoji)) return emoji as DogfoodMessageReactionEmoji
@@ -581,5 +645,7 @@ const dogfoodOperationErrorMessage = (operation: DogfoodOperation): string => {
       return "Could not delete message. Check your connection and try again."
     case "react":
       return "Could not update reaction. Check your connection and try again."
+    case "attach":
+      return "Could not upload attachment. Check your connection and try again."
   }
 }

@@ -8,6 +8,8 @@ const DOGFOOD_WORKSPACE_NAME = "Aether Dogfood"
 const DOGFOOD_CHANNEL_KEY = "general"
 const DOGFOOD_CHANNEL_NAME = "general"
 const MAX_CHANNELS = 100
+const MAX_MESSAGE_ATTACHMENTS = 4
+const MAX_ATTACHMENT_NAME_LENGTH = 180
 const MESSAGE_REACTION_EMOJIS = ["👍", "🎉", "👀"] as const
 const MESSAGE_PARENT_PREVIEW_MAX_LENGTH = 120
 
@@ -16,6 +18,11 @@ const messageReactionEmoji = v.union(
   v.literal(MESSAGE_REACTION_EMOJIS[1]),
   v.literal(MESSAGE_REACTION_EMOJIS[2])
 )
+
+const messageAttachmentInput = v.object({
+  storageId: v.id("_storage"),
+  name: v.string()
+})
 
 type AuthIdentity = Awaited<ReturnType<QueryCtx["auth"]["getUserIdentity"]>>
 type ViewerIdentity = NonNullable<AuthIdentity>
@@ -44,6 +51,14 @@ const emailFromIdentity = (identity: ViewerIdentity): string | undefined =>
   stringClaim(identity, "preferred_username")
 
 const displayNameFromEmail = (email: string): string => email.split("@")[0] ?? "Aether User"
+
+const attachmentName = (name: string): string => {
+  const normalized = name.trim().replace(/\s+/g, " ").slice(0, MAX_ATTACHMENT_NAME_LENGTH)
+  return normalized.length === 0 ? "attachment" : normalized
+}
+
+const attachmentKind = (contentType: string): "file" | "image" =>
+  contentType.toLowerCase().startsWith("image/") ? "image" : "file"
 
 const normalizeChannelName = (name: string): string =>
   name.trim().replace(/^#+/, "").replace(/\s+/g, "-").toLowerCase()
@@ -387,6 +402,47 @@ const requireChannelMember = async (
   return channel
 }
 
+const validateMessageAttachments = async (
+  ctx: MutationCtx,
+  attachments: ReadonlyArray<{ readonly storageId: Id<"_storage">; readonly name: string }> | undefined
+) => {
+  if (attachments === undefined) return []
+  if (attachments.length > MAX_MESSAGE_ATTACHMENTS) {
+    throw new Error(`Messages can include at most ${MAX_MESSAGE_ATTACHMENTS} attachments`)
+  }
+
+  const validated: Array<{
+    readonly storageId: Id<"_storage">
+    readonly name: string
+    readonly contentType: string
+    readonly size: number
+    readonly kind: "file" | "image"
+  }> = []
+
+  for (const attachment of attachments) {
+    const metadata = await ctx.db.system.get("_storage", attachment.storageId)
+    if (metadata === null) throw new Error("Attachment upload was not found")
+    const contentType = metadata.contentType ?? "application/octet-stream"
+    validated.push({
+      storageId: attachment.storageId,
+      name: attachmentName(attachment.name),
+      contentType,
+      size: metadata.size,
+      kind: attachmentKind(contentType)
+    })
+  }
+
+  return validated
+}
+
+export const generateAttachmentUploadUrl = mutation({
+  args: {},
+  handler: async (ctx) => {
+    await requireAllowedCurrentUser(ctx)
+    return ctx.storage.generateUploadUrl()
+  }
+})
+
 export const ensureViewer = action({
   args: {},
   handler: async (ctx) => {
@@ -668,11 +724,13 @@ export const sendMessage = mutation({
   args: {
     channelId: v.id("channels"),
     body: v.string(),
-    parentMessageId: v.optional(v.id("messages"))
+    parentMessageId: v.optional(v.id("messages")),
+    attachments: v.optional(v.array(messageAttachmentInput))
   },
   handler: async (ctx, args) => {
     const body = args.body.trim()
-    if (body.length === 0) throw new Error("Message body is required")
+    const attachments = await validateMessageAttachments(ctx, args.attachments)
+    if (body.length === 0 && attachments.length === 0) throw new Error("Message body or attachment is required")
 
     const user = await requireAllowedCurrentUser(ctx)
 
@@ -695,6 +753,7 @@ export const sendMessage = mutation({
       authorDisplayName: user.displayName,
       body,
       ...(args.parentMessageId === undefined ? {} : { parentMessageId: args.parentMessageId }),
+      ...(attachments.length === 0 ? {} : { attachments }),
       createdAt: Date.now()
     })
 
@@ -811,6 +870,14 @@ type MessageView = {
     readonly count: number
     readonly reactedByCurrentUser: boolean
   }>
+  readonly attachments: ReadonlyArray<{
+    readonly storageId: Id<"_storage">
+    readonly name: string
+    readonly contentType: string
+    readonly size: number
+    readonly kind: "file" | "image"
+    readonly url: string | null
+  }>
 }
 
 const messageReactionRank = (emoji: string): number => {
@@ -857,6 +924,30 @@ const trimParentPreview = (body: string): string => {
   return `${normalized.slice(0, MESSAGE_PARENT_PREVIEW_MAX_LENGTH - 3)}...`
 }
 
+const attachmentsForMessage = async (
+  ctx: QueryCtx | MutationCtx,
+  message: Doc<"messages">
+) => {
+  const attachments = message.attachments ?? []
+  const views: Array<{
+    readonly storageId: Id<"_storage">
+    readonly name: string
+    readonly contentType: string
+    readonly size: number
+    readonly kind: "file" | "image"
+    readonly url: string | null
+  }> = []
+
+  for (const attachment of attachments) {
+    views.push({
+      ...attachment,
+      url: await ctx.storage.getUrl(attachment.storageId)
+    })
+  }
+
+  return views
+}
+
 const toMessageViews = async (
   ctx: QueryCtx | MutationCtx,
   messages: ReadonlyArray<Doc<"messages">>,
@@ -864,6 +955,7 @@ const toMessageViews = async (
 ): Promise<ReadonlyArray<MessageView>> => {
   const authorNamesById = new Map<Id<"users">, string>()
   const reactionsByMessageId = new Map<Id<"messages">, Awaited<ReturnType<typeof reactionsForMessage>>>()
+  const attachmentsByMessageId = new Map<Id<"messages">, Awaited<ReturnType<typeof attachmentsForMessage>>>()
   const parentsById = new Map<Id<"messages">, Doc<"messages"> | null>()
 
   for (const message of messages) {
@@ -875,6 +967,10 @@ const toMessageViews = async (
 
   for (const message of messages) {
     reactionsByMessageId.set(message._id, await reactionsForMessage(ctx, { messageId: message._id, currentUserId }))
+  }
+
+  for (const message of messages) {
+    attachmentsByMessageId.set(message._id, await attachmentsForMessage(ctx, message))
   }
 
   for (const message of messages) {
@@ -913,7 +1009,8 @@ const toMessageViews = async (
           },
       createdAt: message.createdAt,
       editedAt: message.editedAt ?? null,
-      reactions: reactionsByMessageId.get(message._id) ?? []
+      reactions: reactionsByMessageId.get(message._id) ?? [],
+      attachments: attachmentsByMessageId.get(message._id) ?? []
     }
   })
 }

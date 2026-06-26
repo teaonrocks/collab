@@ -194,6 +194,8 @@ and `@effect-atom/atom-react` 0.5.0. Built with Electron 41 and electron-vite 2.
   accepted decisions for that slice.
 - [`docs/message-replies-decision.md`](docs/message-replies-decision.md) records the human-chat
   reply behavior and data model impact for the Collaboration Depth milestone.
+- [`docs/message-attachments-upload-path.md`](docs/message-attachments-upload-path.md) records the
+  Convex storage upload path for dogfood chat file and image attachments.
 - [`docs/mvp-slice.md`](docs/mvp-slice.md), [`docs/agent-collab-domain-model.md`](docs/agent-collab-domain-model.md), and
   [`docs/adr-agent-collaboration.md`](docs/adr-agent-collaboration.md) are historical agent-collaboration planning notes.
 - [`package.json`](package.json) contains the pinned runtime dependencies and scripts.

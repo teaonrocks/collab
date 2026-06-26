@@ -6,6 +6,7 @@ import type {
   ChannelAgentEnablement,
   ChannelId,
   ChannelMessage,
+  ChannelMessageAttachment,
   ChannelMessageId,
   CollabError,
   CollabNotFound,
@@ -36,6 +37,7 @@ export class CollabApi extends Context.Tag("renderer/CollabApi")<
       readonly channelId: ChannelId
       readonly body: string
       readonly parentMessageId?: ChannelMessageId | null
+      readonly attachments?: ReadonlyArray<ChannelMessageAttachment>
     }) => Effect.Effect<ChannelMessage, CollabNotFound | CollabPolicyDenied | CollabError | RpcClientError>
     readonly deleteChannelMessage: (input: {
       readonly channelId: ChannelId

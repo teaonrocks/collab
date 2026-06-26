@@ -4,7 +4,7 @@ import { getFunctionName } from "convex/server"
 import type { ComponentType } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Id } from "../../convex/_generated/dataModel"
-import { ChannelMessage, ChannelMessageReaction } from "../shared/collab-rpc"
+import { ChannelMessage, ChannelMessageAttachment, ChannelMessageReaction } from "../shared/collab-rpc"
 import {
   dogfoodChatToChatData,
   type DogfoodChannelMemberView,
@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => ({
   createChannel: vi.fn(),
   ensureChannelMember: vi.fn(),
   markChannelRead: vi.fn(),
+  generateAttachmentUploadUrl: vi.fn(),
   mutationCallCount: 0,
   workspace: undefined as DogfoodWorkspaceView | null | undefined,
   channels: undefined as ReadonlyArray<DogfoodChannelView> | undefined,
@@ -57,8 +58,9 @@ vi.mock("convex/react", () => ({
       mocks.toggleMessageReaction,
       mocks.createChannel,
       mocks.ensureChannelMember,
-      mocks.markChannelRead
-    ][mocks.mutationCallCount % 7]
+      mocks.markChannelRead,
+      mocks.generateAttachmentUploadUrl
+    ][mocks.mutationCallCount % 8]
     mocks.mutationCallCount += 1
     return mutation
   },
@@ -91,7 +93,13 @@ vi.mock("./App", () => ({
     }
   readonly createChannel?: (input: { readonly name: string }) => Promise<unknown>
   readonly selectChannel?: (channelId: string) => void
-  readonly createChannelMessage: (input: { readonly channelId: string; readonly body: string; readonly parentMessageId?: string | null }) => Promise<unknown>
+  readonly createChannelMessage: (input: {
+    readonly channelId: string
+    readonly body: string
+    readonly parentMessageId?: string | null
+    readonly attachments?: ReadonlyArray<{ readonly storageId: string; readonly name: string }>
+  }) => Promise<unknown>
+  readonly uploadMessageAttachment?: (file: File) => Promise<unknown>
   readonly editChannelMessage?: (input: { readonly channelId: string; readonly messageId: string; readonly body: string }) => Promise<unknown>
   readonly deleteChannelMessage: (input: { readonly channelId: string; readonly messageId: string }) => Promise<unknown>
   readonly toggleMessageReaction?: (input: { readonly channelId: string; readonly messageId: string; readonly emoji: string }) => Promise<unknown>
@@ -215,6 +223,7 @@ beforeEach(() => {
   })
   mocks.ensureChannelMember.mockResolvedValue({})
   mocks.markChannelRead.mockResolvedValue({})
+  mocks.generateAttachmentUploadUrl.mockResolvedValue("https://upload.example/convex")
   mocks.mutationCallCount = 0
   mocks.workspace = undefined
   mocks.channels = undefined
@@ -383,6 +392,53 @@ describe("dogfoodChatToChatData", () => {
       channelId: workspace.channel.id,
       body: "Reply through adapter.",
       parentMessageId: messages[0]!.id
+    })
+  })
+
+  it("adapts attachment metadata and forwards storage ids when sending", async () => {
+    const chatData = dogfoodChatToChatData({
+      workspace,
+      channels,
+      selectedChannelId: workspace.channel.id,
+      messages: [{
+        ...messages[0]!,
+        attachments: [{
+          storageId: "storage-1" as Id<"_storage">,
+          name: "brief.png",
+          contentType: "image/png",
+          size: 4096,
+          kind: "image",
+          url: "https://files.example/brief.png"
+        }]
+      }],
+      sendMessage: mocks.sendMessage,
+      editMessage: mocks.editMessage,
+      deleteMessage: mocks.deleteMessage
+    })
+
+    expect(chatData.model.channelMessages[0]?.attachments).toEqual([
+      new ChannelMessageAttachment({
+        id: "storage-1",
+        storageId: "storage-1",
+        name: "brief.png",
+        contentType: "image/png",
+        size: 4096,
+        kind: "image",
+        url: "https://files.example/brief.png"
+      })
+    ])
+
+    await chatData.createChannelMessage({
+      channelId: chatData.model.channel.id,
+      body: "Attachment included.",
+      attachments: chatData.model.channelMessages[0]?.attachments
+    })
+
+    expect(mocks.sendMessage).toHaveBeenCalledWith({
+      channelId: workspace.channel.id,
+      body: "Attachment included.",
+      parentMessageId: undefined,
+      attachments: [{ storageId: "storage-1", name: "brief.png" }]
     })
   })
 
