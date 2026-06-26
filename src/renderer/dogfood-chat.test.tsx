@@ -636,7 +636,9 @@ describe("ConvexDogfoodApp", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Sign out" }))
 
-    expect(mocks.auth.signOut).toHaveBeenCalledTimes(1)
+    expect(mocks.auth.signOut).toHaveBeenCalledWith({
+      returnTo: "http://localhost:3000/"
+    })
   })
 
   it("sends messages through the Convex mutation using the active channel", async () => {

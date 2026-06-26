@@ -13,6 +13,8 @@ For failure capture and recovery, see [`docs/dogfood-debugging.md`](dogfood-debu
 
 - Signed-out users see the Aether Dogfood sign-in screen.
 - Sign-in opens AuthKit in the system browser and returns to the app.
+- In preview or packaged-style builds, the `aether://auth/callback` deep link focuses Aether and
+  completes the AuthKit callback without opening unsupported external URLs.
 - A non-allowlisted account sees a compact access error and can sign out.
 - An allowlisted account joins the shared `#general` channel.
 - The first empty channel state invites the user to start the conversation.

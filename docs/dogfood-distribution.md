@@ -6,9 +6,8 @@ Aether's current dogfood distribution path is dev-only. Dogfood users run the El
 the local checkout with the Convex development deployment and Convex-managed WorkOS AuthKit.
 
 Do not produce signed installers, auto-updaters, or packaged artifacts for this milestone. The app
-does not yet have packaging configuration, updater infrastructure, or packaged AuthKit hardening, and
-the accepted dogfood ADR explicitly allows the first shared chat loop to prove itself without
-packaged app delivery.
+does not yet have packaging configuration or updater infrastructure, and the accepted dogfood ADR
+explicitly allows the first shared chat loop to prove itself without packaged app delivery.
 
 ## Installer Setup
 
@@ -28,6 +27,9 @@ Fill `.env.local` with the Convex-managed values for:
 
 Keep `VITE_WORKOS_REDIRECT_URI` set to `aether://auth/callback` unless the AuthKit configuration is
 changed deliberately.
+
+Packaged and preview builds use the same native callback value. The tested deep-link behavior is
+documented in [`docs/packaged-authkit-callback.md`](packaged-authkit-callback.md).
 
 The dogfood allowlist stays in Convex environment state, not in the renderer bundle:
 
@@ -87,6 +89,5 @@ band and keep it out of screenshots, docs comments, Linear comments, and Git his
 ## Exit Criteria For Packaging
 
 Revisit signed builds or packaged artifacts only after the dogfood chat loop is worth carrying
-forward and the packaged AuthKit path is explicitly tested. That follow-up should decide signing,
-notarization, update behavior, packaged deep-link auth, and production Convex/AuthKit ownership
-together instead of adding a partial installer now.
+forward. That follow-up should decide signing, notarization, update behavior, and production
+Convex/AuthKit ownership together instead of adding a partial installer now.

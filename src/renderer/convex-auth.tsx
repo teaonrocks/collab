@@ -2,6 +2,7 @@ import { ConvexProviderWithAuthKit } from "@convex-dev/workos"
 import { AuthKitProvider, useAuth } from "@workos-inc/authkit-react"
 import { ConvexReactClient } from "convex/react"
 import type { ReactNode } from "react"
+import { authKitRedirectUriForCurrentLocation } from "./authkit-redirect"
 import { isDogfoodAuthConfigured } from "./dogfood-config"
 
 let convexClient: ConvexReactClient | null = null
@@ -21,11 +22,13 @@ export function DogfoodAuthProvider(props: { readonly children: ReactNode }) {
 
   const convexUrl = import.meta.env.VITE_CONVEX_URL
   const clientId = import.meta.env.VITE_WORKOS_CLIENT_ID
-  const redirectUri = import.meta.env.VITE_WORKOS_REDIRECT_URI
+  const configuredRedirectUri = import.meta.env.VITE_WORKOS_REDIRECT_URI
 
-  if (!hasValue(convexUrl) || !hasValue(clientId) || !hasValue(redirectUri)) {
+  if (!hasValue(convexUrl) || !hasValue(clientId) || !hasValue(configuredRedirectUri)) {
     return <>{props.children}</>
   }
+
+  const redirectUri = authKitRedirectUriForCurrentLocation(configuredRedirectUri, window.location)
 
   return (
     <AuthKitProvider clientId={clientId} redirectUri={redirectUri}>

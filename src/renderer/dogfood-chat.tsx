@@ -18,6 +18,7 @@ import {
   type WorkspaceId
 } from "../shared/collab-rpc"
 import { WorkspaceChat } from "./App"
+import { authKitSignOutReturnTo } from "./authkit-redirect"
 import { openExternalUrl } from "./electron-shell"
 
 type ConvexDogfoodError = {
@@ -338,7 +339,7 @@ function ConvexDogfoodChat() {
   return (
     <WorkspaceChat
       {...model}
-      profileMenuActions={[{ label: "Sign out", onSelect: () => auth.signOut() }]}
+      profileMenuActions={[{ label: "Sign out", onSelect: () => auth.signOut({ returnTo: authKitSignOutReturnTo() }) }]}
     />
   )
 }

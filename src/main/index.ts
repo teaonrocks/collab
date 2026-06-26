@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, shell } from "electron"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
+import { createAuthCallbackCoordinator, focusAuthCallbackWindow } from "./auth-callback"
 import {
   authCallbackScheme,
   findAuthCallbackUrl,
@@ -9,8 +10,6 @@ import {
 } from "../shared/auth-redirect-policy"
 
 let mainWindow: BrowserWindow | null = null
-
-let pendingAuthCallbackUrl: string | null = findAuthCallbackUrl(process.argv)
 
 ipcMain.handle("aether:open-external", (_event, rawUrl: unknown) => {
   if (typeof rawUrl !== "string") {
@@ -29,11 +28,10 @@ const rendererCallbackUrl = (rawUrl: string): string | null => {
   })
 }
 
-const focusWindow = (window: BrowserWindow): void => {
-  if (window.isDestroyed()) return
-  if (window.isMinimized()) window.restore()
-  window.focus()
-}
+const authCallbacks = createAuthCallbackCoordinator({
+  initialAuthCallbackUrl: findAuthCallbackUrl(process.argv),
+  rendererCallbackUrl
+})
 
 const getMainWindow = (): BrowserWindow | null => {
   if (mainWindow === null) return null
@@ -44,34 +42,20 @@ const getMainWindow = (): BrowserWindow | null => {
   return mainWindow
 }
 
-const handleAuthCallback = (rawUrl: string): void => {
-  const targetUrl = rendererCallbackUrl(rawUrl)
-  if (targetUrl === null) return
-
-  const window = getMainWindow()
-  if (window === null) {
-    pendingAuthCallbackUrl = rawUrl
-    return
-  }
-
-  focusWindow(window)
-  void window.loadURL(targetUrl)
-}
-
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   app.on("second-instance", (_event, argv) => {
     const callbackUrl = findAuthCallbackUrl(argv)
-    if (callbackUrl !== null) handleAuthCallback(callbackUrl)
+    if (callbackUrl !== null) authCallbacks.handleAuthCallback(callbackUrl, getMainWindow())
     const window = getMainWindow()
-    if (window !== null) focusWindow(window)
+    if (window !== null) focusAuthCallbackWindow(window)
   })
 }
 
 app.on("open-url", (event, rawUrl) => {
   event.preventDefault()
-  handleAuthCallback(rawUrl)
+  authCallbacks.handleAuthCallback(rawUrl, getMainWindow())
 })
 
 const createWindow = (): void => {
@@ -90,10 +74,8 @@ const createWindow = (): void => {
   })
 
   const devServerUrl = process.env.ELECTRON_RENDERER_URL
-  if (pendingAuthCallbackUrl !== null) {
-    const callbackUrl = pendingAuthCallbackUrl
-    pendingAuthCallbackUrl = null
-    handleAuthCallback(callbackUrl)
+  if (authCallbacks.pendingAuthCallbackUrl() !== null) {
+    authCallbacks.consumePendingAuthCallback(window)
   } else if (devServerUrl !== undefined) {
     void window.loadURL(devServerUrl)
   } else {
