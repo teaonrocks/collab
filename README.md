@@ -3,12 +3,11 @@
 Aether is an experiment in building a calmer work chat: fast human collaboration first, with
 agent-native workflows added only after the core chat product feels real.
 
-The current repository is an Electron + React app that wires `@effect/rpc` and `effect-atom` across
-the main/renderer boundary over a `MessagePort`. The active app now prioritizes a working
-Slack/Discord-style channel surface: workspace navigation, a channel timeline, message composer,
-message selection, copy/delete actions, live snapshots, and a channel details panel.
+The current repository is an Electron + React app using Convex and WorkOS AuthKit for the active
+dogfood chat path. Snapshot-era `@effect/rpc` and `effect-atom` modules remain in the tree as legacy
+fixtures, but they are no longer wired into runtime startup.
 
-The next planning target is realtime dogfooding with Convex and WorkOS AuthKit. The earlier agent
+The active dogfood path is realtime chat with Convex and WorkOS AuthKit. The earlier agent
 collaboration docs remain in `docs/` as historical planning material. They should not drive the
 first product milestone until the chat surface itself is solid.
 
@@ -47,87 +46,62 @@ it with WorkOS AuthKit:
 - Authenticated current user.
 - One shared workspace and one shared channel.
 - Realtime message send/read across multiple users.
-- Local JSON persistence treated as a migration fallback rather than the active chat source of truth.
+- Local JSON persistence removed from runtime startup and retained only as legacy test fixtures.
 
 See [`docs/chat-realtime-auth-plan.md`](docs/chat-realtime-auth-plan.md) for the architecture
 decision, data model sketch, Electron auth concerns, migration plan, risks, and acceptance criteria.
 The accepted decision record is [`docs/adr-chat-realtime-auth-dogfood.md`](docs/adr-chat-realtime-auth-dogfood.md).
+The local fallback retirement choice is recorded in
+[`docs/local-json-fallback-retirement.md`](docs/local-json-fallback-retirement.md).
 
 ## Current Implementation
 
-- `CollabRpcs` is the schema-defined shared RPC contract for payloads, successes, streams, and typed
-  errors.
-- `CollabRepo` is the filesystem-backed main-process store. It seeds the workspace/channel/current
-  user, stores channel messages, still contains parked agent collaboration operations for a later
-  phase, and persists data to `app.getPath("userData")/aether-collab.json`.
-- `CollabHandlersLive` exposes the repo through the RPC server.
-- `layerIpcServer` and `layerIpcClient` provide the custom MsgPack RPC transport over Electron
-  `MessagePort`.
-- `CollabApiLive` adapts the RPC client into the renderer-facing `CollabApi` service tag.
-- `collab-atoms.ts` builds renderer state and mutation functions with `effect-atom`.
-- `App.tsx` renders the working chat-first channel flow.
+- `convex/chat.ts` owns the dogfood chat queries, mutations, and actions.
+- `src/renderer/dogfood-chat.tsx` adapts Convex data into the shared chat UI model.
+- `src/renderer/convex-auth.tsx` wires WorkOS AuthKit to Convex.
+- `src/renderer/main.tsx` starts the Convex/AuthKit dogfood app when all required env values exist
+  and otherwise shows a configuration-required state.
+- `CollabRpcs`, `CollabRepo`, `CollabHandlersLive`, `collab-atoms.ts`, and `App.tsx` are preserved
+  as snapshot-era legacy fixtures with colocated tests. They are not wired into runtime startup.
 
 ## Architecture
 
 ```text
-Electron main (Node)
-  ManagedRuntime(Live)
-    RpcServer.layer(CollabRpcs)
-      CollabHandlersLive
-        CollabRepo
-          FileSystem + SubscriptionRef -> userData/aether-collab.json
-
-    layerIpcServer
-      RpcServer.Protocol over IpcServerPort
-      RpcPortHandoff.bind, rebinds a fresh port per renderer load
-
-                  MessagePortMain
-               new MessageChannelMain
-                       |
-                       v
-
-preload (isolated world)
-  ipcRenderer.on("rpc-port") -> window.postMessage(port)
-
-                       |
-                       v
-
 Electron renderer (DOM)
-  window message "rpc-port" -> MessagePort
-    CollabApiLive
-      layerIpcClient
-      RpcClient.make(CollabRpcs)
-      adapter -> CollabApi Context.Tag
-
-    collab-atoms.ts
-      Atom.runtime(CollabApiLive)
-      effect-atom
-      React App
+  main.tsx
+    dogfood env configured?
+      yes -> DogfoodAuthProvider
+               ConvexDogfoodApp
+                 Convex AuthKit session
+                 Convex realtime queries and mutations
+      no  -> configuration-required state
 ```
 
-The renderer depends on the `CollabApi` tag rather than the transport. Production binds
-`CollabApiLive` to the handed-off `MessagePort`; tests can replace it with a mock layer through the
-atom runtime.
+The old Electron RPC transport is no longer part of the runtime architecture. Its modules remain
+covered by tests so the snapshot-era behavior is available as reference while dogfood work continues
+on Convex.
 
 ## Project Structure
 
 ```text
 src/
   shared/
-    collab-rpc.ts          # agent collaboration MVP RPC contract and wire-level errors
-    rpc-client.ts          # renderer RpcClient.Protocol over MessagePort
+    collab-rpc.ts          # legacy snapshot-era RPC contract and wire-level errors
+    rpc-client.ts          # legacy renderer RpcClient.Protocol over MessagePort
   main/
-    ipc-server.ts          # main RpcServer.Protocol and port handoff
-    collab-repo.ts         # filesystem collaboration store and change stream
-    collab-handlers.ts     # RPC handlers wired to the collaboration repo
-    index.ts               # Electron bootstrap and active collaboration runtime composition
+    ipc-server.ts          # legacy main RpcServer.Protocol and port handoff
+    collab-repo.ts         # legacy filesystem collaboration store and change stream
+    collab-handlers.ts     # legacy RPC handlers wired to the collaboration repo
+    index.ts               # Electron bootstrap and AuthKit callback handling
   preload/
-    index.ts               # relays the transferred port to the renderer
+    index.ts               # exposes shell helpers to the renderer
   renderer/
-    collab-api.ts          # renderer-facing collaboration API tag
-    collab-api-live.ts     # production RPC-backed collaboration API layer
-    collab-atoms.ts        # collaboration effect-atom state and mutation atoms
-    App.tsx                # current chat-first channel UI
+    collab-api.ts          # legacy renderer-facing collaboration API tag
+    collab-api-live.ts     # legacy RPC-backed collaboration API layer
+    collab-atoms.ts        # legacy collaboration effect-atom state and mutation atoms
+    App.tsx                # legacy snapshot-era channel UI
+    convex-auth.tsx        # Convex AuthKit provider
+    dogfood-chat.tsx       # active Convex dogfood chat UI adapter
     main.tsx               # React bootstrap
 ```
 
@@ -157,8 +131,10 @@ The scaffold for the next dogfood slice is present but not yet the active chat s
    `VITE_WORKOS_REDIRECT_URI` should be `aether://auth/callback` so AuthKit opens in the user's
    default browser and returns to Electron.
 
-Until those values exist, the renderer falls back to the current local Electron RPC app. The first
-Convex backend functions live in `convex/chat.ts`.
+Until those values exist, the renderer shows a configuration-required state. The old local Electron
+RPC chat no longer runs as a fallback. Seeing `Aether Labs` or `#origination` should only happen in
+tests or deliberately imported legacy modules. The first Convex backend functions live in
+`convex/chat.ts`.
 
 ## Tests
 
@@ -196,6 +172,8 @@ and `@effect-atom/atom-react` 0.5.0. Built with Electron 41 and electron-vite 2.
   dogfood install/update path and reproducible build check.
 - [`docs/dogfood-debugging.md`](docs/dogfood-debugging.md) explains diagnostic codes, recovery, and
   safe failure reports for dogfood users.
+- [`docs/local-json-fallback-retirement.md`](docs/local-json-fallback-retirement.md) records the
+  removal of the local JSON runtime fallback and the preserved legacy fixtures.
 - [`docs/message-replies-decision.md`](docs/message-replies-decision.md) records the human-chat
   reply behavior and data model impact for the Collaboration Depth milestone.
 - [`docs/message-attachments-upload-path.md`](docs/message-attachments-upload-path.md) records the

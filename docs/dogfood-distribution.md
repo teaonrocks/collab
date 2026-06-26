@@ -38,6 +38,11 @@ pnpm convex env set AETHER_ALLOWED_EMAILS "you@example.com,friend@example.com"
 Use `docs/dogfood-smoke-test.md` after setup to confirm sign-in, allowlist behavior, realtime sends,
 mutation failures, and sign-out.
 
+If any of the required `VITE_` values are missing, `pnpm dev` shows a configuration-required state
+instead of opening chat. The old local Electron RPC fallback has been removed from runtime startup;
+see
+[`docs/local-json-fallback-retirement.md`](local-json-fallback-retirement.md).
+
 ## Running And Updating
 
 Start the app from the checkout:

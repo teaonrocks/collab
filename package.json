@@ -1,7 +1,7 @@
 {
   "name": "aether",
   "version": "0.1.0",
-  "description": "An Electron chat-first collaboration app wiring @effect/rpc and effect-atom over MessagePort while planning Convex + WorkOS dogfooding.",
+  "description": "An Electron chat-first collaboration app using Convex and WorkOS AuthKit for dogfood chat.",
   "license": "MIT",
   "author": "",
   "main": "./out/main/index.js",

@@ -90,20 +90,17 @@ not add a partial scaffold yet.
 
 ## Architecture Decision
 
-Use Convex as the networked chat source of truth for the dogfooding slice, while keeping the current
-`CollabApi` boundary as a temporary compatibility adapter.
-
-The renderer should continue to depend on `CollabApi` during the migration. A new Convex-backed
-implementation can satisfy the same chat-shaped operations while the Electron main process keeps the
-local JSON repo available as a fallback or migration source. Once the chat UI is fully Convex-backed,
-the snapshot contract can be narrowed or replaced with direct Convex hooks.
+Use Convex as the networked chat source of truth for the dogfooding slice. The old `CollabApi`
+boundary and local JSON repo remain as legacy test fixtures, not as runtime fallback architecture.
+If local import is ever needed, it should be an explicit one-time path outside normal app startup.
 
 Initial ownership:
 
 - Auth state: WorkOS AuthKit.
 - User identity in app data: synced or derived WorkOS AuthKit user identity.
 - Workspace/channel/message state: Convex.
-- Local JSON file: migration/export fallback only, then deprecated.
+- Local JSON file: removed from runtime startup; explicit one-time import only if a future ticket
+  chooses it.
 - Agent scaffolding: hidden from the first networked slice.
 
 ## Data Model Sketch
@@ -236,10 +233,11 @@ Do this after confirming the Electron dev origin. The WorkOS setup mode is Conve
 - Use Convex realtime queries for the channel timeline.
 - Keep existing message selection/copy affordances where they do not depend on local-only ids.
 
-### Phase 3: Migration From Local JSON
+### Phase 3: Retire Local JSON Runtime
 
 - Do not import existing local messages for the first dogfood.
-- Keep `aether-collab.json` as a future one-time import source only.
+- Remove `aether-collab.json` from normal runtime startup.
+- Keep snapshot-era fixtures and tests if they still protect useful transport or UI behavior.
 - If import is later requested, map the seeded workspace/channel to the shared Convex
   workspace/channel.
 - Preserve original local ids in optional metadata if useful for debugging.
@@ -265,7 +263,7 @@ Do this after confirming the Electron dev origin. The WorkOS setup mode is Conve
   intentionally narrow.
 - Partial Convex scaffolds can break typecheck if generated files are referenced before
   `convex dev` or codegen runs.
-- Local JSON import can duplicate messages unless it is explicit and idempotent.
+- Local JSON import can duplicate messages unless a future import path is explicit and idempotent.
 
 ## Acceptance Criteria
 

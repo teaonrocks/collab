@@ -55,8 +55,8 @@ breadth.
 
 Do not migrate existing local JSON messages for the first dogfood.
 
-Keep the local JSON file as a fallback or future import source, but Convex starts with fresh chat
-data.
+Do not keep the local JSON file as a runtime fallback. Convex starts with fresh chat data, and any
+future local import must be explicit rather than part of normal startup.
 
 ### Hide Agent UI Behind A Flag
 
@@ -93,7 +93,7 @@ deployment hardening are deferred until realtime chat is worth carrying forward.
 - The data model should include workspace/channel/membership concepts, but only one seeded/default
   instance needs to exist.
 - The renderer should not expose agent controls unless a development flag is enabled.
-- Local JSON persistence should be clearly de-emphasized once Convex chat is active.
+- Local JSON persistence should be removed from runtime startup once Convex chat is active.
 - Production auth and packaged Electron decisions remain known follow-up work, not blockers for the
   first dogfood.
 

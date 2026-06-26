@@ -72,9 +72,9 @@ without a client-side N+1 query. A compact view is enough:
 
 - `parentMessage?: { id, authorDisplayName, bodyPreview, deleted }`
 
-The local RPC fallback model can mirror this with an optional `parentMessageId` on `ChannelMessage`
-and a derived parent summary in the renderer if needed. Do not reuse the existing `Thread` or
-`ThreadMessage` types for human replies.
+The snapshot-era local RPC model mirrored this with an optional `parentMessageId` on
+`ChannelMessage`, but it is now a preserved test fixture rather than a runtime fallback. Do not reuse
+the existing `Thread` or `ThreadMessage` types for human replies.
 
 ## API And UI Impact
 
@@ -113,6 +113,6 @@ continue to operate on the reply message itself.
 Do not prototype in COL-19.
 
 The decision is clear enough to implement directly in COL-33, and a partial prototype would require
-touching the Convex schema, send mutation, local RPC fallback, renderer chat API, and timeline UI.
-Those changes belong together in the implementation ticket so tests can cover the end-to-end reply
-behavior rather than a disposable spike.
+touching the Convex schema, send mutation, legacy snapshot fixtures, renderer chat API, and timeline
+UI. Those changes belong together in the implementation ticket so tests can cover the end-to-end
+reply behavior rather than a disposable spike.
