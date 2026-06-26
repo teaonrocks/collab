@@ -9,6 +9,7 @@ import {
   type ChannelId,
   ChannelMessage,
   type ChannelMessageId,
+  ChannelMessageReaction,
   CollabSnapshot,
   HumanAccount,
   type HumanAccountId,
@@ -1056,6 +1057,41 @@ describe("App", () => {
     expect(buttons).toHaveLength(1)
     expect(buttons[0]?.textContent).toBe("")
     expect(screen.getByLabelText("More actions for message from Maya Patel")).toBeTruthy()
+  })
+
+  it("renders compact message reactions and toggles the selected emoji", async () => {
+    const calls: Array<{ readonly messageId: ChannelMessageId; readonly emoji: string }> = []
+    render(
+      <WorkspaceChat
+        model={makeChatModel([
+          new ChannelMessage({
+            id: messageId,
+            channelId,
+            authorType: "human",
+            authorId: userId,
+            authorDisplayName: "Maya Patel",
+            body: "The partner brief needs a concise risk summary.",
+            createdAt: 2,
+            deletedAt: null,
+            reactions: [new ChannelMessageReaction({ emoji: "👍", count: 2, reactedByCurrentUser: true })]
+          })
+        ])}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+        toggleMessageReaction={(input) => {
+          calls.push({ messageId: input.messageId, emoji: input.emoji })
+          return Promise.resolve()
+        }}
+      />
+    )
+
+    const reaction = await screen.findByRole("button", { name: "Remove 👍 reaction to message from Maya Patel" })
+    expect(reaction.getAttribute("aria-pressed")).toBe("true")
+    expect(reaction.textContent).toContain("2")
+
+    fireEvent.click(reaction)
+
+    await waitFor(() => expect(calls).toEqual([{ messageId, emoji: "👍" }]))
   })
 
   it("waits for delete confirmation before deleting a message", async () => {

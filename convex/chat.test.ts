@@ -362,4 +362,120 @@ describe("dogfood channel memberships", () => {
     await expect(t.withIdentity(mayaIdentity).query(api.chat.channelMembers, { channelId: leadership.id }))
       .resolves.toEqual([expect.objectContaining({ displayName: "Maya Patel" })])
   })
+
+  it("adds, removes, and broadcasts message reactions with current-user state", async () => {
+    const t = convexTest(schema, modules)
+    await t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: mayaIdentity.tokenIdentifier,
+      email: mayaIdentity.email,
+      displayName: mayaIdentity.name
+    })
+    await t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: leeIdentity.tokenIdentifier,
+      email: leeIdentity.email,
+      displayName: leeIdentity.name
+    })
+
+    const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design" })
+    await t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: design.id })
+    const message = await t.withIdentity(mayaIdentity).mutation(api.chat.sendMessage, {
+      channelId: design.id,
+      body: "Reaction state should stay realtime."
+    })
+
+    await t.withIdentity(leeIdentity).mutation(api.chat.toggleMessageReaction, {
+      channelId: design.id,
+      messageId: message.id,
+      emoji: "👍"
+    })
+
+    await expect(t.withIdentity(leeIdentity).query(api.chat.channelMessages, { channelId: design.id }))
+      .resolves.toEqual([
+        expect.objectContaining({
+          id: message.id,
+          reactions: [{ emoji: "👍", count: 1, reactedByCurrentUser: true }]
+        })
+      ])
+    await expect(t.withIdentity(mayaIdentity).query(api.chat.channelMessages, { channelId: design.id }))
+      .resolves.toEqual([
+        expect.objectContaining({
+          id: message.id,
+          reactions: [{ emoji: "👍", count: 1, reactedByCurrentUser: false }]
+        })
+      ])
+
+    await t.withIdentity(leeIdentity).mutation(api.chat.toggleMessageReaction, {
+      channelId: design.id,
+      messageId: message.id,
+      emoji: "👍"
+    })
+
+    await expect(t.withIdentity(leeIdentity).query(api.chat.channelMessages, { channelId: design.id }))
+      .resolves.toEqual([expect.objectContaining({ id: message.id, reactions: [] })])
+  })
+
+  it("collapses duplicate reaction rows from the same user", async () => {
+    const t = convexTest(schema, modules)
+    await t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: mayaIdentity.tokenIdentifier,
+      email: mayaIdentity.email,
+      displayName: mayaIdentity.name
+    })
+    await t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: leeIdentity.tokenIdentifier,
+      email: leeIdentity.email,
+      displayName: leeIdentity.name
+    })
+
+    const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design" })
+    await t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: design.id })
+    const message = await t.withIdentity(mayaIdentity).mutation(api.chat.sendMessage, {
+      channelId: design.id,
+      body: "Duplicate rows should not double count."
+    })
+
+    await t.run(async (ctx) => {
+      const workspace = await ctx.db.query("workspaces").withIndex("by_key", (q) => q.eq("key", "aether-dogfood")).unique()
+      const lee = await ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", leeIdentity.email)).unique()
+      if (workspace === null || lee === null) throw new Error("Seed records not found")
+      await ctx.db.insert("messageReactions", {
+        workspaceId: workspace._id,
+        channelId: design.id,
+        messageId: message.id,
+        userId: lee._id,
+        emoji: "👍",
+        createdAt: 10
+      })
+      await ctx.db.insert("messageReactions", {
+        workspaceId: workspace._id,
+        channelId: design.id,
+        messageId: message.id,
+        userId: lee._id,
+        emoji: "👍",
+        createdAt: 11
+      })
+    })
+
+    await expect(t.withIdentity(leeIdentity).query(api.chat.channelMessages, { channelId: design.id }))
+      .resolves.toEqual([
+        expect.objectContaining({
+          id: message.id,
+          reactions: [{ emoji: "👍", count: 1, reactedByCurrentUser: true }]
+        })
+      ])
+
+    await t.withIdentity(leeIdentity).mutation(api.chat.toggleMessageReaction, {
+      channelId: design.id,
+      messageId: message.id,
+      emoji: "👍"
+    })
+
+    const rows = await t.run((ctx) =>
+      ctx.db
+        .query("messageReactions")
+        .withIndex("by_message", (q) => q.eq("messageId", message.id))
+        .collect()
+    )
+    expect(rows).toHaveLength(0)
+  })
 })

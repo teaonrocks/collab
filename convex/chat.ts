@@ -8,6 +8,13 @@ const DOGFOOD_WORKSPACE_NAME = "Aether Dogfood"
 const DOGFOOD_CHANNEL_KEY = "general"
 const DOGFOOD_CHANNEL_NAME = "general"
 const MAX_CHANNELS = 100
+const MESSAGE_REACTION_EMOJIS = ["👍", "🎉", "👀"] as const
+
+const messageReactionEmoji = v.union(
+  v.literal(MESSAGE_REACTION_EMOJIS[0]),
+  v.literal(MESSAGE_REACTION_EMOJIS[1]),
+  v.literal(MESSAGE_REACTION_EMOJIS[2])
+)
 
 type AuthIdentity = Awaited<ReturnType<QueryCtx["auth"]["getUserIdentity"]>>
 type ViewerIdentity = NonNullable<AuthIdentity>
@@ -635,7 +642,7 @@ export const channelMessages = query({
       .order("desc")
       .take(200)
 
-    return toMessageViews(ctx, [...messages].reverse())
+    return toMessageViews(ctx, [...messages].reverse(), user._id)
   }
 })
 
@@ -680,7 +687,7 @@ export const sendMessage = mutation({
 
     const message = await ctx.db.get(messageId)
     if (message === null) throw new Error("Message not found after insert")
-    return toMessageView(ctx, message)
+    return toMessageView(ctx, message, user._id)
   }
 })
 
@@ -704,7 +711,7 @@ export const editMessage = mutation({
     await ctx.db.patch(args.messageId, { body, editedAt: Date.now() })
     const updated = await ctx.db.get(args.messageId)
     if (updated === null) throw new Error("Message not found after edit")
-    return toMessageView(ctx, updated)
+    return toMessageView(ctx, updated, user._id)
   }
 })
 
@@ -721,8 +728,53 @@ export const deleteMessage = mutation({
     await requireChannelMember(ctx, { channelId: message.channelId, userId: user._id })
     if (message.authorUserId !== user._id) throw new Error("Only the original author can delete this message")
 
+    const reactions = await ctx.db
+      .query("messageReactions")
+      .withIndex("by_message", (q) => q.eq("messageId", args.messageId))
+      .collect()
+    for (const reaction of reactions) {
+      await ctx.db.delete(reaction._id)
+    }
     await ctx.db.delete(args.messageId)
     return { messageId: args.messageId }
+  }
+})
+
+export const toggleMessageReaction = mutation({
+  args: {
+    channelId: v.id("channels"),
+    messageId: v.id("messages"),
+    emoji: messageReactionEmoji
+  },
+  handler: async (ctx, args) => {
+    const user = await requireAllowedCurrentUser(ctx)
+    const message = await ctx.db.get(args.messageId)
+    if (message === null || message.channelId !== args.channelId) throw new Error("Message not found")
+
+    const channel = await requireChannelMember(ctx, { channelId: message.channelId, userId: user._id })
+    const existing = await ctx.db
+      .query("messageReactions")
+      .withIndex("by_message_user_emoji", (q) =>
+        q.eq("messageId", args.messageId).eq("userId", user._id).eq("emoji", args.emoji)
+      )
+      .collect()
+
+    if (existing.length === 0) {
+      await ctx.db.insert("messageReactions", {
+        workspaceId: channel.workspaceId,
+        channelId: message.channelId,
+        messageId: message._id,
+        userId: user._id,
+        emoji: args.emoji,
+        createdAt: Date.now()
+      })
+    } else {
+      for (const reaction of existing) {
+        await ctx.db.delete(reaction._id)
+      }
+    }
+
+    return toMessageView(ctx, message, user._id)
   }
 })
 
@@ -734,19 +786,68 @@ type MessageView = {
   readonly body: string
   readonly createdAt: number
   readonly editedAt: number | null
+  readonly reactions: ReadonlyArray<{
+    readonly emoji: string
+    readonly count: number
+    readonly reactedByCurrentUser: boolean
+  }>
+}
+
+const messageReactionRank = (emoji: string): number => {
+  const index = MESSAGE_REACTION_EMOJIS.findIndex((candidate) => candidate === emoji)
+  return index === -1 ? MESSAGE_REACTION_EMOJIS.length : index
+}
+
+const reactionsForMessage = async (
+  ctx: QueryCtx | MutationCtx,
+  input: {
+    readonly messageId: Id<"messages">
+    readonly currentUserId: Id<"users">
+  }
+) => {
+  const reactions = await ctx.db
+    .query("messageReactions")
+    .withIndex("by_message", (q) => q.eq("messageId", input.messageId))
+    .collect()
+  type ReactionCount = { userIds: Set<Id<"users">>; reactedByCurrentUser: boolean }
+  const counts = new Map<string, ReactionCount>()
+
+  for (const reaction of reactions) {
+    const existing: ReactionCount = counts.get(reaction.emoji) ?? {
+      userIds: new Set(),
+      reactedByCurrentUser: false
+    }
+    existing.userIds.add(reaction.userId)
+    counts.set(reaction.emoji, {
+      userIds: existing.userIds,
+      reactedByCurrentUser: existing.reactedByCurrentUser || reaction.userId === input.currentUserId
+    })
+  }
+
+  return Array.from(counts, ([emoji, state]) => ({
+    emoji,
+    count: state.userIds.size,
+    reactedByCurrentUser: state.reactedByCurrentUser
+  })).sort((left, right) => messageReactionRank(left.emoji) - messageReactionRank(right.emoji) || left.emoji.localeCompare(right.emoji))
 }
 
 const toMessageViews = async (
   ctx: QueryCtx | MutationCtx,
-  messages: ReadonlyArray<Doc<"messages">>
+  messages: ReadonlyArray<Doc<"messages">>,
+  currentUserId: Id<"users">
 ): Promise<ReadonlyArray<MessageView>> => {
   const authorNamesById = new Map<Id<"users">, string>()
+  const reactionsByMessageId = new Map<Id<"messages">, Awaited<ReturnType<typeof reactionsForMessage>>>()
 
   for (const message of messages) {
     if (message.authorDisplayName !== undefined) continue
     if (authorNamesById.has(message.authorUserId)) continue
     const author = await ctx.db.get(message.authorUserId)
     authorNamesById.set(message.authorUserId, author?.displayName ?? "Unknown")
+  }
+
+  for (const message of messages) {
+    reactionsByMessageId.set(message._id, await reactionsForMessage(ctx, { messageId: message._id, currentUserId }))
   }
 
   return messages.map((message) => ({
@@ -756,12 +857,17 @@ const toMessageViews = async (
     authorDisplayName: message.authorDisplayName ?? authorNamesById.get(message.authorUserId) ?? "Unknown",
     body: message.body,
     createdAt: message.createdAt,
-    editedAt: message.editedAt ?? null
+    editedAt: message.editedAt ?? null,
+    reactions: reactionsByMessageId.get(message._id) ?? []
   }))
 }
 
-const toMessageView = async (ctx: QueryCtx | MutationCtx, message: Doc<"messages">): Promise<MessageView> => {
-  const [view] = await toMessageViews(ctx, [message])
+const toMessageView = async (
+  ctx: QueryCtx | MutationCtx,
+  message: Doc<"messages">,
+  currentUserId: Id<"users">
+): Promise<MessageView> => {
+  const [view] = await toMessageViews(ctx, [message], currentUserId)
   return view!
 }
 

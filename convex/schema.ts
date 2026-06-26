@@ -60,5 +60,21 @@ export default defineSchema({
   }).index("by_channel_created_at", ["channelId", "createdAt"]).index("by_workspace_created_at", [
     "workspaceId",
     "createdAt"
+  ]),
+
+  messageReactions: defineTable({
+    workspaceId: v.id("workspaces"),
+    channelId: v.id("channels"),
+    messageId: v.id("messages"),
+    userId: v.id("users"),
+    emoji: v.string(),
+    createdAt: v.number()
+  }).index("by_message", ["messageId"]).index("by_message_user_emoji", [
+    "messageId",
+    "userId",
+    "emoji"
+  ]).index("by_channel_message", [
+    "channelId",
+    "messageId"
   ])
 })

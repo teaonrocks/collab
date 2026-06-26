@@ -179,6 +179,7 @@ export function WorkspaceChat(props: {
   readonly createChannel?: ChatDataView["createChannel"]
   readonly selectChannel?: SelectChatChannel
   readonly editChannelMessage?: ChatDataView["editChannelMessage"]
+  readonly toggleMessageReaction?: ChatDataView["toggleMessageReaction"]
   readonly canDeleteMessages?: boolean
   readonly canDeleteMessage?: ChatMessageGuard
   readonly canEditMessage?: ChatMessageGuard
@@ -192,6 +193,7 @@ export function WorkspaceChat(props: {
     createChannelMessage,
     deleteChannelMessage,
     editChannelMessage,
+    toggleMessageReaction,
     canDeleteMessages = true,
     canDeleteMessage,
     canEditMessage,
@@ -255,6 +257,15 @@ export function WorkspaceChat(props: {
     if (typeof navigator !== "undefined" && navigator.clipboard !== undefined) {
       void navigator.clipboard.writeText(message.body).catch(() => {})
     }
+  }
+
+  const toggleReaction = (message: ChannelMessage, emoji: string) => {
+    if (toggleMessageReaction === undefined) return
+    void toggleMessageReaction({ channelId: model.channel.id, messageId: message.id, emoji })
+      .then(() => setOperationError(null))
+      .catch((cause: unknown) => {
+        setOperationError(operationErrorMessage?.("react", cause) ?? "Could not update reaction.")
+      })
   }
 
   const sendChannelMessage = () => {
@@ -336,6 +347,7 @@ export function WorkspaceChat(props: {
         onCancelEditMessage={messageInteractions.cancelEditingMessage}
         onSaveEditMessage={messageInteractions.saveEditingMessage}
         onDeleteMessage={messageInteractions.requestDeleteMessage}
+        onToggleReaction={toggleMessageReaction === undefined ? undefined : toggleReaction}
         mentionMembers={visibleMembers}
         mentionMembersLoading={channelMembersLoading}
         canDeleteMessage={messageCanDelete}
@@ -801,6 +813,7 @@ function ChatPane(props: {
   readonly onCancelEditMessage: () => void
   readonly onSaveEditMessage: () => void
   readonly onDeleteMessage: (messageId: ChannelMessageId) => void
+  readonly onToggleReaction?: (message: ChannelMessage, emoji: string) => void
   readonly mentionMembers: ReadonlyArray<ChatChannelMember>
   readonly mentionMembersLoading: boolean
   readonly canDeleteMessage: ChatMessageGuard
@@ -828,6 +841,7 @@ function ChatPane(props: {
     onCancelEditMessage,
     onSaveEditMessage,
     onDeleteMessage,
+    onToggleReaction,
     mentionMembers,
     mentionMembersLoading,
     canDeleteMessage,
@@ -891,6 +905,7 @@ function ChatPane(props: {
                     editingDraft={rowState.editingDraft}
                     editSaving={rowState.editSaving}
                     onOpenMenu={(x, y) => onOpenMessageMenu(message.id, x, y)}
+                    onToggleReaction={onToggleReaction === undefined ? undefined : (emoji) => onToggleReaction(message, emoji)}
                     highlighted={activeSearchMessageId === message.id}
                     refCallback={(element) => {
                       if (element === null) {
@@ -1043,6 +1058,7 @@ function ChannelMessageRow(props: {
   readonly editingDraft: string | null
   readonly editSaving: boolean
   readonly onOpenMenu: (x: number, y: number) => void
+  readonly onToggleReaction?: (emoji: string) => void
   readonly highlighted: boolean
   readonly refCallback: (element: HTMLElement | null) => void
 }) {
@@ -1060,6 +1076,7 @@ function ChannelMessageRow(props: {
     editingDraft,
     editSaving,
     onOpenMenu,
+    onToggleReaction,
     highlighted,
     refCallback
   } = props
@@ -1167,6 +1184,9 @@ function ChannelMessageRow(props: {
             />
           )
           : <p className={classNames(messageBodyClassName, deleted && "text-foreground-placeholder italic")}>{deleted ? "Message deleted" : message.body}</p>}
+        {!deleted && !editing && onToggleReaction !== undefined
+          ? <MessageReactions message={message} onToggleReaction={onToggleReaction} />
+          : null}
       </div>
       {deleted || editing || !actionsAvailable
         ? null
@@ -1196,6 +1216,48 @@ function ChannelMessageRow(props: {
           </div>
         )}
     </article>
+  )
+}
+
+const reactionPalette = ["👍", "🎉", "👀"] as const
+
+function MessageReactions(props: {
+  readonly message: ChannelMessage
+  readonly onToggleReaction: (emoji: string) => void
+}) {
+  const { message, onToggleReaction } = props
+  const reactions = message.reactions
+  const reactionByEmoji = new Map(reactions.map((reaction) => [reaction.emoji, reaction]))
+  const visibleEmojis = Array.from(new Set([...reactions.map((reaction) => reaction.emoji), ...reactionPalette]))
+
+  return (
+    <div className="messageReactions mt-1 flex min-w-0 flex-wrap items-center gap-1" aria-label={`Reactions for message from ${message.authorDisplayName}`}>
+      {visibleEmojis.map((emoji) => {
+        const reaction = reactionByEmoji.get(emoji)
+        const count = reaction?.count ?? 0
+        const active = reaction?.reactedByCurrentUser === true
+        return (
+          <button
+            key={emoji}
+            type="button"
+            className={classNames(
+              "messageReaction inline-flex h-6 min-w-6 items-center justify-center gap-1 rounded-control border border-border bg-surface-canvas px-1.5 text-xs leading-none text-foreground-muted hover:border-border-strong hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+              count === 0 && "opacity-0 group-hover/message:opacity-100 group-focus-within/message:opacity-100",
+              active && "border-foreground bg-surface-muted text-foreground"
+            )}
+            aria-pressed={active}
+            aria-label={`${active ? "Remove" : "Add"} ${emoji} reaction to message from ${message.authorDisplayName}`}
+            onClick={(event) => {
+              event.stopPropagation()
+              onToggleReaction(emoji)
+            }}
+          >
+            <span aria-hidden="true">{emoji}</span>
+            {count > 0 ? <span>{count}</span> : null}
+          </button>
+        )
+      })}
+    </div>
   )
 }
 

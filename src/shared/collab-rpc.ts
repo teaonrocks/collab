@@ -83,6 +83,12 @@ export class Channel extends Schema.Class<Channel>("Channel")({
   createdAt: Schema.Number
 }) {}
 
+export class ChannelMessageReaction extends Schema.Class<ChannelMessageReaction>("ChannelMessageReaction")({
+  emoji: NonEmptyText,
+  count: Schema.Number,
+  reactedByCurrentUser: Schema.Boolean
+}) {}
+
 export class ChannelMessage extends Schema.Class<ChannelMessage>("ChannelMessage")({
   id: ChannelMessageId,
   channelId: ChannelId,
@@ -92,7 +98,8 @@ export class ChannelMessage extends Schema.Class<ChannelMessage>("ChannelMessage
   body: NonEmptyText,
   createdAt: Schema.Number,
   editedAt: Schema.optionalWith(Schema.NullOr(Schema.Number), { default: () => null }),
-  deletedAt: Schema.NullOr(Schema.Number)
+  deletedAt: Schema.NullOr(Schema.Number),
+  reactions: Schema.optionalWith(Schema.Array(ChannelMessageReaction), { default: () => [] })
 }) {}
 
 export class WorkspaceAgent extends Schema.Class<WorkspaceAgent>("WorkspaceAgent")({

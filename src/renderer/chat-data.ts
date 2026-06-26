@@ -55,8 +55,14 @@ export type DeleteChatMessage = (input: {
   readonly messageId: ChannelMessageId
 }) => Promise<unknown>
 
+export type ToggleChatMessageReaction = (input: {
+  readonly channelId: ChannelId
+  readonly messageId: ChannelMessageId
+  readonly emoji: string
+}) => Promise<unknown>
+
 export type ChatMessageGuard = (message: ChannelMessage) => boolean
-export type ChatOperation = "send" | "edit" | "delete"
+export type ChatOperation = "send" | "edit" | "delete" | "react"
 export type ChatOperationErrorMessage = (operation: ChatOperation, cause: unknown) => string
 
 export type ChatDataView = {
@@ -66,6 +72,7 @@ export type ChatDataView = {
   readonly createChannelMessage: CreateChatMessage
   readonly deleteChannelMessage: DeleteChatMessage
   readonly editChannelMessage?: EditChatMessage
+  readonly toggleMessageReaction?: ToggleChatMessageReaction
   readonly canDeleteMessages?: boolean
   readonly canDeleteMessage?: ChatMessageGuard
   readonly canEditMessage?: ChatMessageGuard

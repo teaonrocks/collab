@@ -9,6 +9,7 @@ import {
   type ChannelId,
   ChannelMessage,
   type ChannelMessageId,
+  ChannelMessageReaction,
   HumanAccount,
   type HumanAccountId,
   Workspace,
@@ -21,7 +22,9 @@ type ConvexDogfoodError = {
   readonly message: string
 }
 
-type DogfoodOperation = "send" | "edit" | "delete"
+type DogfoodOperation = "send" | "edit" | "delete" | "react"
+type DogfoodMessageReactionEmoji = "👍" | "🎉" | "👀"
+const dogfoodMessageReactionEmojis = new Set<string>(["👍", "🎉", "👀"])
 
 const dogfoodShellClassName =
   "loadingShell grid min-h-screen w-full place-items-center overflow-hidden bg-surface-canvas p-6 font-sans text-foreground"
@@ -66,6 +69,11 @@ export type DogfoodChannelMessageView = {
   readonly body: string
   readonly createdAt: number
   readonly editedAt?: number | null
+  readonly reactions?: ReadonlyArray<{
+    readonly emoji: string
+    readonly count: number
+    readonly reactedByCurrentUser: boolean
+  }>
 }
 
 export type DogfoodChannelMemberView = {
@@ -89,6 +97,7 @@ function ConvexDogfoodChat() {
   const sendMessage = useMutation(api.chat.sendMessage)
   const editMessage = useMutation(api.chat.editMessage)
   const deleteMessage = useMutation(api.chat.deleteMessage)
+  const toggleMessageReaction = useMutation(api.chat.toggleMessageReaction)
   const createChannel = useMutation(api.chat.createChannel)
   const ensureChannelMember = useMutation(api.chat.ensureChannelMember)
   const markChannelRead = useMutation(api.chat.markChannelRead)
@@ -220,9 +229,10 @@ function ConvexDogfoodChat() {
         selectChannel: (channelId) => setSelectedChannelId(channelId),
         sendMessage,
         editMessage,
-        deleteMessage
+        deleteMessage,
+        toggleMessageReaction
       }),
-    [activeChannelId, activeChannelJoined, channelIndicators, channelList, createChannel, deleteMessage, editMessage, members, messages, sendMessage, workspace]
+    [activeChannelId, channelIndicators, channelList, createChannel, deleteMessage, editMessage, members, messages, sendMessage, toggleMessageReaction, workspace]
   )
 
   if (auth.isLoading) {
@@ -380,6 +390,11 @@ export const dogfoodChatToChatData = (input: {
     readonly channelId: Id<"channels">
     readonly messageId: Id<"messages">
   }) => Promise<unknown>
+  readonly toggleMessageReaction?: (input: {
+    readonly channelId: Id<"channels">
+    readonly messageId: Id<"messages">
+    readonly emoji: DogfoodMessageReactionEmoji
+  }) => Promise<unknown>
 }): ChatDataView => {
   const currentUserId = toHumanAccountId(input.workspace.currentUser.id)
   const workspaceId = toWorkspaceId(input.workspace.workspace.id)
@@ -456,6 +471,13 @@ export const dogfoodChatToChatData = (input: {
       input.editMessage({ channelId: toConvexChannelId(channelId), messageId: toConvexMessageId(messageId), body }),
     deleteChannelMessage: ({ channelId, messageId }) =>
       input.deleteMessage({ channelId: toConvexChannelId(channelId), messageId: toConvexMessageId(messageId) }),
+    toggleMessageReaction: input.toggleMessageReaction === undefined
+      ? undefined
+      : ({ channelId, messageId, emoji }) => input.toggleMessageReaction!({
+        channelId: toConvexChannelId(channelId),
+        messageId: toConvexMessageId(messageId),
+        emoji: toDogfoodMessageReactionEmoji(emoji)
+      }),
     operationErrorMessage: (operation) => dogfoodOperationErrorMessage(operation),
     canEditMessage: (message) => message.authorId === currentUserId,
     canDeleteMessage: (message) => message.authorId === currentUserId
@@ -472,7 +494,8 @@ const toLegacyChannelMessage = (message: DogfoodChannelMessageView): ChannelMess
     body: message.body,
     createdAt: message.createdAt,
     editedAt: message.editedAt ?? null,
-    deletedAt: null
+    deletedAt: null,
+    reactions: (message.reactions ?? []).map((reaction) => new ChannelMessageReaction(reaction))
   })
 
 const toHumanAccountId = (id: Id<"users">): HumanAccountId => String(id) as HumanAccountId
@@ -486,6 +509,11 @@ const toChannelMessageId = (id: Id<"messages">): ChannelMessageId => String(id) 
 const toConvexChannelId = (id: ChannelId): Id<"channels"> => String(id) as Id<"channels">
 
 const toConvexMessageId = (id: ChannelMessageId): Id<"messages"> => String(id) as Id<"messages">
+
+const toDogfoodMessageReactionEmoji = (emoji: string): DogfoodMessageReactionEmoji => {
+  if (dogfoodMessageReactionEmojis.has(emoji)) return emoji as DogfoodMessageReactionEmoji
+  throw new Error("Unsupported reaction emoji")
+}
 
 const latestMessageCreatedAt = (messages: ReadonlyArray<DogfoodChannelMessageView>): number =>
   messages.reduce((latest, message) => Math.max(latest, message.createdAt), 0)
@@ -526,5 +554,7 @@ const dogfoodOperationErrorMessage = (operation: DogfoodOperation): string => {
       return "Could not save edit. Check your connection and try again."
     case "delete":
       return "Could not delete message. Check your connection and try again."
+    case "react":
+      return "Could not update reaction. Check your connection and try again."
   }
 }

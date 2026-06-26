@@ -4,7 +4,7 @@ import { getFunctionName } from "convex/server"
 import type { ComponentType } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Id } from "../../convex/_generated/dataModel"
-import { ChannelMessage } from "../shared/collab-rpc"
+import { ChannelMessage, ChannelMessageReaction } from "../shared/collab-rpc"
 import {
   dogfoodChatToChatData,
   type DogfoodChannelMemberView,
@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   sendMessage: vi.fn(),
   editMessage: vi.fn(),
   deleteMessage: vi.fn(),
+  toggleMessageReaction: vi.fn(),
   createChannel: vi.fn(),
   ensureChannelMember: vi.fn(),
   markChannelRead: vi.fn(),
@@ -53,10 +54,11 @@ vi.mock("convex/react", () => ({
       mocks.sendMessage,
       mocks.editMessage,
       mocks.deleteMessage,
+      mocks.toggleMessageReaction,
       mocks.createChannel,
       mocks.ensureChannelMember,
       mocks.markChannelRead
-    ][mocks.mutationCallCount % 6]
+    ][mocks.mutationCallCount % 7]
     mocks.mutationCallCount += 1
     return mutation
   },
@@ -92,7 +94,8 @@ vi.mock("./App", () => ({
   readonly createChannelMessage: (input: { readonly channelId: string; readonly body: string }) => Promise<unknown>
   readonly editChannelMessage?: (input: { readonly channelId: string; readonly messageId: string; readonly body: string }) => Promise<unknown>
   readonly deleteChannelMessage: (input: { readonly channelId: string; readonly messageId: string }) => Promise<unknown>
-  readonly operationErrorMessage?: (operation: "send" | "edit" | "delete", cause: unknown) => string
+  readonly toggleMessageReaction?: (input: { readonly channelId: string; readonly messageId: string; readonly emoji: string }) => Promise<unknown>
+  readonly operationErrorMessage?: (operation: "send" | "edit" | "delete" | "react", cause: unknown) => string
   readonly canEditMessage?: (message: ChannelMessage) => boolean
   readonly canDeleteMessage?: (message: ChannelMessage) => boolean
   readonly profileMenuActions?: ReadonlyArray<{ readonly label: string; readonly onSelect: () => void }>
@@ -118,6 +121,9 @@ vi.mock("./App", () => ({
           ))}
         </ul>
         <p>{firstMessage?.body}</p>
+        {firstMessage?.reactions.map((reaction) => (
+          <span key={reaction.emoji}>{reaction.emoji} {reaction.count} {reaction.reactedByCurrentUser ? "active" : "idle"}</span>
+        ))}
         {firstMessage?.editedAt === null ? null : <span>edited</span>}
         <button
           type="button"
@@ -155,6 +161,20 @@ vi.mock("./App", () => ({
             </button>
           )
           : null}
+        {firstMessage !== undefined && props.toggleMessageReaction !== undefined
+          ? (
+            <button
+              type="button"
+              onClick={() => props.toggleMessageReaction?.({
+                channelId: props.model.channel.id,
+                messageId: firstMessage.id,
+                emoji: "👍"
+              })}
+            >
+              Toggle first reaction
+            </button>
+          )
+          : null}
         {secondMessage !== undefined && props.canEditMessage?.(secondMessage)
           ? <button type="button">Edit second message</button>
           : null}
@@ -185,6 +205,7 @@ beforeEach(() => {
   mocks.sendMessage.mockResolvedValue({})
   mocks.editMessage.mockResolvedValue({})
   mocks.deleteMessage.mockResolvedValue({})
+  mocks.toggleMessageReaction.mockResolvedValue({})
   mocks.createChannel.mockResolvedValue({
     id: "channel-2",
     key: "design",
@@ -294,7 +315,8 @@ describe("dogfoodChatToChatData", () => {
       members,
       sendMessage: mocks.sendMessage,
       editMessage: mocks.editMessage,
-      deleteMessage: mocks.deleteMessage
+      deleteMessage: mocks.deleteMessage,
+      toggleMessageReaction: mocks.toggleMessageReaction
     })
 
     expect(chatData.model.currentUser.displayName).toBe("Maya Patel")
@@ -322,10 +344,43 @@ describe("dogfoodChatToChatData", () => {
       messages: [{ ...messages[0]!, editedAt: 45 }],
       sendMessage: mocks.sendMessage,
       editMessage: mocks.editMessage,
-      deleteMessage: mocks.deleteMessage
+      deleteMessage: mocks.deleteMessage,
+      toggleMessageReaction: mocks.toggleMessageReaction
     })
 
     expect(chatData.model.channelMessages[0]?.editedAt).toBe(45)
+  })
+
+  it("adapts Convex reaction counts and current-user state", async () => {
+    const chatData = dogfoodChatToChatData({
+      workspace,
+      channels,
+      selectedChannelId: workspace.channel.id,
+      messages: [{
+        ...messages[0]!,
+        reactions: [{ emoji: "👍", count: 2, reactedByCurrentUser: true }]
+      }],
+      sendMessage: mocks.sendMessage,
+      editMessage: mocks.editMessage,
+      deleteMessage: mocks.deleteMessage,
+      toggleMessageReaction: mocks.toggleMessageReaction
+    })
+
+    expect(chatData.model.channelMessages[0]?.reactions).toEqual([
+      new ChannelMessageReaction({ emoji: "👍", count: 2, reactedByCurrentUser: true })
+    ])
+
+    await chatData.toggleMessageReaction?.({
+      channelId: chatData.model.channel.id,
+      messageId: chatData.model.channelMessages[0]!.id,
+      emoji: "👍"
+    })
+
+    expect(mocks.toggleMessageReaction).toHaveBeenCalledWith({
+      channelId: workspace.channel.id,
+      messageId: messages[0]!.id,
+      emoji: "👍"
+    })
   })
 
   it("marks selected channel messages as loading without requiring message rows", () => {
@@ -339,7 +394,8 @@ describe("dogfoodChatToChatData", () => {
       membersLoading: true,
       sendMessage: mocks.sendMessage,
       editMessage: mocks.editMessage,
-      deleteMessage: mocks.deleteMessage
+      deleteMessage: mocks.deleteMessage,
+      toggleMessageReaction: mocks.toggleMessageReaction
     })
 
     expect(chatData.model.channel.name).toBe("design")
@@ -673,6 +729,27 @@ describe("ConvexDogfoodApp", () => {
       channelId: workspace.channel.id,
       messageId: messages[0]!.id
     })
+  })
+
+  it("wires reaction toggles through the Convex mutation", async () => {
+    const { ConvexDogfoodApp } = await import("./dogfood-chat")
+    mocks.auth.user = { id: "user-1" }
+    mocks.convexAuth.isAuthenticated = true
+    mocks.workspace = workspace
+    mocks.channels = channels
+    mocks.messages = messages
+
+    render(<ConvexDogfoodApp />)
+
+    fireEvent.click(await screen.findByRole("button", { name: "Toggle first reaction" }))
+
+    await waitFor(() =>
+      expect(mocks.toggleMessageReaction).toHaveBeenCalledWith({
+        channelId: workspace.channel.id,
+        messageId: messages[0]!.id,
+        emoji: "👍"
+      })
+    )
   })
 
   it("passes compact dogfood mutation errors into the reused chat surface", async () => {
