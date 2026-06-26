@@ -640,7 +640,7 @@ describe("App", () => {
       expect(message!.closest("article")?.className).toContain("searchHighlighted")
     })
 
-    expect(resultOption.getAttribute("aria-pressed")).toBe("true")
+    expect(resultOption.hasAttribute("data-message-highlighted")).toBe(true)
     fireEvent.click(resultOption)
 
     await waitFor(() => {
@@ -648,7 +648,7 @@ describe("App", () => {
         .find((element) => element.closest(".chatTimeline") !== null)
       expect(message!.closest("article")?.className).not.toContain("searchHighlighted")
     })
-    expect(resultOption.getAttribute("aria-pressed")).toBe("false")
+    expect(resultOption.hasAttribute("data-message-highlighted")).toBe(false)
   })
 
   it("navigates message search results with the keyboard", async () => {
@@ -711,7 +711,7 @@ describe("App", () => {
         .find((element) => element.closest(".chatTimeline") !== null)
       expect(message!.closest("article")?.className).toContain("searchHighlighted")
     })
-    expect(options[1]!.getAttribute("aria-pressed")).toBe("true")
+    expect(options[1]!.hasAttribute("data-message-highlighted")).toBe(true)
 
     fireEvent.keyDown(search, { key: "ArrowUp", code: "ArrowUp" })
     expect(options[0]!.hasAttribute("data-active")).toBe(true)
@@ -723,8 +723,8 @@ describe("App", () => {
         .find((element) => element.closest(".chatTimeline") !== null)
       expect(message!.closest("article")?.className).toContain("searchHighlighted")
     })
-    expect(options[0]!.getAttribute("aria-pressed")).toBe("true")
-    expect(options[1]!.getAttribute("aria-pressed")).toBe("false")
+    expect(options[0]!.hasAttribute("data-message-highlighted")).toBe(true)
+    expect(options[1]!.hasAttribute("data-message-highlighted")).toBe(false)
   })
 
   it("keeps keyboard navigation in search after Escape clears a selected result", async () => {
@@ -774,10 +774,10 @@ describe("App", () => {
     const options = within(listbox).getAllByRole("option")
 
     fireEvent.keyDown(search, { key: "Enter", code: "Enter" })
-    await waitFor(() => expect(options[0]!.getAttribute("aria-pressed")).toBe("true"))
+    await waitFor(() => expect(options[0]!.hasAttribute("data-message-highlighted")).toBe(true))
 
     fireEvent.keyDown(window, { key: "Escape", code: "Escape" })
-    await waitFor(() => expect(options[0]!.getAttribute("aria-pressed")).toBe("false"))
+    await waitFor(() => expect(options[0]!.hasAttribute("data-message-highlighted")).toBe(false))
     expect(search).toBe(document.activeElement)
 
     fireEvent.keyDown(search, { key: "ArrowDown", code: "ArrowDown" })

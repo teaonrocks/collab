@@ -1248,8 +1248,7 @@ function renderChannelMessageSearchState(
               highlighted && "border-border-strong"
             )}
             data-active={active ? "" : undefined}
-            aria-selected={active}
-            aria-pressed={highlighted}
+            data-message-highlighted={highlighted ? "" : undefined}
             onMouseEnter={() => onActiveResultIndexChange(index)}
             onClick={() => onSelectResult(result)}
           >
