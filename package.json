@@ -11,6 +11,7 @@
     "convex": "convex",
     "convex:dev": "convex dev",
     "convex:codegen": "convex codegen",
+    "dogfood:verify": "pnpm typecheck && pnpm test && pnpm build",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

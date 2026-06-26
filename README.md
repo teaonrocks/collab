@@ -192,6 +192,8 @@ and `@effect-atom/atom-react` 0.5.0. Built with Electron 41 and electron-vite 2.
   Convex + WorkOS chat dogfooding slice.
 - [`docs/adr-chat-realtime-auth-dogfood.md`](docs/adr-chat-realtime-auth-dogfood.md) records the
   accepted decisions for that slice.
+- [`docs/dogfood-distribution.md`](docs/dogfood-distribution.md) records the current dev-only
+  dogfood install/update path and reproducible build check.
 - [`docs/message-replies-decision.md`](docs/message-replies-decision.md) records the human-chat
   reply behavior and data model impact for the Collaboration Depth milestone.
 - [`docs/message-attachments-upload-path.md`](docs/message-attachments-upload-path.md) records the
