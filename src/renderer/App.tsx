@@ -71,7 +71,7 @@ export type ProfileMenuAction = {
 
 const MESSAGE_CONTEXT_MENU_WIDTH = 170
 const MESSAGE_CONTEXT_MENU_OFFSET = 6
-const COMPOSER_MIN_HEIGHT = 22
+const COMPOSER_MIN_HEIGHT = 44
 const COMPOSER_MAX_HEIGHT = 140
 const MESSAGE_EDIT_MAX_HEIGHT = 180
 const normalizeChannelName = (name: string): string =>
@@ -1144,7 +1144,7 @@ function MessageComposer(props: {
           rows={1}
           value={draft}
           disabled={disabled}
-          className="h-[22px] min-h-[22px] max-h-[140px] resize-none overflow-hidden rounded-none border-0 bg-surface-canvas px-3 py-0 text-sm leading-[1.42] focus-visible:border-transparent focus-visible:ring-0 focus-visible:ring-offset-0 disabled:bg-surface-sunken"
+          className="block max-h-[140px] min-h-11 resize-none overflow-hidden rounded-none border-0 bg-surface-canvas px-3 py-3 text-sm leading-5 focus-visible:border-transparent focus-visible:ring-0 focus-visible:ring-offset-0 disabled:bg-surface-sunken"
           placeholder={`Message ${channelName}`}
           onChange={(event) => onDraftChange(event.target.value)}
           onKeyDown={(event) => {
