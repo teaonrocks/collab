@@ -1,110 +1,138 @@
 # Dogfood Distribution Path
 
-## Decision
+## Shared Deployment Decision
 
-Aether's current dogfood distribution path is checkout-based. Dogfood users run the Electron/Vite
-app locally against a shared Convex deployment with Convex-managed WorkOS AuthKit.
+The friend beta uses the Aether project's production deployment as one shared backend:
 
-The repository does not contain signing, installer, or updater infrastructure. `pnpm build` and
-`pnpm start` are useful for production-bundle checks, but they do not create a distributable app.
+- deployment: `polished-bison-174` (Aether Friend Beta)
+- public client URL: `https://polished-bison-174.convex.cloud`
+- data boundary: one shared workspace, channel/message store, and dogfood allowlist
 
-## Supported Toolchain
+Every tester checkout uses that same URL. Testers do not run `pnpm convex:dev`, create a Convex
+deployment, join the Convex team, or receive a deploy key. A production deployment is intentional:
+Convex redacts unexpected server errors to a generic `Server Error` for clients while retaining full
+details in operator-only deployment logs.
+
+Aether remains checkout-based for this beta. The repository does not contain signing, installer, or
+updater infrastructure; `pnpm build` and `pnpm start` verify the production bundle but do not create
+a distributable app.
+
+## Tester Startup
 
 Use exactly Node.js 22.23.1 and pnpm 11.7.0. Node is pinned in `.nvmrc`, and pnpm is pinned by the
-`packageManager` field in `package.json`. With a compatible Corepack installation, activate the
-pinned package manager before installing:
+`packageManager` field in `package.json`.
 
 ```sh
 corepack enable
 corepack install
 node --version # v22.23.1
 pnpm --version # 11.7.0
-```
-
-## Deployment Operator Setup
-
-The deployment operator owns Convex code sync and server-side secrets:
-
-```sh
-pnpm install
-pnpm convex:dev
-pnpm convex env set AETHER_ALLOWLIST_OPERATOR_KEY "<shared-operator-key>"
-```
-
-Add users through the audited flow in [`docs/dogfood-allowlist.md`](dogfood-allowlist.md). Do not
-share the operator key or Convex deployment credentials with ordinary dogfood users.
-
-## Dogfood User Setup
-
-Give each dogfood user access to the repository and ask them to install from the checkout:
-
-```sh
 pnpm install
 cp .env.example .env.local
-```
-
-Fill `.env.local` with the Convex-managed values for:
-
-- `VITE_CONVEX_URL`
-- `VITE_WORKOS_CLIENT_ID`
-- `VITE_WORKOS_REDIRECT_URI`
-
-Keep `VITE_WORKOS_REDIRECT_URI` set to `aether://auth/callback` unless the AuthKit configuration is
-changed deliberately.
-
-Packaged and preview builds use the same native callback value. The tested deep-link behavior is
-documented in [`docs/packaged-authkit-callback.md`](packaged-authkit-callback.md).
-
-`AETHER_ALLOWED_EMAILS` is still supported as a bootstrap list, but regular add/remove operations
-should use the audited Convex flow in [`docs/dogfood-allowlist.md`](dogfood-allowlist.md).
-
-Use `docs/dogfood-smoke-test.md` after setup to confirm sign-in, allowlist behavior, realtime sends,
-mutation failures, and sign-out.
-
-If any of the required `VITE_` values are missing, `pnpm dev` shows a configuration-required state
-instead of opening chat. The old local Electron RPC implementation remains test-only and is not a
-runtime fallback.
-
-## Running And Updating
-
-Start the app from the checkout:
-
-```sh
 pnpm dev
 ```
 
-To update an existing dogfood checkout:
+The checked-in `.env.example` contains only the public renderer configuration for Aether Friend
+Beta. It is ready to copy without editing. In particular, it contains no `CONVEX_DEPLOYMENT`,
+`CONVEX_DEPLOY_KEY`, WorkOS API key, operator key, or allowlist contents.
+
+If any required `VITE_` value is missing, the app shows a configuration-required state instead of
+opening chat. The old local Electron RPC implementation remains test-only and is not a runtime
+fallback.
+
+To update a tester checkout:
+
+```sh
+git pull
+pnpm install
+pnpm dev
+```
+
+Tester startup and update never require the Convex CLI to contact or modify a deployment.
+
+## Deployment Operator Runbook
+
+Only a Convex team operator performs this section. Start from a clean checkout at the revision being
+released and keep production credentials out of the repository, shell history, screenshots, Linear,
+and tester instructions.
+
+### First deployment
+
+1. Verify the release locally:
+
+   ```sh
+   pnpm install
+   pnpm dogfood:verify
+   pnpm convex:codegen
+   ```
+
+2. Configure the production deployment's server-side environment. Use interactive input or another
+   approved secret store; never put values in a committed file:
+
+   ```sh
+   pnpm convex env set --prod WORKOS_API_KEY
+   pnpm convex env set --prod WORKOS_CLIENT_ID
+   pnpm convex env set --prod WORKOS_ENVIRONMENT_ID
+   pnpm convex env set --prod AETHER_ALLOWLIST_OPERATOR_KEY
+   # Optional emergency bootstrap only:
+   pnpm convex env set --prod AETHER_ALLOWED_EMAILS
+   pnpm convex env list --prod --names-only
+   ```
+
+3. Deploy functions, schema, and auth configuration once to the shared production deployment:
+
+   ```sh
+   pnpm convex deploy --message "Aether Friend Beta initial deployment"
+   ```
+
+4. Manage friend access against production using
+   [`docs/dogfood-allowlist.md`](dogfood-allowlist.md), then execute the two-account gate in
+   [`docs/dogfood-smoke-test.md`](dogfood-smoke-test.md).
+
+### Updates
+
+Deploy backend-compatible changes before asking testers to pull a client that depends on them:
 
 ```sh
 git pull
 pnpm install
 pnpm dogfood:verify
-pnpm dev
+pnpm convex:codegen
+pnpm convex deploy --message "Aether Friend Beta update <revision>"
 ```
 
-The deployment operator must sync Convex changes before users exercise new backend behavior. Run
-`pnpm convex:codegen` after schema or public function changes and before `pnpm dogfood:verify`.
+Record the deployed Git revision and smoke-test evidence. Do not give testers the operator checkout,
+Convex dashboard access, or deployment credentials.
 
-## Reproducible Build Check
+### Rollback
 
-Before handing a revision to dogfood users, run:
+Use a separate clean operator checkout at the recorded last-known-good revision. Confirm its schema
+accepts the current production data, run `pnpm dogfood:verify`, then run `pnpm convex deploy` from
+that revision with a rollback message. Convex code deploys do not rewind data. Any schema/data
+rollback must be designed as a forward-compatible migration; restore or transform data separately
+rather than deleting the shared deployment.
+
+After rollback, repeat the two-account smoke gate before reopening the beta. If the last-known-good
+schema cannot accept current data, stop traffic and prepare a compatible forward fix instead of
+forcing the old schema.
+
+## Reproducible Release Check
+
+Before every handoff or deployment, run:
 
 ```sh
 pnpm dogfood:verify
 ```
 
-The script runs `pnpm typecheck`, `pnpm test`, and `pnpm build`. `pnpm build` regenerates the
-Electron/Vite output under `out/`; that directory remains generated build output and should not be
-edited by hand.
+The script runs `pnpm typecheck`, `pnpm test`, and `pnpm build`. `pnpm build` regenerates output under
+`out/`; that directory remains generated build output and must not be edited by hand.
 
-## Secret Handling
+## Secret Boundary
 
-Never commit `.env.local`, WorkOS secrets, Convex deploy keys, webhook secrets, cookie passwords, or
-raw auth/session tokens.
-
-Only `VITE_` values needed by the renderer belong in `.env.local`, and server-side dogfood access
-state belongs in Convex environment variables. If a setup step requires a secret, share it out of
-band and keep it out of screenshots, docs comments, Linear comments, and Git history.
+Public tester values are limited to `VITE_CONVEX_URL`, `VITE_WORKOS_CLIENT_ID`,
+`VITE_WORKOS_REDIRECT_URI`, and optional UI flags. Never commit or distribute `.env.local`,
+`CONVEX_DEPLOYMENT`, `CONVEX_DEPLOY_KEY`, WorkOS secrets, operator keys, webhook secrets, cookies,
+or auth/session tokens.
 
 ## Exit Criteria For Packaging
 

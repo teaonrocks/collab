@@ -5,9 +5,11 @@ For failure capture and recovery, see [`docs/dogfood-debugging.md`](dogfood-debu
 
 ## Setup
 
-- Start the app with `pnpm dev`.
-- Confirm the Convex deployment and WorkOS/AuthKit configuration are already set in the local environment.
-- Use two allowlisted accounts in separate app/browser sessions.
+- Use two clean tester checkouts with `.env.local` copied from the checked-in `.env.example`.
+- Confirm both checkouts use `https://polished-bison-174.convex.cloud`; neither checkout may contain
+  `CONVEX_DEPLOYMENT` or `CONVEX_DEPLOY_KEY`, and neither tester needs Convex team access.
+- Start both apps with `pnpm dev` without running `pnpm convex:dev`.
+- Use two different allowlisted accounts in separate app/browser sessions.
 
 ## Checklist
 
@@ -34,6 +36,20 @@ For failure capture and recovery, see [`docs/dogfood-debugging.md`](dogfood-debu
 - Delete asks for confirmation, then hard-deletes the message for both users.
 - Edit and delete failures show compact retryable errors without raw internal details.
 - Signing out from the profile menu returns to the sign-in state.
+
+## Shared-Deployment Acceptance Record
+
+Record this evidence without email addresses, tokens, keys, or environment-file screenshots:
+
+- Git revision tested and UTC timestamp.
+- Tester A and Tester B both reported deployment `polished-bison-174`.
+- Tester A created or selected a channel that appeared for Tester B.
+- A message from each account appeared in realtime in the other checkout without refresh.
+- An allowlist add or removal made by the operator against `--prod` affected the intended account in
+  both checkouts.
+- Neither tester ran a Convex command or had Convex team access.
+- Unexpected server failures shown to testers contained only production-safe generic detail; the
+  operator correlated the full detail in production logs.
 
 ## UI Migration Checks
 

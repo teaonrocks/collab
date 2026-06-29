@@ -80,6 +80,11 @@ pnpm dev
 If any required `VITE_` value is missing, the renderer intentionally shows a configuration-required
 screen. It does not fall back to the local JSON chat.
 
+Friend-beta testers use the ready-to-copy public values in `.env.example` and do not run
+`pnpm convex:dev` or need Convex access. See
+[`docs/dogfood-distribution.md`](docs/dogfood-distribution.md) for the separate tester and deployment
+operator paths.
+
 ## Commands
 
 | Task | Command |

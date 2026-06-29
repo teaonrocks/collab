@@ -17,7 +17,8 @@ Do not share `.env.local`, WorkOS secrets, Convex deploy keys, auth tokens, cook
 - If a packaged or preview callback opens the app but leaves you signed out, confirm
   `VITE_WORKOS_REDIRECT_URI` and the WorkOS/AuthKit allowed redirect URI are both
   `aether://auth/callback`.
-- For `Could Not Join`, use Try again after confirming the account is allowlisted and the Convex dev deployment is running.
+- For `Could Not Join`, use Try again after confirming the account is allowlisted and `.env.local`
+  points to the shared Aether Friend Beta deployment.
 - For send, edit, delete, reaction, or attachment failures, keep the draft, editor, or dialog open, reconnect, then retry the same action.
 - If the app shows `Waiting for your AuthKit session to reach Convex...` for more than a few seconds, retry sign-in.
 

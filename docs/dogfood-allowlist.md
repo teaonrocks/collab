@@ -5,10 +5,10 @@ allowlist contents, WorkOS secrets, Convex deploy keys, or raw auth claims.
 
 ## Operator Setup
 
-Set a shared operator key in the Convex deployment:
+Set a shared operator key in the production deployment:
 
 ```sh
-pnpm convex env set AETHER_ALLOWLIST_OPERATOR_KEY "<shared-operator-key>"
+pnpm convex env set --prod AETHER_ALLOWLIST_OPERATOR_KEY
 ```
 
 `AETHER_ALLOWED_EMAILS` remains supported as a bootstrap list, but day-to-day changes should use the
@@ -22,7 +22,7 @@ Run the mutation from an operator shell. Keep the key out of docs, screenshots, 
 terminal transcripts shared with dogfood users.
 
 ```sh
-pnpm convex run chat:updateDogfoodAllowlist '{
+pnpm convex run --prod chat:updateDogfoodAllowlist '{
   "operatorKey": "<shared-operator-key>",
   "email": "friend@example.com",
   "action": "add",
@@ -36,7 +36,7 @@ dogfood workspace.
 ## Remove A User
 
 ```sh
-pnpm convex run chat:updateDogfoodAllowlist '{
+pnpm convex run --prod chat:updateDogfoodAllowlist '{
   "operatorKey": "<shared-operator-key>",
   "email": "friend@example.com",
   "action": "remove",
