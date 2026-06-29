@@ -2,21 +2,32 @@
 
 ## Decision
 
-Aether's current dogfood distribution path is dev-only. Dogfood users run the Electron/Vite app from
-the local checkout with the Convex development deployment and Convex-managed WorkOS AuthKit.
+Aether's current dogfood distribution path is checkout-based. Dogfood users run the Electron/Vite
+app locally against a shared Convex deployment with Convex-managed WorkOS AuthKit.
 
-Do not produce signed installers, auto-updaters, or packaged artifacts for this milestone. The app
-does not yet have packaging configuration or updater infrastructure, and the accepted dogfood ADR
-explicitly allows the first shared chat loop to prove itself without packaged app delivery.
+The repository does not contain signing, installer, or updater infrastructure. `pnpm build` and
+`pnpm start` are useful for production-bundle checks, but they do not create a distributable app.
 
-## Installer Setup
+## Deployment Operator Setup
+
+The deployment operator owns Convex code sync and server-side secrets:
+
+```sh
+pnpm install
+pnpm convex:dev
+pnpm convex env set AETHER_ALLOWLIST_OPERATOR_KEY "<shared-operator-key>"
+```
+
+Add users through the audited flow in [`docs/dogfood-allowlist.md`](dogfood-allowlist.md). Do not
+share the operator key or Convex deployment credentials with ordinary dogfood users.
+
+## Dogfood User Setup
 
 Give each dogfood user access to the repository and ask them to install from the checkout:
 
 ```sh
 pnpm install
 cp .env.example .env.local
-pnpm convex:dev
 ```
 
 Fill `.env.local` with the Convex-managed values for:
@@ -31,18 +42,6 @@ changed deliberately.
 Packaged and preview builds use the same native callback value. The tested deep-link behavior is
 documented in [`docs/packaged-authkit-callback.md`](packaged-authkit-callback.md).
 
-The dogfood allowlist stays in server-side Convex state, not in the renderer bundle:
-
-```sh
-pnpm convex env set AETHER_ALLOWLIST_OPERATOR_KEY "<shared-operator-key>"
-pnpm convex run chat:updateDogfoodAllowlist '{
-  "operatorKey": "<shared-operator-key>",
-  "email": "friend@example.com",
-  "action": "add",
-  "reason": "initial dogfood invite"
-}'
-```
-
 `AETHER_ALLOWED_EMAILS` is still supported as a bootstrap list, but regular add/remove operations
 should use the audited Convex flow in [`docs/dogfood-allowlist.md`](dogfood-allowlist.md).
 
@@ -50,9 +49,8 @@ Use `docs/dogfood-smoke-test.md` after setup to confirm sign-in, allowlist behav
 mutation failures, and sign-out.
 
 If any of the required `VITE_` values are missing, `pnpm dev` shows a configuration-required state
-instead of opening chat. The old local Electron RPC fallback has been removed from runtime startup;
-see
-[`docs/local-json-fallback-retirement.md`](local-json-fallback-retirement.md).
+instead of opening chat. The old local Electron RPC implementation remains test-only and is not a
+runtime fallback.
 
 ## Running And Updating
 
@@ -62,7 +60,7 @@ Start the app from the checkout:
 pnpm dev
 ```
 
-To update an existing dogfood install:
+To update an existing dogfood checkout:
 
 ```sh
 git pull
@@ -71,8 +69,8 @@ pnpm dogfood:verify
 pnpm dev
 ```
 
-If Convex schema or generated API files changed, run `pnpm convex:codegen` after `pnpm install` and
-before `pnpm dogfood:verify`.
+The deployment operator must sync Convex changes before users exercise new backend behavior. Run
+`pnpm convex:codegen` after schema or public function changes and before `pnpm dogfood:verify`.
 
 ## Reproducible Build Check
 
@@ -97,6 +95,5 @@ band and keep it out of screenshots, docs comments, Linear comments, and Git his
 
 ## Exit Criteria For Packaging
 
-Revisit signed builds or packaged artifacts only after the dogfood chat loop is worth carrying
-forward. That follow-up should decide signing, notarization, update behavior, and production
-Convex/AuthKit ownership together instead of adding a partial installer now.
+A packaging follow-up should decide signing, notarization, update behavior, artifact hosting, and
+production Convex/AuthKit ownership together.

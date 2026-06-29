@@ -17,8 +17,16 @@ For failure capture and recovery, see [`docs/dogfood-debugging.md`](dogfood-debu
   completes the AuthKit callback without opening unsupported external URLs.
 - A non-allowlisted account sees a compact access error and can sign out.
 - An allowlisted account joins the shared `#general` channel.
+- Public channel creation is visible to the other account; selecting it joins the viewer before
+  messages load.
+- Private channels remain hidden from users who are not members.
 - The first empty channel state invites the user to start the conversation.
 - Messages sent from one account appear in realtime for the other account.
+- Inactive channels show unread state, and a matching `@name` mention takes priority over unread.
+- Channel search filters the current timeline and keyboard navigation focuses matching messages.
+- Reply mode preserves the draft, sends a shallow parent link, and renders a compact parent preview.
+- Reactions update in realtime and show whether the current user reacted.
+- Image and file attachments upload, render safely, and remain associated with the sent message.
 - Send failures show a compact retryable error near the composer.
 - Only the author sees edit and delete actions for their message.
 - Enter saves an edit; Shift+Enter inserts a newline.
@@ -42,7 +50,8 @@ For failure capture and recovery, see [`docs/dogfood-debugging.md`](dogfood-debu
 - At 1280 px or wider, verify rail, sidebar, chat, and member panel are all visible and the composer stays pinned to the bottom.
 - At 920 px or narrower, verify the channel sidebar and member panel collapse while the rail, header, chat timeline, and composer remain usable.
 - At a short viewport height, verify message scrolling is contained to the timeline and dialogs remain centered without clipping their actions.
-- Toggle light and dark theme attributes if testing them manually; color tokens should keep readable foreground, border, destructive, unread, and mention states.
+- If manually setting `data-aether-theme` to `light` or `dark`, verify foreground, border,
+  destructive, unread, and mention states remain readable. There is no user-facing theme switch yet.
 
 ## Residual Visual Risks
 

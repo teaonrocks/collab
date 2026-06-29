@@ -9,7 +9,8 @@ The renderer owns its UI components under `src/renderer/ui`. Feature code should
 - Use Base UI for headless accessibility where interaction semantics are easy to get wrong: dialog, dropdown menu, scroll area, and tooltip.
 - Use native elements for simple controls: button, input, textarea, badge, and avatar.
 - Prefer the Base UI `render` prop when composing triggers with app components. This differs from stock shadcn's `asChild` convention and matches Base UI's documented composition model.
-- Keep feature migration separate. These primitives are foundation-only; later tickets should migrate one surface at a time and remove obsolete CSS as they go.
+- Prefer these primitives for new interaction surfaces and remove obsolete feature CSS when a
+  migrated component no longer needs it.
 
 ## Design Tokens
 
