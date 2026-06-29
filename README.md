@@ -57,7 +57,8 @@ docs/                   # current operations and focused implementation decision
 
 ## Local Setup
 
-Requirements: Node.js, pnpm, a Convex deployment, and Convex-managed WorkOS AuthKit.
+Requirements: Node.js 22.23.1, pnpm 11.7.0, a Convex deployment, and Convex-managed WorkOS
+AuthKit. The exact toolchain is pinned in `.nvmrc` and `package.json#packageManager`.
 
 ```sh
 pnpm install

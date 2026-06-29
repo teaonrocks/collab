@@ -8,6 +8,19 @@ app locally against a shared Convex deployment with Convex-managed WorkOS AuthKi
 The repository does not contain signing, installer, or updater infrastructure. `pnpm build` and
 `pnpm start` are useful for production-bundle checks, but they do not create a distributable app.
 
+## Supported Toolchain
+
+Use exactly Node.js 22.23.1 and pnpm 11.7.0. Node is pinned in `.nvmrc`, and pnpm is pinned by the
+`packageManager` field in `package.json`. With a compatible Corepack installation, activate the
+pinned package manager before installing:
+
+```sh
+corepack enable
+corepack install
+node --version # v22.23.1
+pnpm --version # 11.7.0
+```
+
 ## Deployment Operator Setup
 
 The deployment operator owns Convex code sync and server-side secrets:
