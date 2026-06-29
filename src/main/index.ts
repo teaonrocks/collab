@@ -8,18 +8,20 @@ import {
   isAllowedExternalAuthUrl,
   rendererAuthCallbackUrl
 } from "../shared/auth-redirect-policy"
+import {
+  createWillNavigateHandler,
+  createWindowOpenHandler,
+  hardenedWebPreferences,
+  isTrustedPrivilegedIpcSender,
+  type RendererLocationPolicy
+} from "./security-policy"
 
 let mainWindow: BrowserWindow | null = null
 
-ipcMain.handle("aether:open-external", (_event, rawUrl: unknown) => {
-  if (typeof rawUrl !== "string") {
-    throw new Error("Refusing to open non-string external URL.")
-  }
-  if (!isAllowedExternalAuthUrl(rawUrl)) {
-    throw new Error("Refusing to open unsupported external URL.")
-  }
-  return shell.openExternal(rawUrl)
-})
+const rendererLocationPolicy: RendererLocationPolicy = {
+  rendererDevServerUrl: process.env.ELECTRON_RENDERER_URL,
+  packagedRendererUrl: pathToFileURL(join(__dirname, "../renderer/index.html")).toString()
+}
 
 const rendererCallbackUrl = (rawUrl: string): string | null => {
   return rendererAuthCallbackUrl(rawUrl, {
@@ -42,6 +44,20 @@ const getMainWindow = (): BrowserWindow | null => {
   return mainWindow
 }
 
+ipcMain.handle("aether:open-external", (event, rawUrl: unknown) => {
+  const window = getMainWindow()
+  if (window === null || !isTrustedPrivilegedIpcSender(event, window.webContents, rendererLocationPolicy)) {
+    throw new Error("Refusing privileged IPC from an untrusted renderer frame.")
+  }
+  if (typeof rawUrl !== "string") {
+    throw new Error("Refusing to open non-string external URL.")
+  }
+  if (!isAllowedExternalAuthUrl(rawUrl)) {
+    throw new Error("Refusing to open unsupported external URL.")
+  }
+  return shell.openExternal(rawUrl)
+})
+
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
@@ -62,13 +78,14 @@ const createWindow = (): void => {
   const window = new BrowserWindow({
     width: 960,
     height: 720,
-    webPreferences: {
-      preload: join(__dirname, "../preload/index.js"),
-      contextIsolation: true,
-      sandbox: false
-    }
+    webPreferences: hardenedWebPreferences(join(__dirname, "../preload/index.js"))
   })
   mainWindow = window
+  window.webContents.on("will-navigate", createWillNavigateHandler(rendererLocationPolicy))
+  window.webContents.setWindowOpenHandler(createWindowOpenHandler(
+    (url) => shell.openExternal(url),
+    (cause) => console.error("Failed to open external attachment", cause)
+  ))
   window.on("closed", () => {
     if (mainWindow === window) mainWindow = null
   })

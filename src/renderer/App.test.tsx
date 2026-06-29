@@ -953,6 +953,15 @@ describe("App", () => {
             size: 2048,
             kind: "file",
             url: "javascript:alert(1)"
+          }),
+          new ChannelMessageAttachment({
+            id: "attachment-3",
+            storageId: "storage-3",
+            name: "insecure.txt",
+            contentType: "text/plain",
+            size: 1024,
+            kind: "file",
+            url: "http://files.example/insecure.txt"
           })
         ]
       })
@@ -963,6 +972,8 @@ describe("App", () => {
     expect(screen.getByRole("link", { name: "Open image attachment brief.png" })).toBeTruthy()
     expect(screen.getByText("notes.pdf")).toBeTruthy()
     expect(screen.queryByRole("link", { name: /notes\.pdf/ })).toBeNull()
+    expect(screen.getByText("insecure.txt")).toBeTruthy()
+    expect(screen.queryByRole("link", { name: /insecure\.txt/ })).toBeNull()
   })
 
   it("keeps Shift+Enter inside the composer without sending", async () => {

@@ -1609,7 +1609,7 @@ const safeAttachmentUrl = (url: string | null): string | null => {
   if (url === null) return null
   try {
     const parsed = new URL(url, window.location.href)
-    return parsed.protocol === "https:" || parsed.protocol === "http:" || parsed.protocol === "blob:" ? parsed.toString() : null
+    return parsed.protocol === "https:" || parsed.protocol === "blob:" ? parsed.toString() : null
   } catch {
     return null
   }
