@@ -41,7 +41,7 @@ For failure capture and recovery, see [`docs/dogfood-debugging.md`](dogfood-debu
 
 Record this evidence without email addresses, tokens, keys, or environment-file screenshots:
 
-- Git revision tested and UTC timestamp.
+- Exact tested Git commit, immutable friend-beta tag, CI run URL, and UTC timestamp.
 - Tester A and Tester B both reported deployment `polished-bison-174`.
 - Tester A created or selected a channel that appeared for Tester B.
 - A message from each account appeared in realtime in the other checkout without refresh.

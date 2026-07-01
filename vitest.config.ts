@@ -5,6 +5,6 @@ export default defineConfig({
   plugins: [react()],
   test: {
     environment: "node",
-    include: ["src/**/*.test.{ts,tsx}", "convex/**/*.test.ts"]
+    include: ["src/**/*.test.{ts,tsx}", "convex/**/*.test.ts", "scripts/**/*.test.ts"]
   }
 })

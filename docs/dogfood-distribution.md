@@ -61,10 +61,14 @@ and tester instructions.
 1. Verify the release locally:
 
    ```sh
-   pnpm install
+   pnpm install --frozen-lockfile
    pnpm dogfood:verify
-   pnpm convex:codegen
    ```
+
+   The gate typechecks both TypeScript projects, validates the committed Convex function bindings,
+   runs static analysis and tests, and builds the production Electron/Vite output. If it reports
+   stale Convex bindings, run `pnpm convex:codegen` from an authorized development checkout, commit
+   the generated files, and rerun the gate.
 
 2. Configure the production deployment's server-side environment. Use interactive input or another
    approved secret store; never put values in a committed file:
@@ -95,9 +99,8 @@ Deploy backend-compatible changes before asking testers to pull a client that de
 
 ```sh
 git pull
-pnpm install
+pnpm install --frozen-lockfile
 pnpm dogfood:verify
-pnpm convex:codegen
 pnpm convex deploy --message "Aether Friend Beta update <revision>"
 ```
 
@@ -116,16 +119,41 @@ After rollback, repeat the two-account smoke gate before reopening the beta. If 
 schema cannot accept current data, stop traffic and prepare a compatible forward fix instead of
 forcing the old schema.
 
-## Reproducible Release Check
+## Reproducible Release And Handoff Check
 
-Before every handoff or deployment, run:
+Before every handoff or deployment, start with a clean checkout and run:
 
 ```sh
+test -z "$(git status --porcelain)"
+pnpm install --frozen-lockfile
 pnpm dogfood:verify
 ```
 
-The script runs `pnpm typecheck`, `pnpm test`, and `pnpm build`. `pnpm build` regenerates output under
-`out/`; that directory remains generated build output and must not be edited by hand.
+The gate runs the root typecheck, Convex typecheck and generated-binding validation, ESLint and React
+Hooks checks, unused production dependency analysis, the full test suite, and the production build.
+`pnpm build` regenerates `out/`; that directory remains generated output and must not be edited.
+
+Once CI passes for that exact commit, publish an annotated tag and verify both the branch and tag on
+the remote. Choose a unique tag such as `friend-beta-20260701.1`:
+
+```sh
+TESTED_COMMIT=$(git rev-parse HEAD)
+TESTED_BRANCH=$(git symbolic-ref --short HEAD)
+TESTED_TAG=friend-beta-YYYYMMDD.N
+git push origin "HEAD:refs/heads/$TESTED_BRANCH"
+REMOTE_COMMIT=$(git ls-remote --exit-code origin "refs/heads/$TESTED_BRANCH" | cut -f1)
+test "$REMOTE_COMMIT" = "$TESTED_COMMIT"
+git tag -a "$TESTED_TAG" "$TESTED_COMMIT" -m "Aether Friend Beta $TESTED_COMMIT"
+git push origin "refs/tags/$TESTED_TAG"
+REMOTE_TAG_COMMIT=$(git ls-remote --exit-code origin "refs/tags/$TESTED_TAG^{}" | cut -f1)
+test "$REMOTE_TAG_COMMIT" = "$TESTED_COMMIT"
+```
+
+Do not reuse or move a published friend-beta tag. Record the tested commit, tag, branch, CI run URL,
+UTC gate time, production deployment message, and the credential-free two-account acceptance record
+from [`dogfood-smoke-test.md`](dogfood-smoke-test.md). The tested commit/tag is the only revision to
+hand to friends. If push/tag authority or two-account access is unavailable, stop after the local
+gate and record that exact blocker; do not describe the release as complete.
 
 ## Secret Boundary
 

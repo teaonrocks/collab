@@ -94,13 +94,17 @@ operator paths.
 | Regenerate Convex types | `pnpm convex:codegen` |
 | Run one test file | `pnpm vitest run path/to/file.test.ts` |
 | Run all tests | `pnpm test` |
-| Typecheck | `pnpm typecheck` |
+| Typecheck the Electron/renderer project | `pnpm typecheck` |
+| Typecheck Convex and validate generated bindings | `pnpm convex:check` |
+| Run ESLint, Hooks checks, and unused production dependency analysis | `pnpm lint` |
 | Build Electron/Vite output | `pnpm build` |
 | Preview the build | `pnpm start` |
 | Run the dogfood verification gate | `pnpm dogfood:verify` |
 
-Run `pnpm convex:codegen` after changing the Convex schema or public functions. Generated build
-output under `out/` should never be edited by hand.
+Run `pnpm convex:codegen` with development-deployment access after adding or removing a Convex
+function module. The release gate detects a stale committed module map without requiring CI or a
+tester to hold Convex credentials. Generated build output under `out/` should never be edited by
+hand.
 
 ## Tests
 
@@ -110,11 +114,18 @@ Tests are colocated with their source. The main coverage groups are:
   replies, reactions, and attachments;
 - `src/renderer/App.test.tsx`: shared chat behavior and interaction states;
 - `src/renderer/dogfood-chat.test.tsx`: Convex-to-UI adaptation and authenticated app states;
+- `scripts/check-convex-bindings.test.ts`: offline stale Convex module-binding detection;
+- `src/renderer/dogfood-distribution.test.ts`: release command, frozen-install CI, revision handoff,
+  runtime documentation, and two-account smoke-contract checks;
 - `src/main/auth-callback.test.ts` and the auth-policy tests: native callback handling and URL
   restrictions; and
 - snapshot-era RPC, repo, transport, and atom tests: retained legacy fixture behavior.
 
-`pnpm dogfood:verify` runs typecheck, the full test suite, and the production build.
+`pnpm dogfood:verify` is the complete automated friend-beta gate: root and Convex typechecks,
+generated-binding validation, ESLint (including React Hooks), unused production dependency analysis,
+the full test suite, and the production build. CI runs the same command after a frozen install on the
+pinned Node and pnpm versions. The operator-only remote/tag and two-account checks remain documented
+manual release steps because they require repository authority and two real AuthKit accounts.
 
 ## Documentation
 

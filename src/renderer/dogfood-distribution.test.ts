@@ -28,4 +28,42 @@ describe("friend dogfood distribution", () => {
     expect(guide).toContain("pnpm convex env set --prod")
     expect(guide).toContain("### Rollback")
   })
+
+  it("defines one complete automated release command", () => {
+    const manifest = JSON.parse(readRepoFile("package.json")) as {
+      scripts: Record<string, string>
+    }
+
+    expect(manifest.scripts["convex:check"]).toContain("tsc -p convex/tsconfig.json")
+    expect(manifest.scripts["convex:check"]).toContain("check-convex-bindings.mjs")
+    expect(manifest.scripts.lint).toContain("eslint .")
+    expect(manifest.scripts.lint).toContain("knip --dependencies")
+    expect(manifest.scripts["dogfood:verify"]).toBe(
+      "pnpm typecheck && pnpm convex:check && pnpm lint && pnpm test && pnpm build"
+    )
+  })
+
+  it("runs the release command in CI after a frozen install on the pinned toolchain", () => {
+    const workflow = readRepoFile(".github/workflows/release-gate.yml")
+
+    expect(workflow).toContain("node-version-file: .nvmrc")
+    expect(workflow).toContain("pnpm install --frozen-lockfile")
+    expect(workflow).toContain("pnpm dogfood:verify")
+  })
+
+  it("documents immutable remote handoff and credential-free two-account evidence", () => {
+    const guide = readRepoFile("docs/dogfood-distribution.md")
+    const smoke = readRepoFile("docs/dogfood-smoke-test.md")
+    const readme = readRepoFile("README.md")
+
+    expect(guide).toContain('test -z "$(git status --porcelain)"')
+    expect(guide).toContain("git ls-remote --exit-code origin")
+    expect(guide).toContain("git tag -a")
+    expect(guide).toContain("tested commit, tag, branch, CI run URL")
+    expect(smoke).toContain("Use two different allowlisted accounts")
+    expect(smoke).toContain("Exact tested Git commit, immutable friend-beta tag, CI run URL")
+    expect(smoke).not.toContain("CONVEX_DEPLOY_KEY=")
+    expect(readme).toContain("active runtime uses")
+    expect(readme).toContain("does not fall back to the local JSON chat")
+  })
 })

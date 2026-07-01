@@ -278,7 +278,7 @@ function ConvexDogfoodChat() {
         deleteMessage,
         toggleMessageReaction
       }),
-    [activeChannelId, channelIndicators, channelList, createChannel, deleteMessage, editMessage, members, messagePagination, messages, sendMessage, toggleMessageReaction, workspace]
+    [activeChannelId, channelIndicators, channelList, createChannel, deleteMessage, editMessage, generateAttachmentUploadUrl, members, messagePagination, messages, sendMessage, toggleMessageReaction, workspace]
   )
 
   if (auth.isLoading) {

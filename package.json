@@ -15,7 +15,9 @@
     "convex": "convex",
     "convex:dev": "convex dev",
     "convex:codegen": "convex codegen",
-    "dogfood:verify": "pnpm typecheck && pnpm test && pnpm build",
+    "convex:check": "tsc -p convex/tsconfig.json --noEmit && node scripts/check-convex-bindings.mjs",
+    "dogfood:verify": "pnpm typecheck && pnpm convex:check && pnpm lint && pnpm test && pnpm build",
+    "lint": "eslint . && knip --dependencies",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -40,9 +42,21 @@
     "react-dom": "^19.0.0",
     "tailwind-merge": "^3.6.0"
   },
+  "knip": {
+    "entry": [
+      "src/main/index.ts",
+      "src/renderer/main.tsx",
+      "convex/{auth.config,chat,schema}.ts"
+    ],
+    "project": [
+      "src/**/*.{ts,tsx}",
+      "convex/**/*.ts"
+    ]
+  },
   "devDependencies": {
     "@edge-runtime/vm": "^5.0.0",
     "@effect/vitest": "0.29.0",
+    "@eslint/js": "^10.0.1",
     "@tailwindcss/postcss": "^4.3.1",
     "@testing-library/react": "^16.1.0",
     "@types/node": "^22.10.0",
@@ -52,10 +66,14 @@
     "convex-test": "^0.0.53",
     "electron": "^41.0.0",
     "electron-vite": "^2.3.0",
+    "eslint": "^10.6.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "happy-dom": "^16.0.0",
+    "knip": "^6.23.0",
     "postcss": "^8.5.15",
     "tailwindcss": "^4.3.1",
     "typescript": "^5.7.0",
+    "typescript-eslint": "^8.62.1",
     "vite": "^5.4.11",
     "vitest": "^3.2.4"
   }
