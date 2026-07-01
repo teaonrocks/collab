@@ -23,3 +23,18 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Run the friend-beta release gate
         run: pnpm dogfood:verify
+
+  package-macos:
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: Install frozen dependency graph
+        run: pnpm install --frozen-lockfile
+      - name: Build the tester macOS application
+        run: pnpm package:mac

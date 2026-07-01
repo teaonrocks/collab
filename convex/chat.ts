@@ -12,7 +12,6 @@ const MAX_CHANNELS = 100
 const MAX_CHANNEL_NAME_LENGTH = 80
 const MAX_MESSAGE_BODY_LENGTH = 8_000
 const MAX_MESSAGE_PAGE_SIZE = 100
-const MAX_UNREAD_MESSAGES_PER_CHANNEL = 50
 const MAX_MESSAGE_ATTACHMENTS = 4
 const MAX_ATTACHMENT_NAME_LENGTH = 180
 const MAX_ATTACHMENT_SIZE_BYTES = 25 * 1024 * 1024
@@ -136,6 +135,40 @@ const mentionsDisplayName = (body: string, displayName: string): boolean =>
     const mention = new RegExp(`(^|[^A-Za-z0-9_])${escapeRegExp(candidate)}($|[^A-Za-z0-9_])`, "i")
     return mention.test(body)
   })
+
+const syncMessageMentions = async (
+  ctx: MutationCtx,
+  input: {
+    readonly channelId: Id<"channels">
+    readonly messageId: Id<"messages">
+    readonly messageCreatedAt: number
+    readonly body: string
+    readonly authorUserId: Id<"users">
+  }
+) => {
+  const existing = await ctx.db
+    .query("messageMentions")
+    .withIndex("by_message", (q) => q.eq("messageId", input.messageId))
+    .collect()
+  for (const mention of existing) await ctx.db.delete(mention._id)
+
+  if (input.body.length === 0) return
+  const memberships = await ctx.db
+    .query("channelMemberships")
+    .withIndex("by_channel", (q) => q.eq("channelId", input.channelId))
+    .collect()
+  for (const membership of memberships) {
+    if (membership.userId === input.authorUserId) continue
+    const member = await ctx.db.get(membership.userId)
+    if (member === null || !mentionsDisplayName(input.body, member.displayName)) continue
+    await ctx.db.insert("messageMentions", {
+      channelId: input.channelId,
+      messageId: input.messageId,
+      userId: member._id,
+      messageCreatedAt: input.messageCreatedAt
+    })
+  }
+}
 
 const displayNameFromIdentity = (identity: ViewerIdentity, email: string): string => {
   const name = (identity.name ?? stringClaim(identity, "properties.name"))?.trim()
@@ -413,7 +446,8 @@ const ensureMemberships = async (
       userId: input.userId,
       role: "member",
       createdAt: input.now,
-      lastReadAt: input.now
+      lastReadAt: input.now,
+      mentionTrackingStartedAt: input.now
     })
   }
 }
@@ -438,7 +472,8 @@ const ensureChannelMembership = async (
     userId: input.userId,
     role: "member",
     createdAt: input.now,
-    lastReadAt: input.now
+    lastReadAt: input.now,
+    mentionTrackingStartedAt: input.now
   })
 
   const membership = await ctx.db.get(membershipId)
@@ -554,7 +589,16 @@ export const registerAttachmentUpload = mutation({
     const user = await requireAllowedCurrentUser(ctx)
     const metadata = await ctx.db.system.get("_storage", args.storageId)
     if (metadata === null) throw new Error("Attachment upload was not found")
-    const contentType = validateAttachmentMetadata(metadata, args.contentType)
+    let contentType: string
+    try {
+      contentType = validateAttachmentMetadata(metadata, args.contentType)
+    } catch (cause) {
+      await ctx.storage.delete(args.storageId)
+      return {
+        status: "rejected" as const,
+        reason: cause instanceof Error ? cause.message : "Attachment upload was rejected"
+      }
+    }
     const existing = await ctx.db.query("attachmentUploads")
       .withIndex("by_storage_id", (q) => q.eq("storageId", args.storageId)).unique()
     if (existing !== null) throw new Error("Attachment upload is already registered")
@@ -567,7 +611,7 @@ export const registerAttachmentUpload = mutation({
     await ctx.scheduler.runAfter(ATTACHMENT_UPLOAD_TTL_MS, internal.chat.cleanupAbandonedAttachmentUpload, {
       storageId: args.storageId
     })
-    return { storageId: args.storageId }
+    return { status: "registered" as const, storageId: args.storageId }
   })
 })
 
@@ -781,22 +825,28 @@ export const channelIndicators = query({
       if (membership === undefined) continue
 
       const lastReadAt = membership.lastReadAt ?? membership.createdAt
-      let hasUnread = false
-      let mentioned = false
-      const messages = await ctx.db
+      const newestUnread = await ctx.db
         .query("messages")
         .withIndex("by_channel_created_at", (q) => q.eq("channelId", channel.id).gt("createdAt", lastReadAt))
         .order("desc")
-        .take(MAX_UNREAD_MESSAGES_PER_CHANNEL)
-      for (const message of messages) {
-        if (message.authorUserId === user._id) continue
-        hasUnread = true
-        if (mentionsDisplayName(message.body, user.displayName)) {
-          mentioned = true
-          break
-        }
+        .first()
+      if (newestUnread === null) continue
+
+      let mentioned: boolean
+      if (membership.mentionTrackingStartedAt !== undefined && lastReadAt >= membership.mentionTrackingStartedAt) {
+        mentioned = await ctx.db
+          .query("messageMentions")
+          .withIndex("by_channel_user_created_at", (q) =>
+            q.eq("channelId", channel.id).eq("userId", user._id).gt("messageCreatedAt", lastReadAt))
+          .first() !== null
+      } else {
+        const legacyUnread = await ctx.db
+          .query("messages")
+          .withIndex("by_channel_created_at", (q) => q.eq("channelId", channel.id).gt("createdAt", lastReadAt))
+          .collect()
+        mentioned = legacyUnread.some((message) =>
+          message.authorUserId !== user._id && mentionsDisplayName(message.body, user.displayName))
       }
-      if (!hasUnread) continue
       indicators.push({ channelId: channel.id, indicator: mentioned ? "mentioned" : "unread" })
     }
 
@@ -849,8 +899,18 @@ export const markChannelRead = mutation({
       throw new Error("Read-through message not found in this channel")
     }
 
-    if ((membership.lastReadAt ?? membership.createdAt) >= readThroughMessage.createdAt) return toChannelView(channel)
-    await ctx.db.patch(membership._id, { lastReadAt: readThroughMessage.createdAt })
+    if ((membership.lastReadAt ?? membership.createdAt) >= readThroughMessage.createdAt) {
+      if (membership.mentionTrackingStartedAt === undefined) {
+        await ctx.db.patch(membership._id, { mentionTrackingStartedAt: readThroughMessage.createdAt })
+      }
+      return toChannelView(channel)
+    }
+    await ctx.db.patch(membership._id, {
+      lastReadAt: readThroughMessage.createdAt,
+      ...(membership.mentionTrackingStartedAt === undefined
+        ? { mentionTrackingStartedAt: readThroughMessage.createdAt }
+        : {})
+    })
     return toChannelView(channel)
   })
 })
@@ -904,7 +964,8 @@ export const createChannel = mutation({
       userId: user._id,
       role: "member",
       createdAt: now,
-      lastReadAt: now
+      lastReadAt: now,
+      mentionTrackingStartedAt: now
     })
 
     const channel = await ctx.db.get(channelId)
@@ -998,14 +1059,28 @@ export const sendMessage = mutation({
       ...(attachments.length === 0 ? {} : { attachments }),
       createdAt: Date.now()
     })
+    const message = await ctx.db.get(messageId)
+    if (message === null) throw new Error("Message not found after insert")
+    await syncMessageMentions(ctx, {
+      channelId: message.channelId,
+      messageId: message._id,
+      messageCreatedAt: message.createdAt,
+      body: message.body,
+      authorUserId: message.authorUserId
+    })
+    const senderMembership = await ctx.db
+      .query("channelMemberships")
+      .withIndex("by_channel_user", (q) => q.eq("channelId", message.channelId).eq("userId", user._id))
+      .unique()
+    if (senderMembership !== null && (senderMembership.lastReadAt ?? senderMembership.createdAt) < message.createdAt) {
+      await ctx.db.patch(senderMembership._id, { lastReadAt: message.createdAt })
+    }
     for (const attachment of attachments) {
       const upload = await ctx.db.query("attachmentUploads")
         .withIndex("by_storage_id", (q) => q.eq("storageId", attachment.storageId)).unique()
       if (upload !== null) await ctx.db.patch(upload._id, { claimedMessageId: messageId })
     }
 
-    const message = await ctx.db.get(messageId)
-    if (message === null) throw new Error("Message not found after insert")
     return toMessageView(ctx, message, user._id)
   })
 })
@@ -1031,6 +1106,13 @@ export const editMessage = mutation({
     if (message.authorUserId !== user._id) throw new Error("Only the original author can edit this message")
 
     await ctx.db.patch(args.messageId, { body, editedAt: Date.now() })
+    await syncMessageMentions(ctx, {
+      channelId: message.channelId,
+      messageId: message._id,
+      messageCreatedAt: message.createdAt,
+      body,
+      authorUserId: message.authorUserId
+    })
     const updated = await ctx.db.get(args.messageId)
     if (updated === null) throw new Error("Message not found after edit")
     return toMessageView(ctx, updated, user._id)
@@ -1060,6 +1142,11 @@ export const deleteMessage = mutation({
     for (const reaction of reactions) {
       await ctx.db.delete(reaction._id)
     }
+    const mentions = await ctx.db
+      .query("messageMentions")
+      .withIndex("by_message", (q) => q.eq("messageId", args.messageId))
+      .collect()
+    for (const mention of mentions) await ctx.db.delete(mention._id)
     for (const attachment of message.attachments ?? []) {
       await ctx.storage.delete(attachment.storageId)
       const upload = await ctx.db.query("attachmentUploads")

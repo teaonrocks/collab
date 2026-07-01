@@ -16,7 +16,8 @@ external URLs stay blocked before they reach `shell.openExternal`.
 
 ## Packaged App Behavior
 
-Packaged builds register `aether` as the app protocol. When the OS opens
+Packaged builds use the unique bundle identifier `com.aether.chat`, declare `aether` in the app's
+`Info.plist`, and register it as the app protocol. When the OS opens
 `aether://auth/callback?code=...`, the Electron main process:
 
 - rejects anything that is not the strict native callback shape;
@@ -36,7 +37,9 @@ logout page.
 
 ## Manual Smoke Check
 
-Use this after `pnpm build` or `pnpm start` when the dogfood environment values are present:
+Use this after `pnpm package:mac` and `pnpm start:mac` when the dogfood environment values are
+present. `pnpm dev` uses Electron's generic macOS bundle identity and is not a valid native callback
+smoke test when more than one Electron checkout is registered with Launch Services.
 
 1. Confirm the WorkOS/AuthKit configuration includes `aether://auth/callback` as an allowed redirect
    URI.

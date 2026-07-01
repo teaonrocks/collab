@@ -213,7 +213,7 @@ function ConvexDogfoodChat() {
     lastReadMarkerRef.current = readMarker
 
     void markChannelRead({ channelId: activeChannelId, readThroughMessageId }).catch((cause: unknown) => {
-      console.warn("Could not mark channel read", cause)
+      logDogfoodDiagnostic("read-marker", cause, dogfoodDiagnostic("mutation", "try-again", cause))
     })
   }, [activeChannelId, activeChannelJoined, markChannelRead, messagePagination.status, messages, viewerReady])
 
@@ -640,7 +640,13 @@ const toConvexStorageId = (id: string): Id<"_storage"> => String(id) as Id<"_sto
 
 const uploadDogfoodAttachment = async (
   generateAttachmentUploadUrl: (input: Record<string, never>) => Promise<string>,
-  registerAttachmentUpload: (input: { readonly storageId: Id<"_storage">; readonly contentType: string }) => Promise<unknown>,
+  registerAttachmentUpload: (input: { readonly storageId: Id<"_storage">; readonly contentType: string }) => Promise<{
+    readonly status: "registered"
+    readonly storageId: Id<"_storage">
+  } | {
+    readonly status: "rejected"
+    readonly reason: string
+  }>,
   file: File
 ): Promise<ChannelMessageAttachment> => {
   const uploadUrl = await generateAttachmentUploadUrl({})
@@ -654,7 +660,8 @@ const uploadDogfoodAttachment = async (
 
   const body = await response.json() as { readonly storageId?: string }
   if (body.storageId === undefined || body.storageId.length === 0) throw new Error("Attachment upload did not return a storage id")
-  await registerAttachmentUpload({ storageId: toConvexStorageId(body.storageId), contentType })
+  const registration = await registerAttachmentUpload({ storageId: toConvexStorageId(body.storageId), contentType })
+  if (registration.status === "rejected") throw new Error(registration.reason)
 
   return new ChannelMessageAttachment({
     id: body.storageId,

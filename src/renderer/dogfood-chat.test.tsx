@@ -246,6 +246,7 @@ beforeEach(() => {
   mocks.ensureChannelMember.mockResolvedValue({})
   mocks.markChannelRead.mockResolvedValue({})
   mocks.generateAttachmentUploadUrl.mockResolvedValue("https://upload.example/convex")
+  mocks.registerAttachmentUpload.mockResolvedValue({ status: "registered", storageId: "storage-1" })
   mocks.mutationCallCount = 0
   mocks.workspace = undefined
   mocks.channels = undefined

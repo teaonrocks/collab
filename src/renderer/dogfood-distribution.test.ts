@@ -22,11 +22,26 @@ describe("friend dogfood distribution", () => {
     const testerSection = guide.split("## Deployment Operator Runbook", 1)[0]
 
     expect(testerSection).toContain("polished-bison-174")
-    expect(testerSection).toContain("pnpm dev")
+    expect(testerSection).toContain("pnpm package:mac")
+    expect(testerSection).toContain("pnpm start:mac")
     expect(testerSection).not.toContain("pnpm convex:dev\n")
     expect(guide).toContain("pnpm convex deploy")
     expect(guide).toContain("pnpm convex env set --prod")
     expect(guide).toContain("### Rollback")
+  })
+
+  it("packages a uniquely identified macOS callback handler", () => {
+    const manifest = JSON.parse(readRepoFile("package.json")) as {
+      scripts: Record<string, string>
+      build: {
+        appId: string
+        protocols: ReadonlyArray<{ schemes: ReadonlyArray<string> }>
+      }
+    }
+
+    expect(manifest.scripts["package:mac"]).toContain("electron-builder --mac dir")
+    expect(manifest.build.appId).toBe("com.aether.chat")
+    expect(manifest.build.protocols.some(({ schemes }) => schemes.includes("aether"))).toBe(true)
   })
 
   it("defines one complete automated release command", () => {
@@ -49,6 +64,8 @@ describe("friend dogfood distribution", () => {
     expect(workflow).toContain("node-version-file: .nvmrc")
     expect(workflow).toContain("pnpm install --frozen-lockfile")
     expect(workflow).toContain("pnpm dogfood:verify")
+    expect(workflow).toContain("runs-on: macos-14")
+    expect(workflow).toContain("pnpm package:mac")
   })
 
   it("documents immutable remote handoff and credential-free two-account evidence", () => {

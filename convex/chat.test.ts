@@ -455,7 +455,27 @@ describe("dogfood channel memberships", () => {
         .withIndex("by_channel_user", (q) => q.eq("channelId", design.id).eq("userId", lee._id))
         .unique()
       if (membership === null) throw new Error("Membership not found")
-      await ctx.db.patch(membership._id, { lastReadAt: 1 })
+      await ctx.db.patch(membership._id, { lastReadAt: 1, mentionTrackingStartedAt: 1 })
+
+      await ctx.db.insert("messages", {
+        workspaceId: workspace._id,
+        channelId: design.id,
+        authorUserId: maya._id,
+        authorDisplayName: maya.displayName,
+        body: "Buried note for @Lee before newer unread messages.",
+        createdAt: 100
+      })
+      const mentionMessage = await ctx.db
+        .query("messages")
+        .withIndex("by_channel_created_at", (q) => q.eq("channelId", design.id).eq("createdAt", 100))
+        .unique()
+      if (mentionMessage === null) throw new Error("Mention message not found")
+      await ctx.db.insert("messageMentions", {
+        channelId: design.id,
+        messageId: mentionMessage._id,
+        userId: lee._id,
+        messageCreatedAt: mentionMessage.createdAt
+      })
 
       for (let index = 0; index < 50; index += 1) {
         await ctx.db.insert("messages", {
@@ -464,18 +484,9 @@ describe("dogfood channel memberships", () => {
           authorUserId: maya._id,
           authorDisplayName: maya.displayName,
           body: `Unread context ${index}`,
-          createdAt: 100 + index
+          createdAt: 101 + index
         })
       }
-
-      await ctx.db.insert("messages", {
-        workspaceId: workspace._id,
-        channelId: design.id,
-        authorUserId: maya._id,
-        authorDisplayName: maya.displayName,
-        body: "Buried note for @Lee after the old scan cap.",
-        createdAt: 200
-      })
 
       return workspace._id
     })
@@ -734,12 +745,17 @@ describe("dogfood channel memberships", () => {
     const disallowedId = await t.run((ctx) => ctx.storage.store(new Blob(["binary"])))
     await expect(t.withIdentity(mayaIdentity).mutation(api.chat.registerAttachmentUpload, {
       storageId: disallowedId, contentType: "application/zip"
-    })).rejects.toThrow("Attachments must be a PNG, JPEG, GIF, WebP, PDF, or plain-text file")
+    })).resolves.toEqual({
+      status: "rejected",
+      reason: "Attachments must be a PNG, JPEG, GIF, WebP, PDF, or plain-text file"
+    })
+    await expect(t.run((ctx) => ctx.db.system.get("_storage", disallowedId))).resolves.toBeNull()
 
     const oversizedId = await t.run((ctx) => ctx.storage.store(new Blob([new Uint8Array(25 * 1024 * 1024 + 1)])))
     await expect(t.withIdentity(mayaIdentity).mutation(api.chat.registerAttachmentUpload, {
       storageId: oversizedId, contentType: "image/png"
-    })).rejects.toThrow("Attachments can be at most 25 MB")
+    })).resolves.toEqual({ status: "rejected", reason: "Attachments can be at most 25 MB" })
+    await expect(t.run((ctx) => ctx.db.system.get("_storage", oversizedId))).resolves.toBeNull()
 
     const storageId = await t.run((ctx) => ctx.storage.store(new Blob(["private"])))
     await t.withIdentity(mayaIdentity).mutation(api.chat.registerAttachmentUpload, { storageId, contentType: "text/plain" })
@@ -1002,16 +1018,24 @@ describe("dogfood channel memberships", () => {
       }
       for (const [channelIndex, channel] of channels.entries()) {
         for (let messageIndex = 0; messageIndex < 60; messageIndex += 1) {
-          const isBoundedOutMention = channelIndex === 0 && messageIndex === 0
+          const isBuriedMention = channelIndex === 0 && messageIndex === 0
           const isRecentMention = channelIndex === 1 && messageIndex === 59
-          await ctx.db.insert("messages", {
+          const messageId = await ctx.db.insert("messages", {
             workspaceId: workspace._id,
             channelId: channel.id,
             authorUserId: maya._id,
             authorDisplayName: maya.displayName,
-            body: isBoundedOutMention || isRecentMention ? "@Lee review this" : `Dense context ${messageIndex}`,
+            body: isBuriedMention || isRecentMention ? "@Lee review this" : `Dense context ${messageIndex}`,
             createdAt: 100 + messageIndex
           })
+          if (isBuriedMention || isRecentMention) {
+            await ctx.db.insert("messageMentions", {
+              channelId: channel.id,
+              messageId,
+              userId: lee._id,
+              messageCreatedAt: 100 + messageIndex
+            })
+          }
         }
       }
       return workspace._id
@@ -1019,7 +1043,7 @@ describe("dogfood channel memberships", () => {
 
     const indicators = await t.withIdentity(leeIdentity).query(api.chat.channelIndicators, { workspaceId })
     expect(indicators).toHaveLength(10)
-    expect(indicators.find((indicator) => indicator.channelId === channels[0]!.id)?.indicator).toBe("unread")
+    expect(indicators.find((indicator) => indicator.channelId === channels[0]!.id)?.indicator).toBe("mentioned")
     expect(indicators.find((indicator) => indicator.channelId === channels[1]!.id)?.indicator).toBe("mentioned")
   })
 

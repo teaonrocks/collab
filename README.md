@@ -71,10 +71,20 @@ Use the Convex-generated values for `VITE_CONVEX_URL` and `VITE_WORKOS_CLIENT_ID
 deliberately.
 
 Configure the server-side operator key and add at least one dogfood user as described in
-[`docs/dogfood-allowlist.md`](docs/dogfood-allowlist.md). Then start Electron:
+[`docs/dogfood-allowlist.md`](docs/dogfood-allowlist.md). For normal renderer development, start
+Electron directly:
 
 ```sh
 pnpm dev
+```
+
+On macOS, system-browser sign-in must run through Aether's packaged app identity. The generic
+development Electron app is shared by every Electron checkout and cannot reliably own the
+`aether://` callback. Build and launch the unsigned local app instead:
+
+```sh
+pnpm package:mac
+pnpm start:mac
 ```
 
 If any required `VITE_` value is missing, the renderer intentionally shows a configuration-required
@@ -99,6 +109,8 @@ operator paths.
 | Run ESLint, Hooks checks, and unused production dependency analysis | `pnpm lint` |
 | Build Electron/Vite output | `pnpm build` |
 | Preview the build | `pnpm start` |
+| Build an unsigned macOS app with the native callback | `pnpm package:mac` |
+| Launch the locally packaged macOS app | `pnpm start:mac` |
 | Run the dogfood verification gate | `pnpm dogfood:verify` |
 
 Run `pnpm convex:codegen` with development-deployment access after adding or removing a Convex

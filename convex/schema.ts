@@ -51,7 +51,8 @@ export default defineSchema({
     userId: v.id("users"),
     role: channelRole,
     createdAt: v.number(),
-    lastReadAt: v.optional(v.number())
+    lastReadAt: v.optional(v.number()),
+    mentionTrackingStartedAt: v.optional(v.number())
   }).index("by_channel", ["channelId"]).index("by_user", ["userId"]).index("by_channel_user", [
     "channelId",
     "userId"
@@ -71,6 +72,14 @@ export default defineSchema({
     "workspaceId",
     "createdAt"
   ]).index("by_parent_message", ["parentMessageId"]),
+
+  messageMentions: defineTable({
+    channelId: v.id("channels"),
+    messageId: v.id("messages"),
+    userId: v.id("users"),
+    messageCreatedAt: v.number()
+  }).index("by_channel_user_created_at", ["channelId", "userId", "messageCreatedAt"])
+    .index("by_message", ["messageId"]),
 
   attachmentUploads: defineTable({
     storageId: v.id("_storage"),

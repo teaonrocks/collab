@@ -13,9 +13,10 @@ deployment, join the Convex team, or receive a deploy key. A production deployme
 Convex redacts unexpected server errors to a generic `Server Error` for clients while retaining full
 details in operator-only deployment logs.
 
-Aether remains checkout-based for this beta. The repository does not contain signing, installer, or
-updater infrastructure; `pnpm build` and `pnpm start` verify the production bundle but do not create
-a distributable app.
+Aether remains checkout-based for this beta. The repository can create an unsigned local macOS app
+so the native AuthKit callback has a unique application identity, but it does not contain signing,
+notarization, installer, or updater infrastructure. The generated `.app` is local build output, not
+a distributable release artifact.
 
 ## Tester Startup
 
@@ -29,7 +30,8 @@ node --version # v22.23.1
 pnpm --version # 11.7.0
 pnpm install
 cp .env.example .env.local
-pnpm dev
+pnpm package:mac
+pnpm start:mac
 ```
 
 The checked-in `.env.example` contains only the public renderer configuration for Aether Friend
@@ -40,12 +42,18 @@ If any required `VITE_` value is missing, the app shows a configuration-required
 opening chat. The old local Electron RPC implementation remains test-only and is not a runtime
 fallback.
 
+The packaged app declares `aether` in its `Info.plist` and uses the unique bundle identifier
+`com.aether.chat`. Do not use `pnpm dev` for a macOS sign-in smoke test: the generic Electron
+development app shares `com.github.Electron` with other checkouts, so Launch Services can deliver
+the callback to the wrong Electron binary.
+
 To update a tester checkout:
 
 ```sh
 git pull
 pnpm install
-pnpm dev
+pnpm package:mac
+pnpm start:mac
 ```
 
 Tester startup and update never require the Convex CLI to contact or modify a deployment.
