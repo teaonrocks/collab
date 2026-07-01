@@ -12,6 +12,7 @@ const MAX_CHANNELS = 100
 const MAX_CHANNEL_NAME_LENGTH = 80
 const MAX_MESSAGE_BODY_LENGTH = 8_000
 const MAX_MESSAGE_PAGE_SIZE = 100
+const MAX_BATCHED_REACTION_ROWS = 5_000
 const MAX_MESSAGE_ATTACHMENTS = 4
 const MAX_ATTACHMENT_NAME_LENGTH = 180
 const MAX_ATTACHMENT_SIZE_BYTES = 25 * 1024 * 1024
@@ -578,15 +579,41 @@ const validateMessageAttachments = async (
 export const generateAttachmentUploadUrl = mutation({
   args: {},
   handler: (ctx) => withDogfoodDiagnostics("generateAttachmentUploadUrl", {}, async () => {
-    await requireAllowedCurrentUser(ctx)
-    return ctx.storage.generateUploadUrl()
+    const user = await requireAllowedCurrentUser(ctx)
+    const intentId = await ctx.db.insert("attachmentUploadIntents", {
+      uploaderUserId: user._id,
+      createdAt: Date.now()
+    })
+    await ctx.scheduler.runAfter(ATTACHMENT_UPLOAD_TTL_MS, internal.chat.cleanupAttachmentUploadIntent, {
+      intentId
+    })
+    return { uploadUrl: await ctx.storage.generateUploadUrl(), intentId }
   })
 })
 
 export const registerAttachmentUpload = mutation({
-  args: { storageId: v.id("_storage"), contentType: v.string() },
+  args: {
+    intentId: v.id("attachmentUploadIntents"),
+    storageId: v.id("_storage"),
+    contentType: v.string()
+  },
   handler: (ctx, args) => withDogfoodDiagnostics("registerAttachmentUpload", { storageId: args.storageId }, async () => {
     const user = await requireAllowedCurrentUser(ctx)
+    const existing = await ctx.db.query("attachmentUploads")
+      .withIndex("by_storage_id", (q) => q.eq("storageId", args.storageId)).unique()
+    if (existing !== null) {
+      if (existing.uploaderUserId !== user._id) throw new Error("Attachment upload is already registered")
+      if (existing.contentType !== args.contentType.toLowerCase()) {
+        throw new Error("Attachment upload is already registered with a different content type")
+      }
+      return { status: "registered" as const, storageId: args.storageId }
+    }
+
+    const intent = await ctx.db.get(args.intentId)
+    if (intent === null || intent.uploaderUserId !== user._id) {
+      throw new Error("Attachment upload intent is missing or is not owned by the current user")
+    }
+
     const metadata = await ctx.db.system.get("_storage", args.storageId)
     if (metadata === null) throw new Error("Attachment upload was not found")
     let contentType: string
@@ -594,20 +621,19 @@ export const registerAttachmentUpload = mutation({
       contentType = validateAttachmentMetadata(metadata, args.contentType)
     } catch (cause) {
       await ctx.storage.delete(args.storageId)
+      await ctx.db.delete(intent._id)
       return {
         status: "rejected" as const,
         reason: cause instanceof Error ? cause.message : "Attachment upload was rejected"
       }
     }
-    const existing = await ctx.db.query("attachmentUploads")
-      .withIndex("by_storage_id", (q) => q.eq("storageId", args.storageId)).unique()
-    if (existing !== null) throw new Error("Attachment upload is already registered")
     await ctx.db.insert("attachmentUploads", {
       storageId: args.storageId,
       uploaderUserId: user._id,
       contentType,
       createdAt: Date.now()
     })
+    await ctx.db.delete(intent._id)
     await ctx.scheduler.runAfter(ATTACHMENT_UPLOAD_TTL_MS, internal.chat.cleanupAbandonedAttachmentUpload, {
       storageId: args.storageId
     })
@@ -616,18 +642,38 @@ export const registerAttachmentUpload = mutation({
 })
 
 export const deleteAttachmentUpload = mutation({
-  args: { storageId: v.id("_storage") },
+  args: {
+    storageId: v.id("_storage"),
+    intentId: v.optional(v.id("attachmentUploadIntents"))
+  },
   handler: (ctx, args) => withDogfoodDiagnostics("deleteAttachmentUpload", { storageId: args.storageId }, async () => {
     const user = await requireAllowedCurrentUser(ctx)
     const upload = await ctx.db.query("attachmentUploads")
       .withIndex("by_storage_id", (q) => q.eq("storageId", args.storageId)).unique()
-    if (upload === null) return { storageId: args.storageId }
+    if (upload === null) {
+      if (args.intentId === undefined) return { storageId: args.storageId }
+      const intent = await ctx.db.get(args.intentId)
+      if (intent === null) return { storageId: args.storageId }
+      if (intent.uploaderUserId !== user._id) throw new Error("Only the uploader can delete this upload")
+      await ctx.storage.delete(args.storageId)
+      await ctx.db.delete(intent._id)
+      return { storageId: args.storageId }
+    }
     if (upload.uploaderUserId !== user._id) throw new Error("Only the uploader can delete this upload")
     if (upload.claimedMessageId !== undefined) throw new Error("Claimed attachments cannot be deleted as abandoned uploads")
     await ctx.storage.delete(args.storageId)
     await ctx.db.delete(upload._id)
     return { storageId: args.storageId }
   })
+})
+
+export const cleanupAttachmentUploadIntent = internalMutation({
+  args: { intentId: v.id("attachmentUploadIntents") },
+  handler: async (ctx, args) => {
+    const intent = await ctx.db.get(args.intentId)
+    if (intent !== null) await ctx.db.delete(intent._id)
+    return null
+  }
 })
 
 export const cleanupAbandonedAttachmentUpload = internalMutation({
@@ -832,21 +878,13 @@ export const channelIndicators = query({
         .first()
       if (newestUnread === null) continue
 
-      let mentioned: boolean
-      if (membership.mentionTrackingStartedAt !== undefined && lastReadAt >= membership.mentionTrackingStartedAt) {
-        mentioned = await ctx.db
-          .query("messageMentions")
-          .withIndex("by_channel_user_created_at", (q) =>
-            q.eq("channelId", channel.id).eq("userId", user._id).gt("messageCreatedAt", lastReadAt))
-          .first() !== null
-      } else {
-        const legacyUnread = await ctx.db
-          .query("messages")
-          .withIndex("by_channel_created_at", (q) => q.eq("channelId", channel.id).gt("createdAt", lastReadAt))
-          .collect()
-        mentioned = legacyUnread.some((message) =>
-          message.authorUserId !== user._id && mentionsDisplayName(message.body, user.displayName))
-      }
+      // Pre-index history intentionally degrades to `unread` rather than scanning an
+      // unbounded message range. New mentions are maintained in messageMentions.
+      const mentioned = await ctx.db
+        .query("messageMentions")
+        .withIndex("by_channel_user_created_at", (q) =>
+          q.eq("channelId", channel.id).eq("userId", user._id).gt("messageCreatedAt", lastReadAt))
+        .first() !== null
       indicators.push({ channelId: channel.id, indicator: mentioned ? "mentioned" : "unread" })
     }
 
@@ -1057,6 +1095,7 @@ export const sendMessage = mutation({
       body,
       ...(args.parentMessageId === undefined ? {} : { parentMessageId: args.parentMessageId }),
       ...(attachments.length === 0 ? {} : { attachments }),
+      reactionBatchReady: true,
       createdAt: Date.now()
     })
     const message = await ctx.db.get(messageId)
@@ -1188,6 +1227,7 @@ export const toggleMessageReaction = mutation({
         messageId: message._id,
         userId: user._id,
         emoji: args.emoji,
+        messageCreatedAt: message.createdAt,
         createdAt: Date.now()
       })
     } else {
@@ -1246,7 +1286,16 @@ const reactionsForMessage = async (
     .query("messageReactions")
     .withIndex("by_message", (q) => q.eq("messageId", input.messageId))
     .collect()
-  type ReactionCount = { userIds: Set<Id<"users">>; reactedByCurrentUser: boolean }
+  return aggregateReactionRows(reactions, input.currentUserId)
+}
+
+type ReactionRow = Doc<"messageReactions">
+type ReactionCount = { userIds: Set<Id<"users">>; reactedByCurrentUser: boolean }
+
+const aggregateReactionRows = (
+  reactions: ReadonlyArray<ReactionRow>,
+  currentUserId: Id<"users">
+) => {
   const counts = new Map<string, ReactionCount>()
 
   for (const reaction of reactions) {
@@ -1257,7 +1306,7 @@ const reactionsForMessage = async (
     existing.userIds.add(reaction.userId)
     counts.set(reaction.emoji, {
       userIds: existing.userIds,
-      reactedByCurrentUser: existing.reactedByCurrentUser || reaction.userId === input.currentUserId
+      reactedByCurrentUser: existing.reactedByCurrentUser || reaction.userId === currentUserId
     })
   }
 
@@ -1266,6 +1315,57 @@ const reactionsForMessage = async (
     count: state.userIds.size,
     reactedByCurrentUser: state.reactedByCurrentUser
   })).sort((left, right) => messageReactionRank(left.emoji) - messageReactionRank(right.emoji) || left.emoji.localeCompare(right.emoji))
+}
+
+const reactionsForMessages = async (
+  ctx: QueryCtx | MutationCtx,
+  messages: ReadonlyArray<Doc<"messages">>,
+  currentUserId: Id<"users">
+): Promise<Map<Id<"messages">, ReturnType<typeof aggregateReactionRows>>> => {
+  const byMessageId = new Map<Id<"messages">, ReturnType<typeof aggregateReactionRows>>()
+  if (messages.length === 0) return byMessageId
+  if (messages.length === 1) {
+    byMessageId.set(messages[0]!._id, await reactionsForMessage(ctx, {
+      messageId: messages[0]!._id,
+      currentUserId
+    }))
+    return byMessageId
+  }
+
+  const batchReady = messages.filter((message) => message.reactionBatchReady === true)
+  const fallback = messages.filter((message) => message.reactionBatchReady !== true)
+  if (batchReady.length > 0) {
+    const channelId = batchReady[0]!.channelId
+    const createdAt = batchReady.map((message) => message.createdAt)
+    const messageIds = new Set(batchReady.map((message) => message._id))
+    const rows = await ctx.db
+      .query("messageReactions")
+      .withIndex("by_channel_and_message_created_at", (q) =>
+        q.eq("channelId", channelId).gte("messageCreatedAt", Math.min(...createdAt)).lte("messageCreatedAt", Math.max(...createdAt)))
+      .take(MAX_BATCHED_REACTION_ROWS + 1)
+
+    if (rows.length <= MAX_BATCHED_REACTION_ROWS) {
+      const rowsByMessageId = new Map<Id<"messages">, Array<ReactionRow>>()
+      for (const row of rows) {
+        if (!messageIds.has(row.messageId)) continue
+        const messageRows = rowsByMessageId.get(row.messageId) ?? []
+        messageRows.push(row)
+        rowsByMessageId.set(row.messageId, messageRows)
+      }
+      for (const message of batchReady) {
+        byMessageId.set(message._id, aggregateReactionRows(rowsByMessageId.get(message._id) ?? [], currentUserId))
+      }
+    } else {
+      fallback.push(...batchReady)
+    }
+  }
+
+  const fallbackReactions = await Promise.all(fallback.map(async (message) => [
+    message._id,
+    await reactionsForMessage(ctx, { messageId: message._id, currentUserId })
+  ] as const))
+  fallbackReactions.forEach(([messageId, reactions]) => byMessageId.set(messageId, reactions))
+  return byMessageId
 }
 
 const trimParentPreview = (body: string): string => {
@@ -1315,18 +1415,15 @@ const toMessageViews = async (
     messages.flatMap((message) => message.parentMessageId === undefined ? [] : [message.parentMessageId])
   ))
 
-  const [authors, reactions, attachmentViews, parents] = await Promise.all([
+  const [authors, reactionsByMessage, attachmentViews, parents] = await Promise.all([
     Promise.all(missingAuthorIds.map(async (authorId) => [authorId, await ctx.db.get(authorId)] as const)),
-    Promise.all(messages.map(async (message) => [
-      message._id,
-      await reactionsForMessage(ctx, { messageId: message._id, currentUserId })
-    ] as const)),
+    reactionsForMessages(ctx, messages, currentUserId),
     Promise.all(messages.map(async (message) => [message._id, await attachmentsForMessage(ctx, message)] as const)),
     Promise.all(parentIds.map(async (parentId) => [parentId, await ctx.db.get(parentId)] as const))
   ])
 
   authors.forEach(([authorId, author]) => authorNamesById.set(authorId, author?.displayName ?? "Unknown"))
-  reactions.forEach(([messageId, messageReactions]) => reactionsByMessageId.set(messageId, messageReactions))
+  reactionsByMessage.forEach((messageReactions, messageId) => reactionsByMessageId.set(messageId, messageReactions))
   attachmentViews.forEach(([messageId, attachments]) => attachmentsByMessageId.set(messageId, attachments))
   parents.forEach(([parentId, parent]) => parentsById.set(parentId, parent))
 

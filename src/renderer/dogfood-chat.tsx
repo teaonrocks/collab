@@ -275,7 +275,12 @@ function ConvexDogfoodChat() {
         },
         selectChannel: (channelId) => setSelectedChannelId(channelId),
         sendMessage,
-        uploadMessageAttachment: (file) => uploadDogfoodAttachment(generateAttachmentUploadUrl, registerAttachmentUpload, file),
+        uploadMessageAttachment: (file) => uploadDogfoodAttachment(
+          generateAttachmentUploadUrl,
+          registerAttachmentUpload,
+          deleteAttachmentUpload,
+          file
+        ),
         discardMessageAttachment: (attachment) => deleteAttachmentUpload({ storageId: toConvexStorageId(attachment.storageId) }),
         editMessage,
         deleteMessage,
@@ -639,17 +644,28 @@ const toConvexMessageId = (id: ChannelMessageId): Id<"messages"> => String(id) a
 const toConvexStorageId = (id: string): Id<"_storage"> => String(id) as Id<"_storage">
 
 const uploadDogfoodAttachment = async (
-  generateAttachmentUploadUrl: (input: Record<string, never>) => Promise<string>,
-  registerAttachmentUpload: (input: { readonly storageId: Id<"_storage">; readonly contentType: string }) => Promise<{
+  generateAttachmentUploadUrl: (input: Record<string, never>) => Promise<{
+    readonly uploadUrl: string
+    readonly intentId: Id<"attachmentUploadIntents">
+  }>,
+  registerAttachmentUpload: (input: {
+    readonly intentId: Id<"attachmentUploadIntents">
+    readonly storageId: Id<"_storage">
+    readonly contentType: string
+  }) => Promise<{
     readonly status: "registered"
     readonly storageId: Id<"_storage">
   } | {
     readonly status: "rejected"
     readonly reason: string
   }>,
+  deleteAttachmentUpload: (input: {
+    readonly storageId: Id<"_storage">
+    readonly intentId?: Id<"attachmentUploadIntents">
+  }) => Promise<unknown>,
   file: File
 ): Promise<ChannelMessageAttachment> => {
-  const uploadUrl = await generateAttachmentUploadUrl({})
+  const { uploadUrl, intentId } = await generateAttachmentUploadUrl({})
   const contentType = file.type.length === 0 ? "application/octet-stream" : file.type
   const response = await fetch(uploadUrl, {
     method: "POST",
@@ -660,8 +676,21 @@ const uploadDogfoodAttachment = async (
 
   const body = await response.json() as { readonly storageId?: string }
   if (body.storageId === undefined || body.storageId.length === 0) throw new Error("Attachment upload did not return a storage id")
-  const registration = await registerAttachmentUpload({ storageId: toConvexStorageId(body.storageId), contentType })
-  if (registration.status === "rejected") throw new Error(registration.reason)
+  const storageId = toConvexStorageId(body.storageId)
+  let registration: Awaited<ReturnType<typeof registerAttachmentUpload>> | undefined
+  let registrationFailure: unknown
+  for (let attempt = 0; attempt < 3 && registration === undefined; attempt += 1) {
+    try {
+      registration = await registerAttachmentUpload({ intentId, storageId, contentType })
+    } catch (cause) {
+      registrationFailure = cause
+    }
+  }
+  if (registration === undefined || registration.status === "rejected") {
+    await deleteAttachmentUpload({ intentId, storageId }).catch(() => {})
+    if (registration?.status === "rejected") throw new Error(registration.reason)
+    throw registrationFailure instanceof Error ? registrationFailure : new Error("Attachment registration failed")
+  }
 
   return new ChannelMessageAttachment({
     id: body.storageId,

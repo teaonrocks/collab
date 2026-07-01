@@ -336,6 +336,12 @@ describe("dogfood channel memberships", () => {
         body: "@Lee can you review the design notes?",
         createdAt: 100
       })
+      await ctx.db.insert("messageMentions", {
+        channelId: design.id,
+        messageId: designMessageId,
+        userId: lee._id,
+        messageCreatedAt: 100
+      })
       const productMessageId = await ctx.db.insert("messages", {
         workspaceId: workspace._id,
         channelId: product.id,
@@ -532,6 +538,45 @@ describe("dogfood channel memberships", () => {
         createdAt: 100
       })
 
+      return workspace._id
+    })
+
+    await expect(t.withIdentity(leeIdentity).query(api.chat.channelIndicators, { workspaceId }))
+      .resolves.toEqual([{ channelId: design.id, indicator: "unread" }])
+  })
+
+  it("keeps legacy pre-index mentions bounded as unread", async () => {
+    const t = convexTest(schema, modules)
+    await t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: mayaIdentity.tokenIdentifier,
+      email: mayaIdentity.email,
+      displayName: mayaIdentity.name
+    })
+    await t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: leeIdentity.tokenIdentifier,
+      email: leeIdentity.email,
+      displayName: leeIdentity.name
+    })
+    const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "legacy-mentions" })
+    await t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: design.id })
+
+    const workspaceId = await t.run(async (ctx) => {
+      const workspace = await ctx.db.query("workspaces").withIndex("by_key", (q) => q.eq("key", "aether-dogfood")).unique()
+      const maya = await ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", mayaIdentity.email)).unique()
+      const lee = await ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", leeIdentity.email)).unique()
+      if (workspace === null || maya === null || lee === null) throw new Error("Seed records not found")
+      const membership = await ctx.db.query("channelMemberships")
+        .withIndex("by_channel_user", (q) => q.eq("channelId", design.id).eq("userId", lee._id)).unique()
+      if (membership === null) throw new Error("Membership not found")
+      await ctx.db.patch(membership._id, { lastReadAt: 1 })
+      await ctx.db.insert("messages", {
+        workspaceId: workspace._id,
+        channelId: design.id,
+        authorUserId: maya._id,
+        authorDisplayName: maya.displayName,
+        body: "Legacy @Lee mention without an indexed mention row.",
+        createdAt: 100
+      })
       return workspace._id
     })
 
@@ -743,8 +788,10 @@ describe("dogfood channel memberships", () => {
     await t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: design.id })
 
     const disallowedId = await t.run((ctx) => ctx.storage.store(new Blob(["binary"])))
+    const { intentId: disallowedIntentId } = await t.withIdentity(mayaIdentity)
+      .mutation(api.chat.generateAttachmentUploadUrl, {})
     await expect(t.withIdentity(mayaIdentity).mutation(api.chat.registerAttachmentUpload, {
-      storageId: disallowedId, contentType: "application/zip"
+      intentId: disallowedIntentId, storageId: disallowedId, contentType: "application/zip"
     })).resolves.toEqual({
       status: "rejected",
       reason: "Attachments must be a PNG, JPEG, GIF, WebP, PDF, or plain-text file"
@@ -752,13 +799,43 @@ describe("dogfood channel memberships", () => {
     await expect(t.run((ctx) => ctx.db.system.get("_storage", disallowedId))).resolves.toBeNull()
 
     const oversizedId = await t.run((ctx) => ctx.storage.store(new Blob([new Uint8Array(25 * 1024 * 1024 + 1)])))
+    const { intentId: oversizedIntentId } = await t.withIdentity(mayaIdentity)
+      .mutation(api.chat.generateAttachmentUploadUrl, {})
     await expect(t.withIdentity(mayaIdentity).mutation(api.chat.registerAttachmentUpload, {
-      storageId: oversizedId, contentType: "image/png"
+      intentId: oversizedIntentId, storageId: oversizedId, contentType: "image/png"
     })).resolves.toEqual({ status: "rejected", reason: "Attachments can be at most 25 MB" })
     await expect(t.run((ctx) => ctx.db.system.get("_storage", oversizedId))).resolves.toBeNull()
 
+    const abandonedId = await t.run((ctx) => ctx.storage.store(new Blob(["abandoned"])))
+    const { intentId: abandonedIntentId } = await t.withIdentity(mayaIdentity)
+      .mutation(api.chat.generateAttachmentUploadUrl, {})
+    await expect(t.withIdentity(leeIdentity).mutation(api.chat.deleteAttachmentUpload, {
+      intentId: abandonedIntentId,
+      storageId: abandonedId
+    })).rejects.toThrow("Only the uploader")
+    await expect(t.withIdentity(mayaIdentity).mutation(api.chat.deleteAttachmentUpload, {
+      intentId: abandonedIntentId,
+      storageId: abandonedId
+    })).resolves.toEqual({ storageId: abandonedId })
+    await expect(t.run((ctx) => ctx.db.system.get("_storage", abandonedId))).resolves.toBeNull()
+
     const storageId = await t.run((ctx) => ctx.storage.store(new Blob(["private"])))
-    await t.withIdentity(mayaIdentity).mutation(api.chat.registerAttachmentUpload, { storageId, contentType: "text/plain" })
+    const { intentId } = await t.withIdentity(mayaIdentity).mutation(api.chat.generateAttachmentUploadUrl, {})
+    await expect(t.withIdentity(mayaIdentity).mutation(api.chat.registerAttachmentUpload, {
+      intentId,
+      storageId,
+      contentType: "text/plain"
+    })).resolves.toEqual({ status: "registered", storageId })
+    await expect(t.withIdentity(mayaIdentity).mutation(api.chat.registerAttachmentUpload, {
+      intentId,
+      storageId,
+      contentType: "text/plain"
+    })).resolves.toEqual({ status: "registered", storageId })
+    await expect(t.withIdentity(leeIdentity).mutation(api.chat.registerAttachmentUpload, {
+      intentId,
+      storageId,
+      contentType: "text/plain"
+    })).rejects.toThrow("already registered")
     await expect(t.withIdentity(leeIdentity).mutation(api.chat.sendMessage, {
       channelId: design.id, body: "", attachments: [{ storageId, name: "private.txt" }]
     })).rejects.toThrow("Attachment upload is not owned by the current user")
@@ -1110,5 +1187,59 @@ describe("dogfood channel memberships", () => {
         .collect()
     )
     expect(rows).toHaveLength(0)
+  })
+
+  it("batches reactions for new messages while preserving legacy fallback rows", async () => {
+    const t = convexTest(schema, modules)
+    await t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: mayaIdentity.tokenIdentifier,
+      email: mayaIdentity.email,
+      displayName: mayaIdentity.name
+    })
+    await t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: leeIdentity.tokenIdentifier,
+      email: leeIdentity.email,
+      displayName: leeIdentity.name
+    })
+    const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "reaction-batch" })
+    await t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: design.id })
+    const current = await t.withIdentity(mayaIdentity).mutation(api.chat.sendMessage, {
+      channelId: design.id,
+      body: "Current reaction path"
+    })
+    const legacyId = await t.run(async (ctx) => {
+      const workspace = await ctx.db.query("workspaces").withIndex("by_key", (q) => q.eq("key", "aether-dogfood")).unique()
+      const maya = await ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", mayaIdentity.email)).unique()
+      const lee = await ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", leeIdentity.email)).unique()
+      if (workspace === null || maya === null || lee === null) throw new Error("Seed records not found")
+      const legacyId = await ctx.db.insert("messages", {
+        workspaceId: workspace._id,
+        channelId: design.id,
+        authorUserId: maya._id,
+        authorDisplayName: maya.displayName,
+        body: "Legacy reaction path",
+        createdAt: current.createdAt - 1
+      })
+      await ctx.db.insert("messageReactions", {
+        workspaceId: workspace._id,
+        channelId: design.id,
+        messageId: legacyId,
+        userId: lee._id,
+        emoji: "👀",
+        createdAt: 10
+      })
+      return legacyId
+    })
+    await t.withIdentity(leeIdentity).mutation(api.chat.toggleMessageReaction, {
+      channelId: design.id,
+      messageId: current.id,
+      emoji: "👍"
+    })
+
+    const page = await t.withIdentity(leeIdentity).query(api.chat.channelMessages, messagePageArgs(design.id))
+    expect(page.page.find((message) => message.id === current.id)?.reactions)
+      .toEqual([{ emoji: "👍", count: 1, reactedByCurrentUser: true }])
+    expect(page.page.find((message) => message.id === legacyId)?.reactions)
+      .toEqual([{ emoji: "👀", count: 1, reactedByCurrentUser: true }])
   })
 })

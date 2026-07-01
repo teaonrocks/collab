@@ -66,6 +66,7 @@ export default defineSchema({
     body: v.string(),
     parentMessageId: v.optional(v.id("messages")),
     attachments: v.optional(v.array(messageAttachment)),
+    reactionBatchReady: v.optional(v.boolean()),
     createdAt: v.number(),
     editedAt: v.optional(v.number())
   }).index("by_channel_created_at", ["channelId", "createdAt"]).index("by_workspace_created_at", [
@@ -89,12 +90,18 @@ export default defineSchema({
     claimedMessageId: v.optional(v.id("messages"))
   }).index("by_storage_id", ["storageId"]).index("by_uploader", ["uploaderUserId"]),
 
+  attachmentUploadIntents: defineTable({
+    uploaderUserId: v.id("users"),
+    createdAt: v.number()
+  }).index("by_uploader", ["uploaderUserId"]),
+
   messageReactions: defineTable({
     workspaceId: v.id("workspaces"),
     channelId: v.id("channels"),
     messageId: v.id("messages"),
     userId: v.id("users"),
     emoji: v.string(),
+    messageCreatedAt: v.optional(v.number()),
     createdAt: v.number()
   }).index("by_message", ["messageId"]).index("by_message_user_emoji", [
     "messageId",
@@ -103,6 +110,9 @@ export default defineSchema({
   ]).index("by_channel_message", [
     "channelId",
     "messageId"
+  ]).index("by_channel_and_message_created_at", [
+    "channelId",
+    "messageCreatedAt"
   ]),
 
   dogfoodAllowlistEntries: defineTable({

@@ -231,6 +231,13 @@ export function WorkspaceChat(props: {
   const [replyParent, setReplyParent] = useState<ChannelMessage | null>(null)
   const [pendingAttachments, setPendingAttachments] = useState<ReadonlyArray<ChatMessageAttachment>>([])
   const [uploadingAttachment, setUploadingAttachment] = useState(false)
+  const composerScopeRef = useRef({ channelId: model.channel.id, generation: 0 })
+  if (composerScopeRef.current.channelId !== model.channel.id) {
+    composerScopeRef.current = {
+      channelId: model.channel.id,
+      generation: composerScopeRef.current.generation + 1
+    }
+  }
   const pendingAttachmentsRef = useRef(pendingAttachments)
   pendingAttachmentsRef.current = pendingAttachments
   const discardMessageAttachmentRef = useRef(discardMessageAttachment)
@@ -343,6 +350,7 @@ export function WorkspaceChat(props: {
     if (channelMessagesLoading || uploadingAttachment) return
     const body = messageDraft.trim()
     if (body.length === 0 && pendingAttachments.length === 0) return
+    const composerGeneration = composerScopeRef.current.generation
     setOperationError(null)
     void createChannelMessage({
       channelId: model.channel.id,
@@ -351,11 +359,13 @@ export function WorkspaceChat(props: {
       ...(pendingAttachments.length === 0 ? {} : { attachments: pendingAttachments })
     })
       .then(() => {
+        if (composerScopeRef.current.generation !== composerGeneration) return
         setMessageDraft("")
         setReplyParent(null)
         setPendingAttachments([])
       })
       .catch((cause) => {
+        if (composerScopeRef.current.generation !== composerGeneration) return
         if (operationErrorMessage !== undefined) setOperationError(operationErrorMessage("send", cause))
       })
   }
@@ -377,21 +387,29 @@ export function WorkspaceChat(props: {
       setOperationError("Attachments must be PNG, JPEG, GIF, WebP, PDF, or plain text and no larger than 25 MB.")
       return
     }
+    const composerGeneration = composerScopeRef.current.generation
     setUploadingAttachment(true)
     void Promise.allSettled(selectedFiles.map((file) => uploadMessageAttachment(file)))
       .then(async (results) => {
         const attachments = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : [])
+        if (composerScopeRef.current.generation !== composerGeneration) {
+          await Promise.allSettled(attachments.map((attachment) => discardMessageAttachmentRef.current?.(attachment)))
+          return
+        }
         if (results.some((result) => result.status === "rejected")) {
-          await Promise.allSettled(attachments.map((attachment) => discardMessageAttachment?.(attachment)))
+          await Promise.allSettled(attachments.map((attachment) => discardMessageAttachmentRef.current?.(attachment)))
           throw new Error("One or more attachment uploads failed")
         }
         setPendingAttachments((existing) => [...existing, ...attachments].slice(0, MAX_COMPOSER_ATTACHMENTS))
         setOperationError(null)
       })
       .catch((cause: unknown) => {
+        if (composerScopeRef.current.generation !== composerGeneration) return
         setOperationError(operationErrorMessage?.("attach", cause) ?? "Could not upload attachment. Check your connection and try again.")
       })
-      .finally(() => setUploadingAttachment(false))
+      .finally(() => {
+        if (composerScopeRef.current.generation === composerGeneration) setUploadingAttachment(false)
+      })
   }
 
   const messageCanDelete = (message: ChannelMessage): boolean =>

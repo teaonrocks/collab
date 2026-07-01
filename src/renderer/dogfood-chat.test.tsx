@@ -164,6 +164,14 @@ vi.mock("./App", () => ({
         <button type="button" onClick={() => props.createChannel?.({ name: "design" })}>
           Create design channel
         </button>
+        <button
+          type="button"
+          onClick={() => void props.uploadMessageAttachment?.(
+            new File(["file"], "brief.txt", { type: "text/plain" })
+          ).catch(() => {})}
+        >
+          Upload mock attachment
+        </button>
         {firstMessage !== undefined && props.canEditMessage?.(firstMessage)
           ? (
             <button
@@ -223,6 +231,7 @@ vi.mock("./App", () => ({
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
+  vi.unstubAllGlobals()
 })
 
 beforeEach(() => {
@@ -245,8 +254,12 @@ beforeEach(() => {
   })
   mocks.ensureChannelMember.mockResolvedValue({})
   mocks.markChannelRead.mockResolvedValue({})
-  mocks.generateAttachmentUploadUrl.mockResolvedValue("https://upload.example/convex")
+  mocks.generateAttachmentUploadUrl.mockResolvedValue({
+    uploadUrl: "https://upload.example/convex",
+    intentId: "intent-1"
+  })
   mocks.registerAttachmentUpload.mockResolvedValue({ status: "registered", storageId: "storage-1" })
+  mocks.deleteAttachmentUpload.mockResolvedValue({})
   mocks.mutationCallCount = 0
   mocks.workspace = undefined
   mocks.channels = undefined
@@ -903,6 +916,52 @@ describe("ConvexDogfoodApp", () => {
         emoji: "👍"
       })
     )
+  })
+
+  it("retries attachment registration after the upload succeeds", async () => {
+    const { ConvexDogfoodApp } = await import("./dogfood-chat")
+    mocks.auth.user = { id: "user-1" }
+    mocks.convexAuth.isAuthenticated = true
+    mocks.workspace = workspace
+    mocks.channels = channels
+    mocks.messages = messages
+    mocks.registerAttachmentUpload
+      .mockRejectedValueOnce(new Error("temporary registration failure"))
+      .mockRejectedValueOnce(new Error("temporary registration failure"))
+      .mockResolvedValueOnce({ status: "registered", storageId: "storage-1" })
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ storageId: "storage-1" })
+    }))
+
+    render(<ConvexDogfoodApp />)
+    fireEvent.click(await screen.findByRole("button", { name: "Upload mock attachment" }))
+
+    await waitFor(() => expect(mocks.registerAttachmentUpload).toHaveBeenCalledTimes(3))
+    expect(mocks.deleteAttachmentUpload).not.toHaveBeenCalled()
+  })
+
+  it("cleans up a direct upload after terminal registration failure", async () => {
+    const { ConvexDogfoodApp } = await import("./dogfood-chat")
+    mocks.auth.user = { id: "user-1" }
+    mocks.convexAuth.isAuthenticated = true
+    mocks.workspace = workspace
+    mocks.channels = channels
+    mocks.messages = messages
+    mocks.registerAttachmentUpload.mockRejectedValue(new Error("registration unavailable"))
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ storageId: "storage-1" })
+    }))
+
+    render(<ConvexDogfoodApp />)
+    fireEvent.click(await screen.findByRole("button", { name: "Upload mock attachment" }))
+
+    await waitFor(() => expect(mocks.deleteAttachmentUpload).toHaveBeenCalledWith({
+      intentId: "intent-1",
+      storageId: "storage-1"
+    }))
+    expect(mocks.registerAttachmentUpload).toHaveBeenCalledTimes(3)
   })
 
   it("passes compact dogfood mutation errors into the reused chat surface", async () => {

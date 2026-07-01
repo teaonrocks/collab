@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { Atom } from "@effect-atom/atom"
 import { RegistryProvider } from "@effect-atom/atom-react"
-import { cleanup, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { Effect, Layer, Stream } from "effect"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
@@ -884,6 +884,54 @@ describe("App", () => {
     )
   })
 
+  it("does not clear the next channel draft when a pending send completes", async () => {
+    let completeSend!: () => void
+    const pendingSend = new Promise<void>((resolve) => {
+      completeSend = resolve
+    })
+    const secondChannel = new Channel({
+      id: secondChannelId,
+      workspaceId,
+      name: "design",
+      visibility: "public",
+      createdBy: userId,
+      createdAt: 3
+    })
+    const props = {
+      createChannelMessage: () => pendingSend,
+      deleteChannelMessage: () => Promise.resolve()
+    }
+    const base = makeChatModel([])
+    const { rerender } = render(
+      <WorkspaceChat {...props} model={{ ...base, channels: [base.channel, secondChannel] }} />
+    )
+
+    const firstInput = await screen.findByPlaceholderText("Message origination")
+    fireEvent.change(firstInput, { target: { value: "Sent from origination." } })
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }))
+
+    rerender(
+      <WorkspaceChat
+        {...props}
+        model={{
+          ...base,
+          channel: secondChannel,
+          channels: [base.channel, secondChannel],
+          channelMessages: []
+        }}
+      />
+    )
+    const nextInput = await screen.findByPlaceholderText("Message design")
+    fireEvent.change(nextInput, { target: { value: "Keep this design draft." } })
+
+    await act(async () => {
+      completeSend()
+      await pendingSend
+    })
+
+    await waitFor(() => expect((nextInput as HTMLTextAreaElement).value).toBe("Keep this design draft."))
+  })
+
   it("sends a reply with the selected parent and can cancel reply mode without clearing the draft", async () => {
     const calls = renderApp(makeSnapshot())
     const menu = await openMessageMenu("Maya Patel")
@@ -1326,6 +1374,66 @@ describe("App", () => {
         attachments: [expect.objectContaining({ storageId: "storage-1", name: "brief.png" })]
       })])
     )
+  })
+
+  it("discards an upload that completes after switching channels", async () => {
+    let completeUpload!: (attachment: ChannelMessageAttachment) => void
+    const pendingUpload = new Promise<ChannelMessageAttachment>((resolve) => {
+      completeUpload = resolve
+    })
+    const upload = vi.fn(() => pendingUpload)
+    const discard = vi.fn(() => Promise.resolve())
+    const secondChannel = new Channel({
+      id: secondChannelId,
+      workspaceId,
+      name: "design",
+      visibility: "public",
+      createdBy: userId,
+      createdAt: 3
+    })
+    const base = makeChatModel([])
+    const props = {
+      createChannelMessage: () => Promise.resolve(),
+      uploadMessageAttachment: upload,
+      discardMessageAttachment: discard,
+      deleteChannelMessage: () => Promise.resolve()
+    }
+    const { container, rerender } = render(
+      <WorkspaceChat {...props} model={{ ...base, channels: [base.channel, secondChannel] }} />
+    )
+    const fileInput = container.querySelector("input[type='file']") as HTMLInputElement
+    fireEvent.change(fileInput, {
+      target: { files: [new File(["image"], "brief.png", { type: "image/png" })] }
+    })
+
+    rerender(
+      <WorkspaceChat
+        {...props}
+        model={{
+          ...base,
+          channel: secondChannel,
+          channels: [base.channel, secondChannel],
+          channelMessages: []
+        }}
+      />
+    )
+    const nextInput = await screen.findByPlaceholderText("Message design")
+    fireEvent.change(nextInput, { target: { value: "Keep this design draft." } })
+    const uploaded = new ChannelMessageAttachment({
+      id: "storage-1",
+      storageId: "storage-1",
+      name: "brief.png",
+      contentType: "image/png",
+      size: 5,
+      kind: "image",
+      url: null
+    })
+
+    completeUpload(uploaded)
+
+    await waitFor(() => expect(discard).toHaveBeenCalledWith(uploaded))
+    expect(screen.queryByText("brief.png")).toBeNull()
+    expect((nextInput as HTMLTextAreaElement).value).toBe("Keep this design draft.")
   })
 
   it("rejects invalid files before upload and cleans successful uploads after a partial batch failure", async () => {
