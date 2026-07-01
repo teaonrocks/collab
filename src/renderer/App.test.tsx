@@ -156,7 +156,7 @@ describe("App", () => {
     expect(within(members).getByText("Maya Patel").className).toContain("text-foreground")
   })
 
-  it("keeps direct messages in the global rail instead of channel navigation", async () => {
+  it("presents direct messages as noninteractive placeholders in the global rail", async () => {
     renderApp(makeSnapshot())
 
     const globalNavigation = await screen.findByLabelText("Global navigation")
@@ -164,7 +164,8 @@ describe("App", () => {
     const directMessages = within(globalNavigation).getByRole("navigation", { name: "Direct messages" })
 
     expect(directMessages).toBeTruthy()
-    expect(within(directMessages).getByRole("button", { name: "Maya Patel" })).toBeTruthy()
+    expect(within(directMessages).queryByRole("button", { name: "Maya Patel" })).toBeNull()
+    expect(within(directMessages).getByLabelText("Maya Patel").getAttribute("title")).toContain("not available yet")
     expect(within(directMessages).getByRole("tooltip", { name: "Maya Patel" })).toBeTruthy()
     expect(within(workspaceNavigation).queryByRole("navigation", { name: "Direct messages" })).toBeNull()
     expect(within(workspaceNavigation).queryByText("Maya Patel")).toBeNull()
@@ -193,7 +194,7 @@ describe("App", () => {
 
     const globalNavigation = await screen.findByLabelText("Global navigation")
     const directMessages = within(globalNavigation).getByRole("navigation", { name: "Direct messages" })
-    expect(await within(directMessages).findByRole("button", { name: "Maya Patel" })).toBeTruthy()
+    expect(await within(directMessages).findByLabelText("Maya Patel")).toBeTruthy()
 
     rerender(
       <WorkspaceChat
@@ -208,7 +209,8 @@ describe("App", () => {
       />
     )
 
-    expect(within(directMessages).getByRole("button", { name: "Maya Patel" })).toBeTruthy()
+    expect(within(directMessages).queryByRole("button", { name: "Maya Patel" })).toBeNull()
+    expect(within(directMessages).getByLabelText("Maya Patel")).toBeTruthy()
     expect(within(directMessages).getByRole("tooltip", { name: "Maya Patel" })).toBeTruthy()
     expect(screen.getByLabelText("Channel members").querySelector("[aria-busy='true']")).toBeTruthy()
     expect(document.querySelector(".chatTimeline [class*='skeletonPulse']")).toBeTruthy()
@@ -295,35 +297,20 @@ describe("App", () => {
     await waitFor(() => expect(calls).toEqual([{ name: "product-team", visibility: "public" }]))
   })
 
-  it("creates a private channel when the private switch is enabled", async () => {
-    const calls: Array<{ readonly name: string; readonly visibility?: "public" | "private" }> = []
-
+  it("does not offer private channel creation", async () => {
     render(
       <WorkspaceChat
         model={makeChatModel()}
         createChannelMessage={() => Promise.resolve()}
         deleteChannelMessage={() => Promise.resolve()}
-        createChannel={(input) => {
-          calls.push(input)
-          return Promise.resolve(new Channel({
-            id: secondChannelId,
-            workspaceId,
-            name: input.name,
-            visibility: input.visibility ?? "public",
-            createdBy: userId,
-            createdAt: 4
-          }))
-        }}
+        createChannel={() => Promise.reject(new Error("not submitted"))}
       />
     )
 
     fireEvent.click(await screen.findByRole("button", { name: "Add channel" }))
     const form = await screen.findByRole("form", { name: "Create channel" })
-    fireEvent.change(within(form).getByLabelText("Channel name"), { target: { value: "ops" } })
-    fireEvent.click(within(form).getByRole("switch", { name: "Private channel" }))
-    fireEvent.submit(form)
-
-    await waitFor(() => expect(calls).toEqual([{ name: "ops", visibility: "private" }]))
+    expect(within(form).queryByRole("switch", { name: "Private channel" })).toBeNull()
+    expect(within(form).queryByText(/invited members/i)).toBeNull()
   })
 
   it("keeps the channel creation dialog state scoped to an open attempt", async () => {
@@ -347,7 +334,6 @@ describe("App", () => {
     const form = await screen.findByRole("form", { name: "Create channel" })
     const channelName = within(form).getByLabelText("Channel name") as HTMLInputElement
     const createButton = within(form).getByRole("button", { name: "Create" }) as HTMLButtonElement
-    const privateSwitch = within(form).getByRole("switch", { name: "Private channel" }) as HTMLButtonElement
     expect(createButton.disabled).toBe(true)
 
     fireEvent.change(channelName, { target: { value: "   " } })
@@ -355,8 +341,6 @@ describe("App", () => {
 
     fireEvent.change(channelName, { target: { value: "ops" } })
     expect(createButton.disabled).toBe(false)
-    fireEvent.click(privateSwitch)
-    expect(privateSwitch.getAttribute("aria-checked")).toBe("true")
     fireEvent.click(within(form).getByRole("button", { name: "Cancel" }))
 
     expect(screen.queryByRole("dialog", { name: "Create Channel" })).toBeNull()
@@ -364,7 +348,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add channel" }))
     const nextForm = await screen.findByRole("form", { name: "Create channel" })
     expect((within(nextForm).getByLabelText("Channel name") as HTMLInputElement).value).toBe("")
-    expect((within(nextForm).getByRole("switch", { name: "Private channel" }) as HTMLButtonElement).getAttribute("aria-checked")).toBe("false")
+    expect(within(nextForm).queryByRole("switch", { name: "Private channel" })).toBeNull()
     expect((within(nextForm).getByRole("button", { name: "Create" }) as HTMLButtonElement).disabled).toBe(true)
   })
 

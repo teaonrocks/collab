@@ -195,15 +195,10 @@ describe("dogfood channel memberships", () => {
     await expect(t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "product team" }))
       .rejects.toThrow("Channel already exists")
 
-    const privateChannel = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, {
+    await expect(t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, {
       name: "leadership",
       visibility: "private"
-    })
-    expect(privateChannel).toMatchObject({
-      key: "leadership",
-      name: "leadership",
-      visibility: "private"
-    })
+    })).rejects.toThrow("Private channel creation is unavailable until member invitations are supported")
   })
 
   it("lets allowlisted users idempotently join created shared channels before reading messages", async () => {
@@ -536,9 +531,29 @@ describe("dogfood channel memberships", () => {
     })
 
     const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design" })
-    const leadership = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, {
-      name: "leadership",
-      visibility: "private"
+    const leadership = await t.run(async (ctx) => {
+      const workspace = await ctx.db.query("workspaces").first()
+      const maya = await ctx.db
+        .query("users")
+        .withIndex("by_token_identifier", (q) => q.eq("tokenIdentifier", mayaIdentity.tokenIdentifier))
+        .unique()
+      if (workspace === null || maya === null) throw new Error("Expected seeded workspace and user")
+      const now = Date.now()
+      const channelId = await ctx.db.insert("channels", {
+        workspaceId: workspace._id,
+        key: "leadership",
+        name: "leadership",
+        visibility: "private",
+        createdAt: now
+      })
+      await ctx.db.insert("channelMemberships", {
+        channelId,
+        userId: maya._id,
+        role: "member",
+        createdAt: now,
+        lastReadAt: now
+      })
+      return { id: channelId }
     })
 
     await expect(t.withIdentity(mayaIdentity).query(api.chat.channelMembers, { channelId: design.id }))

@@ -53,7 +53,6 @@ import {
   DialogFooter,
   DialogTitle,
   Input,
-  Switch,
   Textarea
 } from "./ui"
 
@@ -570,15 +569,15 @@ function WorkspaceRail(props: {
       <div className="railDivider h-px w-8 shrink-0 bg-border-strong" role="separator" aria-label="Direct messages" />
       <nav className="railGroup flex w-full flex-col items-center gap-2" aria-label="Direct messages">
         {members.map((member) => (
-          <button
+          <div
             key={member.id}
-            type="button"
-            className={classNames(railItemClassName, "dmRailItem rounded-full hover:bg-surface-canvas hover:outline-2 hover:outline-border focus-visible:bg-surface-canvas focus-visible:outline-2 focus-visible:outline-border")}
+            className={classNames(railItemClassName, "dmRailItem cursor-default rounded-full")}
             aria-label={member.displayName}
+            title={`${member.displayName} — direct messages are not available yet`}
           >
             {initials(member.displayName)}
             <span className={railTooltipClassName} role="tooltip">{member.displayName}</span>
-          </button>
+          </div>
         ))}
       </nav>
       <div className="railSpacer flex-1" />
@@ -665,7 +664,6 @@ function ChannelSidebar(props: {
   } = props
   const [creating, setCreating] = useState(false)
   const [draft, setDraft] = useState("")
-  const [privateChannel, setPrivateChannel] = useState(false)
   const [saving, setSaving] = useState(false)
   const showAgentParkedPanel = import.meta.env.VITE_AETHER_SHOW_AGENT_UI === "true"
   const canCreate = createChannel !== undefined
@@ -673,7 +671,6 @@ function ChannelSidebar(props: {
     if (saving) return
     setCreating(false)
     setDraft("")
-    setPrivateChannel(false)
     onChannelOperationError(null)
   }
   const submitChannel = (event: FormEvent<HTMLFormElement>) => {
@@ -688,11 +685,10 @@ function ChannelSidebar(props: {
     onChannelOperationError(null)
     void createChannel({
       name: validation.name,
-      visibility: privateChannel ? "private" : "public"
+      visibility: "public"
     })
       .then(() => {
         setDraft("")
-        setPrivateChannel(false)
         setCreating(false)
       })
       .catch((cause: unknown) => onChannelOperationError(channelCreateErrorMessage(cause)))
@@ -787,14 +783,12 @@ function ChannelSidebar(props: {
         ? (
           <CreateChannelDialog
             draft={draft}
-            privateChannel={privateChannel}
             saving={saving}
             error={channelOperationError}
             onDraftChange={(nextDraft) => {
               setDraft(nextDraft)
               if (channelOperationError !== null) onChannelOperationError(null)
             }}
-            onPrivateChannelChange={setPrivateChannel}
             onSubmit={submitChannel}
             onCancel={closeCreateDialog}
           />
@@ -806,15 +800,13 @@ function ChannelSidebar(props: {
 
 function CreateChannelDialog(props: {
   readonly draft: string
-  readonly privateChannel: boolean
   readonly saving: boolean
   readonly error: string | null
   readonly onDraftChange: (draft: string) => void
-  readonly onPrivateChannelChange: (privateChannel: boolean) => void
   readonly onSubmit: (event: FormEvent<HTMLFormElement>) => void
   readonly onCancel: () => void
 }) {
-  const { draft, privateChannel, saving, error, onDraftChange, onPrivateChannelChange, onSubmit, onCancel } = props
+  const { draft, saving, error, onDraftChange, onSubmit, onCancel } = props
 
   const handleOpenChange = (open: boolean) => {
     if (!open) onCancel()
@@ -843,23 +835,6 @@ function CreateChannelDialog(props: {
               onDraftChange(event.target.value)
             }}
           />
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p id="create-channel-private-label" className="m-0 text-[13px] font-bold text-foreground">
-                Private channel
-              </p>
-              <p className="m-0 mt-0.5 text-xs leading-[1.35] text-foreground-subtle">
-                Only invited members can see this channel.
-              </p>
-            </div>
-            <Switch
-              id="create-channel-private"
-              checked={privateChannel}
-              disabled={saving}
-              aria-labelledby="create-channel-private-label"
-              onCheckedChange={onPrivateChannelChange}
-            />
-          </div>
           <p
             id="create-channel-error"
             className={classNames(

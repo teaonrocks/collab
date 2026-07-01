@@ -21,7 +21,9 @@ For failure capture and recovery, see [`docs/dogfood-debugging.md`](dogfood-debu
 - An allowlisted account joins the shared `#general` channel.
 - Public channel creation is visible to the other account; selecting it joins the viewer before
   messages load.
-- Private channels remain hidden from users who are not members.
+- Channel creation offers public channels only; private channels remain deferred until invitation
+  and membership management are available.
+- Direct-message avatars are noninteractive placeholders while direct-message navigation is deferred.
 - The first empty channel state invites the user to start the conversation.
 - Messages sent from one account appear in realtime for the other account.
 - Inactive channels show unread state, and a matching `@name` mention takes priority over unread.

@@ -872,6 +872,9 @@ export const createChannel = mutation({
     if (workspace === null) throw new Error("Workspace not found")
 
     await requireWorkspaceMember(ctx, { workspaceId: workspace._id, userId: user._id })
+    if (args.visibility === "private") {
+      throw new Error("Private channel creation is unavailable until member invitations are supported")
+    }
 
     const name = validateChannelName(args.name)
 
@@ -895,7 +898,7 @@ export const createChannel = mutation({
       workspaceId: workspace._id,
       key,
       name,
-      visibility: args.visibility ?? "public",
+      visibility: "public",
       createdAt: now
     })
 
