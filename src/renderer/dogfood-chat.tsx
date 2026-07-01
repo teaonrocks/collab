@@ -129,6 +129,8 @@ function ConvexDogfoodChat() {
   const ensureChannelMember = useMutation(api.chat.ensureChannelMember)
   const markChannelRead = useMutation(api.chat.markChannelRead)
   const generateAttachmentUploadUrl = useMutation(api.chat.generateAttachmentUploadUrl)
+  const registerAttachmentUpload = useMutation(api.chat.registerAttachmentUpload)
+  const deleteAttachmentUpload = useMutation(api.chat.deleteAttachmentUpload)
   const [ensuredUserId, setEnsuredUserId] = useState<string | null>(null)
   const [selectedChannelId, setSelectedChannelId] = useState<Id<"channels"> | null>(null)
   const [joinedChannelIds, setJoinedChannelIds] = useState<ReadonlySet<Id<"channels">>>(() => new Set())
@@ -273,12 +275,13 @@ function ConvexDogfoodChat() {
         },
         selectChannel: (channelId) => setSelectedChannelId(channelId),
         sendMessage,
-        uploadMessageAttachment: (file) => uploadDogfoodAttachment(generateAttachmentUploadUrl, file),
+        uploadMessageAttachment: (file) => uploadDogfoodAttachment(generateAttachmentUploadUrl, registerAttachmentUpload, file),
+        discardMessageAttachment: (attachment) => deleteAttachmentUpload({ storageId: toConvexStorageId(attachment.storageId) }),
         editMessage,
         deleteMessage,
         toggleMessageReaction
       }),
-    [activeChannelId, channelIndicators, channelList, createChannel, deleteMessage, editMessage, generateAttachmentUploadUrl, members, messagePagination, messages, sendMessage, toggleMessageReaction, workspace]
+    [activeChannelId, channelIndicators, channelList, createChannel, deleteAttachmentUpload, deleteMessage, editMessage, generateAttachmentUploadUrl, members, messagePagination, messages, registerAttachmentUpload, sendMessage, toggleMessageReaction, workspace]
   )
 
   if (auth.isLoading) {
@@ -461,6 +464,7 @@ export const dogfoodChatToChatData = (input: {
     }>
   }) => Promise<unknown>
   readonly uploadMessageAttachment?: (file: File) => Promise<ChannelMessageAttachment>
+  readonly discardMessageAttachment?: (attachment: ChannelMessageAttachment) => Promise<unknown>
   readonly editMessage: (input: {
     readonly channelId: Id<"channels">
     readonly messageId: Id<"messages">
@@ -559,6 +563,7 @@ export const dogfoodChatToChatData = (input: {
       }))
     }),
     uploadMessageAttachment: input.uploadMessageAttachment,
+    discardMessageAttachment: input.discardMessageAttachment,
     editChannelMessage: ({ channelId, messageId, body }) =>
       input.editMessage({ channelId: toConvexChannelId(channelId), messageId: toConvexMessageId(messageId), body }),
     deleteChannelMessage: ({ channelId, messageId }) =>
@@ -628,6 +633,7 @@ const toConvexStorageId = (id: string): Id<"_storage"> => String(id) as Id<"_sto
 
 const uploadDogfoodAttachment = async (
   generateAttachmentUploadUrl: (input: Record<string, never>) => Promise<string>,
+  registerAttachmentUpload: (input: { readonly storageId: Id<"_storage">; readonly contentType: string }) => Promise<unknown>,
   file: File
 ): Promise<ChannelMessageAttachment> => {
   const uploadUrl = await generateAttachmentUploadUrl({})
@@ -641,6 +647,7 @@ const uploadDogfoodAttachment = async (
 
   const body = await response.json() as { readonly storageId?: string }
   if (body.storageId === undefined || body.storageId.length === 0) throw new Error("Attachment upload did not return a storage id")
+  await registerAttachmentUpload({ storageId: toConvexStorageId(body.storageId), contentType })
 
   return new ChannelMessageAttachment({
     id: body.storageId,

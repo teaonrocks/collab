@@ -16,6 +16,15 @@ const MAX_UNREAD_MESSAGES_PER_CHANNEL = 50
 const MAX_MESSAGE_ATTACHMENTS = 4
 const MAX_ATTACHMENT_NAME_LENGTH = 180
 const MAX_ATTACHMENT_SIZE_BYTES = 25 * 1024 * 1024
+const ATTACHMENT_UPLOAD_TTL_MS = 24 * 60 * 60 * 1000
+const ALLOWED_ATTACHMENT_CONTENT_TYPES = new Set([
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "application/pdf",
+  "text/plain"
+])
 const MAX_ALLOWLIST_REASON_LENGTH = 240
 const MESSAGE_REACTION_EMOJIS = ["👍", "🎉", "👀"] as const
 const MESSAGE_PARENT_PREVIEW_MAX_LENGTH = 120
@@ -80,6 +89,17 @@ const attachmentName = (name: string): string => {
 
 const attachmentKind = (contentType: string): "file" | "image" =>
   contentType.toLowerCase().startsWith("image/") ? "image" : "file"
+
+const validateAttachmentMetadata = (metadata: { readonly size: number }, declaredContentType?: string) => {
+  if (metadata.size > MAX_ATTACHMENT_SIZE_BYTES) {
+    throw new Error("Attachments can be at most 25 MB")
+  }
+  const contentType = declaredContentType?.toLowerCase()
+  if (contentType === undefined || !ALLOWED_ATTACHMENT_CONTENT_TYPES.has(contentType)) {
+    throw new Error("Attachments must be a PNG, JPEG, GIF, WebP, PDF, or plain-text file")
+  }
+  return contentType
+}
 
 const allowlistReason = (reason: string | undefined): string | undefined => {
   const normalized = reason?.trim().replace(/\s+/g, " ").slice(0, MAX_ALLOWLIST_REASON_LENGTH)
@@ -483,6 +503,7 @@ const requireChannelMember = async (
 
 const validateMessageAttachments = async (
   ctx: MutationCtx,
+  userId: Id<"users">,
   attachments: ReadonlyArray<{ readonly storageId: Id<"_storage">; readonly name: string }> | undefined
 ) => {
   if (attachments === undefined) return []
@@ -499,12 +520,19 @@ const validateMessageAttachments = async (
   }> = []
 
   for (const attachment of attachments) {
+    if (validated.some((item) => item.storageId === attachment.storageId)) {
+      throw new Error("The same upload cannot be attached more than once")
+    }
+    const upload = await ctx.db
+      .query("attachmentUploads")
+      .withIndex("by_storage_id", (q) => q.eq("storageId", attachment.storageId))
+      .unique()
+    if (upload === null || upload.uploaderUserId !== userId || upload.claimedMessageId !== undefined) {
+      throw new Error("Attachment upload is not owned by the current user or has already been claimed")
+    }
     const metadata = await ctx.db.system.get("_storage", attachment.storageId)
     if (metadata === null) throw new Error("Attachment upload was not found")
-    if (metadata.size > MAX_ATTACHMENT_SIZE_BYTES) {
-      throw new Error(`Attachments can be at most ${MAX_ATTACHMENT_SIZE_BYTES} bytes`)
-    }
-    const contentType = metadata.contentType ?? "application/octet-stream"
+    const contentType = validateAttachmentMetadata(metadata, upload.contentType)
     validated.push({
       storageId: attachment.storageId,
       name: attachmentName(attachment.name),
@@ -523,6 +551,56 @@ export const generateAttachmentUploadUrl = mutation({
     await requireAllowedCurrentUser(ctx)
     return ctx.storage.generateUploadUrl()
   })
+})
+
+export const registerAttachmentUpload = mutation({
+  args: { storageId: v.id("_storage"), contentType: v.string() },
+  handler: (ctx, args) => withDogfoodDiagnostics("registerAttachmentUpload", { storageId: args.storageId }, async () => {
+    const user = await requireAllowedCurrentUser(ctx)
+    const metadata = await ctx.db.system.get("_storage", args.storageId)
+    if (metadata === null) throw new Error("Attachment upload was not found")
+    const contentType = validateAttachmentMetadata(metadata, args.contentType)
+    const existing = await ctx.db.query("attachmentUploads")
+      .withIndex("by_storage_id", (q) => q.eq("storageId", args.storageId)).unique()
+    if (existing !== null) throw new Error("Attachment upload is already registered")
+    await ctx.db.insert("attachmentUploads", {
+      storageId: args.storageId,
+      uploaderUserId: user._id,
+      contentType,
+      createdAt: Date.now()
+    })
+    await ctx.scheduler.runAfter(ATTACHMENT_UPLOAD_TTL_MS, internal.chat.cleanupAbandonedAttachmentUpload, {
+      storageId: args.storageId
+    })
+    return { storageId: args.storageId }
+  })
+})
+
+export const deleteAttachmentUpload = mutation({
+  args: { storageId: v.id("_storage") },
+  handler: (ctx, args) => withDogfoodDiagnostics("deleteAttachmentUpload", { storageId: args.storageId }, async () => {
+    const user = await requireAllowedCurrentUser(ctx)
+    const upload = await ctx.db.query("attachmentUploads")
+      .withIndex("by_storage_id", (q) => q.eq("storageId", args.storageId)).unique()
+    if (upload === null) return { storageId: args.storageId }
+    if (upload.uploaderUserId !== user._id) throw new Error("Only the uploader can delete this upload")
+    if (upload.claimedMessageId !== undefined) throw new Error("Claimed attachments cannot be deleted as abandoned uploads")
+    await ctx.storage.delete(args.storageId)
+    await ctx.db.delete(upload._id)
+    return { storageId: args.storageId }
+  })
+})
+
+export const cleanupAbandonedAttachmentUpload = internalMutation({
+  args: { storageId: v.id("_storage") },
+  handler: async (ctx, args) => {
+    const upload = await ctx.db.query("attachmentUploads")
+      .withIndex("by_storage_id", (q) => q.eq("storageId", args.storageId)).unique()
+    if (upload === null || upload.claimedMessageId !== undefined) return null
+    await ctx.storage.delete(args.storageId)
+    await ctx.db.delete(upload._id)
+    return null
+  }
 })
 
 export const updateDogfoodAllowlist = mutation({
@@ -893,11 +971,10 @@ export const sendMessage = mutation({
     bodyLength: args.body.trim().length,
     attachmentCount: args.attachments?.length ?? 0
   }, async () => {
-    const body = validateMessageBody(args.body, { allowEmpty: true })
-    const attachments = await validateMessageAttachments(ctx, args.attachments)
-    if (body.length === 0 && attachments.length === 0) throw new Error("Message body or attachment is required")
-
     const user = await requireAllowedCurrentUser(ctx)
+    const body = validateMessageBody(args.body, { allowEmpty: true })
+    const attachments = await validateMessageAttachments(ctx, user._id, args.attachments)
+    if (body.length === 0 && attachments.length === 0) throw new Error("Message body or attachment is required")
 
     const channel = await requireChannelMember(ctx, { channelId: args.channelId, userId: user._id })
     if (args.parentMessageId !== undefined) {
@@ -921,6 +998,11 @@ export const sendMessage = mutation({
       ...(attachments.length === 0 ? {} : { attachments }),
       createdAt: Date.now()
     })
+    for (const attachment of attachments) {
+      const upload = await ctx.db.query("attachmentUploads")
+        .withIndex("by_storage_id", (q) => q.eq("storageId", attachment.storageId)).unique()
+      if (upload !== null) await ctx.db.patch(upload._id, { claimedMessageId: messageId })
+    }
 
     const message = await ctx.db.get(messageId)
     if (message === null) throw new Error("Message not found after insert")
@@ -977,6 +1059,12 @@ export const deleteMessage = mutation({
       .collect()
     for (const reaction of reactions) {
       await ctx.db.delete(reaction._id)
+    }
+    for (const attachment of message.attachments ?? []) {
+      await ctx.storage.delete(attachment.storageId)
+      const upload = await ctx.db.query("attachmentUploads")
+        .withIndex("by_storage_id", (q) => q.eq("storageId", attachment.storageId)).unique()
+      if (upload !== null) await ctx.db.delete(upload._id)
     }
     await ctx.db.delete(args.messageId)
     return { messageId: args.messageId }

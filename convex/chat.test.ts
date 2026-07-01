@@ -662,6 +662,11 @@ describe("dogfood channel memberships", () => {
 
     const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design" })
     const storageId = await t.run((ctx) => ctx.storage.store(new Blob(["image"], { type: "image/png" })))
+    await t.run(async (ctx) => {
+      const user = await ctx.db.query("users").withIndex("by_token_identifier", (q) => q.eq("tokenIdentifier", mayaIdentity.tokenIdentifier)).unique()
+      if (user === null) throw new Error("test user missing")
+      await ctx.db.insert("attachmentUploads", { storageId, uploaderUserId: user._id, contentType: "image/png", createdAt: Date.now() })
+    })
     const message = await t.withIdentity(mayaIdentity).mutation(api.chat.sendMessage, {
       channelId: design.id,
       body: "",
@@ -673,9 +678,9 @@ describe("dogfood channel memberships", () => {
       attachments: [expect.objectContaining({
         storageId,
         name: "brief.png",
-        contentType: "application/octet-stream",
+        contentType: "image/png",
         size: 5,
-        kind: "file"
+        kind: "image"
       })]
     })
     expect(message.attachments[0]?.url).toEqual(expect.any(String))
@@ -687,6 +692,47 @@ describe("dogfood channel memberships", () => {
           attachments: [expect.objectContaining({ storageId, url: expect.any(String) })]
         })
       ])
+  })
+
+  it("enforces attachment policy and ownership, then deletes claimed storage with its message", async () => {
+    const t = convexTest(schema, modules)
+    await t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: mayaIdentity.tokenIdentifier, email: mayaIdentity.email, displayName: mayaIdentity.name
+    })
+    await t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: leeIdentity.tokenIdentifier, email: leeIdentity.email, displayName: leeIdentity.name
+    })
+    const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "attachment-policy" })
+    await t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: design.id })
+
+    const disallowedId = await t.run((ctx) => ctx.storage.store(new Blob(["binary"])))
+    await expect(t.withIdentity(mayaIdentity).mutation(api.chat.registerAttachmentUpload, {
+      storageId: disallowedId, contentType: "application/zip"
+    })).rejects.toThrow("Attachments must be a PNG, JPEG, GIF, WebP, PDF, or plain-text file")
+
+    const oversizedId = await t.run((ctx) => ctx.storage.store(new Blob([new Uint8Array(25 * 1024 * 1024 + 1)])))
+    await expect(t.withIdentity(mayaIdentity).mutation(api.chat.registerAttachmentUpload, {
+      storageId: oversizedId, contentType: "image/png"
+    })).rejects.toThrow("Attachments can be at most 25 MB")
+
+    const storageId = await t.run((ctx) => ctx.storage.store(new Blob(["private"])))
+    await t.withIdentity(mayaIdentity).mutation(api.chat.registerAttachmentUpload, { storageId, contentType: "text/plain" })
+    await expect(t.withIdentity(leeIdentity).mutation(api.chat.sendMessage, {
+      channelId: design.id, body: "", attachments: [{ storageId, name: "private.txt" }]
+    })).rejects.toThrow("Attachment upload is not owned by the current user")
+
+    const message = await t.withIdentity(mayaIdentity).mutation(api.chat.sendMessage, {
+      channelId: design.id, body: "", attachments: [{ storageId, name: "private.txt" }]
+    })
+    await expect(t.withIdentity(mayaIdentity).mutation(api.chat.sendMessage, {
+      channelId: design.id, body: "", attachments: [{ storageId, name: "again.txt" }]
+    })).rejects.toThrow("has already been claimed")
+    const issuedUrl = message.attachments[0]?.url
+    expect(issuedUrl).toEqual(expect.any(String))
+
+    await t.withIdentity(mayaIdentity).mutation(api.chat.deleteMessage, { channelId: design.id, messageId: message.id })
+    await expect(t.run((ctx) => ctx.db.system.get("_storage", storageId))).resolves.toBeNull()
+    expect(issuedUrl).not.toBeNull()
   })
 
   it("rejects reply parents from another channel and keeps replies visible after parent deletion", async () => {
@@ -822,15 +868,26 @@ describe("dogfood channel memberships", () => {
     })).rejects.toThrow("Message bodies can contain at most 8000 characters")
 
     const storageId = await t.run((ctx) => ctx.storage.store(new Blob(["file"])))
+    await t.run(async (ctx) => {
+      const user = await ctx.db.query("users").withIndex("by_token_identifier", (q) => q.eq("tokenIdentifier", mayaIdentity.tokenIdentifier)).unique()
+      if (user === null) throw new Error("test user missing")
+      await ctx.db.insert("attachmentUploads", { storageId, uploaderUserId: user._id, contentType: "text/plain", createdAt: Date.now() })
+    })
     await expect(t.withIdentity(mayaIdentity).mutation(api.chat.sendMessage, {
       channelId: boundaryChannel.id,
       body: "",
       attachments: [{ storageId, name: "a".repeat(180) }]
     })).resolves.toMatchObject({ attachments: [expect.objectContaining({ name: "a".repeat(180) })] })
+    const secondStorageId = await t.run((ctx) => ctx.storage.store(new Blob(["file"])))
+    await t.run(async (ctx) => {
+      const user = await ctx.db.query("users").withIndex("by_token_identifier", (q) => q.eq("tokenIdentifier", mayaIdentity.tokenIdentifier)).unique()
+      if (user === null) throw new Error("test user missing")
+      await ctx.db.insert("attachmentUploads", { storageId: secondStorageId, uploaderUserId: user._id, contentType: "text/plain", createdAt: Date.now() })
+    })
     await expect(t.withIdentity(mayaIdentity).mutation(api.chat.sendMessage, {
       channelId: boundaryChannel.id,
       body: "",
-      attachments: [{ storageId, name: "a".repeat(181) }]
+      attachments: [{ storageId: secondStorageId, name: "a".repeat(181) }]
     })).rejects.toThrow("Attachment names can contain at most 180 characters")
     await expect(t.withIdentity(mayaIdentity).mutation(api.chat.sendMessage, {
       channelId: boundaryChannel.id,

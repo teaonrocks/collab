@@ -72,6 +72,14 @@ export default defineSchema({
     "createdAt"
   ]).index("by_parent_message", ["parentMessageId"]),
 
+  attachmentUploads: defineTable({
+    storageId: v.id("_storage"),
+    uploaderUserId: v.id("users"),
+    contentType: v.string(),
+    createdAt: v.number(),
+    claimedMessageId: v.optional(v.id("messages"))
+  }).index("by_storage_id", ["storageId"]).index("by_uploader", ["uploaderUserId"]),
+
   messageReactions: defineTable({
     workspaceId: v.id("workspaces"),
     channelId: v.id("channels"),

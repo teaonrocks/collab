@@ -191,6 +191,7 @@ export function WorkspaceChat(props: {
   readonly model: ChatDataModel
   readonly createChannelMessage: ChatDataView["createChannelMessage"]
   readonly uploadMessageAttachment?: ChatDataView["uploadMessageAttachment"]
+  readonly discardMessageAttachment?: ChatDataView["discardMessageAttachment"]
   readonly deleteChannelMessage: ChatDataView["deleteChannelMessage"]
   readonly createChannel?: ChatDataView["createChannel"]
   readonly selectChannel?: SelectChatChannel
@@ -209,6 +210,7 @@ export function WorkspaceChat(props: {
     selectChannel,
     createChannelMessage,
     uploadMessageAttachment,
+    discardMessageAttachment,
     deleteChannelMessage,
     editChannelMessage,
     toggleMessageReaction,
@@ -230,6 +232,10 @@ export function WorkspaceChat(props: {
   const [replyParent, setReplyParent] = useState<ChannelMessage | null>(null)
   const [pendingAttachments, setPendingAttachments] = useState<ReadonlyArray<ChatMessageAttachment>>([])
   const [uploadingAttachment, setUploadingAttachment] = useState(false)
+  const pendingAttachmentsRef = useRef(pendingAttachments)
+  pendingAttachmentsRef.current = pendingAttachments
+  const discardMessageAttachmentRef = useRef(discardMessageAttachment)
+  discardMessageAttachmentRef.current = discardMessageAttachment
   const view = useMemo(() => createChannelViewModel(model), [model])
   const messageGroups = useMemo(
     () => groupConsecutiveMessages(model.channelMessages),
@@ -255,6 +261,8 @@ export function WorkspaceChat(props: {
   })
 
   useEffect(() => {
+    const abandoned = pendingAttachmentsRef.current
+    for (const attachment of abandoned) void discardMessageAttachmentRef.current?.(attachment).catch(() => {})
     setMessageDraft("")
     setOperationError(null)
     setChannelOperationError(null)
@@ -265,6 +273,12 @@ export function WorkspaceChat(props: {
     setPendingAttachments([])
     setUploadingAttachment(false)
   }, [model.channel.id])
+
+  useEffect(() => () => {
+    for (const attachment of pendingAttachmentsRef.current) {
+      void discardMessageAttachmentRef.current?.(attachment).catch(() => {})
+    }
+  }, [])
 
   useEffect(() => {
     if (replyParent === null) return
@@ -357,9 +371,21 @@ export function WorkspaceChat(props: {
     } else {
       setOperationError(null)
     }
+    const invalidFile = selectedFiles.find((file) =>
+      file.size > 25 * 1024 * 1024 || !["image/gif", "image/jpeg", "image/png", "image/webp", "application/pdf", "text/plain"].includes(file.type.toLowerCase())
+    )
+    if (invalidFile !== undefined) {
+      setOperationError("Attachments must be PNG, JPEG, GIF, WebP, PDF, or plain text and no larger than 25 MB.")
+      return
+    }
     setUploadingAttachment(true)
-    void Promise.all(selectedFiles.map((file) => uploadMessageAttachment(file)))
-      .then((attachments) => {
+    void Promise.allSettled(selectedFiles.map((file) => uploadMessageAttachment(file)))
+      .then(async (results) => {
+        const attachments = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : [])
+        if (results.some((result) => result.status === "rejected")) {
+          await Promise.allSettled(attachments.map((attachment) => discardMessageAttachment?.(attachment)))
+          throw new Error("One or more attachment uploads failed")
+        }
         setPendingAttachments((existing) => [...existing, ...attachments].slice(0, MAX_COMPOSER_ATTACHMENTS))
         setOperationError(null)
       })
@@ -453,7 +479,11 @@ export function WorkspaceChat(props: {
         uploadingAttachment={uploadingAttachment}
         onCancelReply={() => setReplyParent(null)}
         onChooseAttachments={addAttachments}
-        onRemoveAttachment={(attachmentId) => setPendingAttachments((attachments) => attachments.filter((attachment) => attachment.id !== attachmentId))}
+        onRemoveAttachment={(attachmentId) => setPendingAttachments((attachments) => {
+          const removed = attachments.find((attachment) => attachment.id === attachmentId)
+          if (removed !== undefined) void discardMessageAttachment?.(removed).catch(() => {})
+          return attachments.filter((attachment) => attachment.id !== attachmentId)
+        })}
         onToggleReaction={toggleMessageReaction === undefined ? undefined : toggleReaction}
         mentionMembers={visibleMembers}
         mentionMembersLoading={channelMembersLoading}
@@ -1923,6 +1953,7 @@ function MessageComposer(props: {
             ref={fileInputRef}
             className="sr-only"
             type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain"
             multiple
             tabIndex={-1}
             onChange={(event) => {

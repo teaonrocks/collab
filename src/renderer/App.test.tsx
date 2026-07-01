@@ -1344,6 +1344,37 @@ describe("App", () => {
     )
   })
 
+  it("rejects invalid files before upload and cleans successful uploads after a partial batch failure", async () => {
+    const uploaded = new ChannelMessageAttachment({
+      id: "storage-1", storageId: "storage-1", name: "brief.png", contentType: "image/png",
+      size: 5, kind: "image", url: null
+    })
+    const upload = vi.fn()
+      .mockResolvedValueOnce(uploaded)
+      .mockRejectedValueOnce(new Error("second upload failed"))
+    const discard = vi.fn(() => Promise.resolve())
+    const { container } = render(
+      <WorkspaceChat
+        model={makeChatModel([])}
+        createChannelMessage={() => Promise.resolve()}
+        uploadMessageAttachment={upload}
+        discardMessageAttachment={discard}
+        deleteChannelMessage={() => Promise.resolve()}
+      />
+    )
+    const fileInput = container.querySelector("input[type='file']") as HTMLInputElement
+    const invalid = new File(["zip"], "archive.zip", { type: "application/zip" })
+    fireEvent.change(fileInput, { target: { files: [invalid] } })
+    expect(await screen.findByText(/must be PNG, JPEG, GIF, WebP, PDF, or plain text/)).toBeTruthy()
+    expect(upload).not.toHaveBeenCalled()
+
+    const first = new File(["one"], "one.png", { type: "image/png" })
+    const second = new File(["two"], "two.png", { type: "image/png" })
+    fireEvent.change(fileInput, { target: { files: [first, second] } })
+    await waitFor(() => expect(discard).toHaveBeenCalledWith(uploaded))
+    expect(screen.queryByText("brief.png")).toBeNull()
+  })
+
   it("places multi-select checkboxes before the avatar column", async () => {
     renderApp(makeSnapshot([
       ...makeSnapshot().channelMessages,

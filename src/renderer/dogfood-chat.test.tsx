@@ -33,6 +33,8 @@ const mocks = vi.hoisted(() => ({
   ensureChannelMember: vi.fn(),
   markChannelRead: vi.fn(),
   generateAttachmentUploadUrl: vi.fn(),
+  registerAttachmentUpload: vi.fn(),
+  deleteAttachmentUpload: vi.fn(),
   loadMore: vi.fn(),
   paginationStatus: undefined as "LoadingFirstPage" | "CanLoadMore" | "LoadingMore" | "Exhausted" | undefined,
   mutationCallCount: 0,
@@ -61,8 +63,10 @@ vi.mock("convex/react", () => ({
       mocks.createChannel,
       mocks.ensureChannelMember,
       mocks.markChannelRead,
-      mocks.generateAttachmentUploadUrl
-    ][mocks.mutationCallCount % 8]
+      mocks.generateAttachmentUploadUrl,
+      mocks.registerAttachmentUpload,
+      mocks.deleteAttachmentUpload
+    ][mocks.mutationCallCount % 10]
     mocks.mutationCallCount += 1
     return mutation
   },

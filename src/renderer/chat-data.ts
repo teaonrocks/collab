@@ -80,6 +80,7 @@ export type ChatDataView = {
   readonly selectChannel?: SelectChatChannel
   readonly createChannelMessage: CreateChatMessage
   readonly uploadMessageAttachment?: UploadChatMessageAttachment
+  readonly discardMessageAttachment?: (attachment: ChannelMessageAttachment) => Promise<unknown>
   readonly deleteChannelMessage: DeleteChatMessage
   readonly editChannelMessage?: EditChatMessage
   readonly toggleMessageReaction?: ToggleChatMessageReaction
