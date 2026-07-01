@@ -33,6 +33,8 @@ const mocks = vi.hoisted(() => ({
   ensureChannelMember: vi.fn(),
   markChannelRead: vi.fn(),
   generateAttachmentUploadUrl: vi.fn(),
+  loadMore: vi.fn(),
+  paginationStatus: undefined as "LoadingFirstPage" | "CanLoadMore" | "LoadingMore" | "Exhausted" | undefined,
   mutationCallCount: 0,
   workspace: undefined as DogfoodWorkspaceView | null | undefined,
   channels: undefined as ReadonlyArray<DogfoodChannelView> | undefined,
@@ -64,6 +66,16 @@ vi.mock("convex/react", () => ({
     mocks.mutationCallCount += 1
     return mutation
   },
+  usePaginatedQuery: (_query: unknown, args: unknown) => {
+    if (args === "skip") return { results: [], status: "LoadingFirstPage", loadMore: mocks.loadMore }
+    const channelId = typeof args === "object" && args !== null && "channelId" in args ? String(args.channelId) : ""
+    const messages = mocks.messagesByChannel?.[channelId] ?? mocks.messages
+    return {
+      results: messages === undefined ? [] : [...messages].reverse(),
+      status: mocks.paginationStatus ?? (messages === undefined ? "LoadingFirstPage" : "Exhausted"),
+      loadMore: mocks.loadMore
+    }
+  },
   useQuery: (query: unknown, args: unknown) => {
     if (args === "skip") return undefined
     if (typeof args === "object" && args !== null && "channelId" in args) {
@@ -71,7 +83,7 @@ vi.mock("convex/react", () => ({
       if (getFunctionName(query as never) === "chat:channelMembers") {
         return mocks.membersByChannel?.[channelId] ?? mocks.members
       }
-      return mocks.messagesByChannel?.[channelId] ?? mocks.messages
+      return mocks.membersByChannel?.[channelId] ?? mocks.members
     }
     if (getFunctionName(query as never) === "chat:channelIndicators") return mocks.channelIndicators
     if (typeof args === "object" && args !== null && "workspaceId" in args) return mocks.channels
@@ -90,6 +102,8 @@ vi.mock("./App", () => ({
       readonly channelIndicators?: ReadonlyArray<{ readonly channelId: string; readonly indicator: "unread" | "mentioned" }>
       readonly channelMembersLoading?: boolean
       readonly channelMessagesLoading?: boolean
+      readonly channelMessagesHasMore?: boolean
+      readonly channelMessagesLoadingMore?: boolean
     }
   readonly createChannel?: (input: { readonly name: string }) => Promise<unknown>
   readonly selectChannel?: (channelId: string) => void
@@ -107,6 +121,7 @@ vi.mock("./App", () => ({
   readonly canEditMessage?: (message: ChannelMessage) => boolean
   readonly canDeleteMessage?: (message: ChannelMessage) => boolean
   readonly profileMenuActions?: ReadonlyArray<{ readonly label: string; readonly onSelect: () => void }>
+  readonly loadOlderChannelMessages?: () => void
 }) => {
     const firstMessage = props.model.channelMessages[0]
     const secondMessage = props.model.channelMessages[1]
@@ -114,6 +129,9 @@ vi.mock("./App", () => ({
       <section aria-label="mock workspace chat">
         <h2>{props.model.workspace.name}</h2>
         {props.model.channelMessagesLoading === true ? <p>messages loading</p> : null}
+        {props.model.channelMessagesHasMore === true
+          ? <button type="button" onClick={props.loadOlderChannelMessages}>Load older messages</button>
+          : null}
         {props.model.channelMembersLoading === true ? <p>members loading</p> : null}
         <ul aria-label="mock members">
           {props.model.channelMembers?.map((member) => <li key={member.id}>{member.displayName}</li>)}
@@ -229,6 +247,7 @@ beforeEach(() => {
   mocks.channels = undefined
   mocks.messages = undefined
   mocks.messagesByChannel = undefined
+  mocks.paginationStatus = undefined
   mocks.members = undefined
   mocks.membersByChannel = undefined
   mocks.channelIndicators = undefined
@@ -694,6 +713,21 @@ describe("ConvexDogfoodApp", () => {
     expect(screen.queryByRole("heading", { name: "Loading Chat" })).toBeNull()
   })
 
+  it("exposes incremental history loading from the Convex pagination state", async () => {
+    const { ConvexDogfoodApp } = await import("./dogfood-chat")
+    mocks.auth.user = { id: "user-1" }
+    mocks.convexAuth.isAuthenticated = true
+    mocks.workspace = workspace
+    mocks.channels = channels
+    mocks.messages = messages
+    mocks.paginationStatus = "CanLoadMore"
+
+    render(<ConvexDogfoodApp />)
+
+    fireEvent.click(await screen.findByRole("button", { name: "Load older messages" }))
+    expect(mocks.loadMore).toHaveBeenCalledWith(50)
+  })
+
   it("switches channels and scopes messages and sends to the active channel", async () => {
     const { ConvexDogfoodApp } = await import("./dogfood-chat")
     mocks.auth.user = { id: "user-1" }
@@ -733,7 +767,7 @@ describe("ConvexDogfoodApp", () => {
     await waitFor(() =>
       expect(mocks.markChannelRead).toHaveBeenCalledWith({
         channelId: workspace.channel.id,
-        readThroughCreatedAt: 42
+        readThroughMessageId: messages[0]!.id
       })
     )
   })
@@ -751,7 +785,7 @@ describe("ConvexDogfoodApp", () => {
     await waitFor(() =>
       expect(mocks.markChannelRead).toHaveBeenCalledWith({
         channelId: workspace.channel.id,
-        readThroughCreatedAt: 43
+        readThroughMessageId: messagesWithAnotherAuthor[1]!.id
       })
     )
     expect(mocks.markChannelRead).toHaveBeenCalledTimes(1)

@@ -3,9 +3,14 @@
 import { convexTest } from "convex-test"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { api, internal } from "./_generated/api"
+import type { Id } from "./_generated/dataModel"
 import schema from "./schema"
 
 const modules = import.meta.glob("./**/*.ts")
+const messagePageArgs = (channelId: Id<"channels">, numItems = 100, cursor: string | null = null) => ({
+  channelId,
+  paginationOpts: { numItems, cursor }
+})
 
 const mayaIdentity = {
   tokenIdentifier: "https://issuer.example|maya",
@@ -210,7 +215,7 @@ describe("dogfood channel memberships", () => {
     })
 
     const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design" })
-    await expect(t.withIdentity(leeIdentity).query(api.chat.channelMessages, { channelId: design.id }))
+    await expect(t.withIdentity(leeIdentity).query(api.chat.channelMessages, messagePageArgs(design.id)))
       .rejects.toThrow("Current user has not been initialized")
 
     await t.mutation(internal.chat.ensureViewerForIdentity, {
@@ -228,8 +233,8 @@ describe("dogfood channel memberships", () => {
     })
     expect(visibleChannels.map((channel) => channel.name)).toContain("design")
 
-    await expect(t.withIdentity(leeIdentity).query(api.chat.channelMessages, { channelId: design.id }))
-      .resolves.toEqual([])
+    await expect(t.withIdentity(leeIdentity).query(api.chat.channelMessages, messagePageArgs(design.id)))
+      .resolves.toMatchObject({ page: [] })
 
     await expect(t.withIdentity(leeIdentity).query(api.chat.channelMembers, { channelId: design.id }))
       .resolves.toEqual([
@@ -281,7 +286,7 @@ describe("dogfood channel memberships", () => {
     expect(visibleChannels.map((channel) => channel.name)).not.toContain("strategy")
     await expect(t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: privateChannelId }))
       .rejects.toThrow("Current user is not a member of this channel")
-    await expect(t.withIdentity(leeIdentity).query(api.chat.channelMessages, { channelId: privateChannelId }))
+    await expect(t.withIdentity(leeIdentity).query(api.chat.channelMessages, messagePageArgs(privateChannelId)))
       .rejects.toThrow("Current user is not a member of this channel")
     await expect(t.withIdentity(leeIdentity).query(api.chat.channelMembers, { channelId: privateChannelId }))
       .rejects.toThrow("Current user is not a member of this channel")
@@ -305,7 +310,7 @@ describe("dogfood channel memberships", () => {
     await t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: design.id })
     await t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: product.id })
 
-    const workspaceId = await t.run(async (ctx) => {
+    const { workspaceId, designMessageId, productMessageId } = await t.run(async (ctx) => {
       const workspace = await ctx.db.query("workspaces").withIndex("by_key", (q) => q.eq("key", "aether-dogfood")).unique()
       const maya = await ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", mayaIdentity.email)).unique()
       const lee = await ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", leeIdentity.email)).unique()
@@ -317,7 +322,7 @@ describe("dogfood channel memberships", () => {
       for (const membership of leeMemberships) {
         await ctx.db.patch(membership._id, { lastReadAt: 1 })
       }
-      await ctx.db.insert("messages", {
+      const designMessageId = await ctx.db.insert("messages", {
         workspaceId: workspace._id,
         channelId: design.id,
         authorUserId: maya._id,
@@ -325,7 +330,7 @@ describe("dogfood channel memberships", () => {
         body: "@Lee can you review the design notes?",
         createdAt: 100
       })
-      await ctx.db.insert("messages", {
+      const productMessageId = await ctx.db.insert("messages", {
         workspaceId: workspace._id,
         channelId: product.id,
         authorUserId: maya._id,
@@ -333,12 +338,12 @@ describe("dogfood channel memberships", () => {
         body: "@Maya left product context for later.",
         createdAt: 101
       })
-      return workspace._id
+      return { workspaceId: workspace._id, designMessageId, productMessageId }
     })
 
     await t.withIdentity(leeIdentity).mutation(api.chat.markChannelRead, {
       channelId: product.id,
-      readThroughCreatedAt: 101
+      readThroughMessageId: productMessageId
     })
 
     expect(await t.withIdentity(leeIdentity).query(api.chat.channelIndicators, { workspaceId }))
@@ -346,7 +351,7 @@ describe("dogfood channel memberships", () => {
 
     await t.withIdentity(leeIdentity).mutation(api.chat.markChannelRead, {
       channelId: design.id,
-      readThroughCreatedAt: 100
+      readThroughMessageId: designMessageId
     })
 
     expect(await t.withIdentity(leeIdentity).query(api.chat.channelIndicators, { workspaceId }))
@@ -369,7 +374,7 @@ describe("dogfood channel memberships", () => {
     const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design" })
     await t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: design.id })
 
-    const workspaceId = await t.run(async (ctx) => {
+    const { workspaceId, loadedMessageId } = await t.run(async (ctx) => {
       const workspace = await ctx.db.query("workspaces").withIndex("by_key", (q) => q.eq("key", "aether-dogfood")).unique()
       const maya = await ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", mayaIdentity.email)).unique()
       const lee = await ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", leeIdentity.email)).unique()
@@ -380,7 +385,7 @@ describe("dogfood channel memberships", () => {
         .unique()
       if (membership === null) throw new Error("Membership not found")
       await ctx.db.patch(membership._id, { lastReadAt: 1 })
-      await ctx.db.insert("messages", {
+      const loadedMessageId = await ctx.db.insert("messages", {
         workspaceId: workspace._id,
         channelId: design.id,
         authorUserId: maya._id,
@@ -396,12 +401,12 @@ describe("dogfood channel memberships", () => {
         body: "Arrived after the loaded snapshot.",
         createdAt: 200
       })
-      return workspace._id
+      return { workspaceId: workspace._id, loadedMessageId }
     })
 
     await t.withIdentity(leeIdentity).mutation(api.chat.markChannelRead, {
       channelId: design.id,
-      readThroughCreatedAt: 100
+      readThroughMessageId: loadedMessageId
     })
 
     await expect(t.withIdentity(leeIdentity).query(api.chat.channelIndicators, { workspaceId }))
@@ -572,14 +577,14 @@ describe("dogfood channel memberships", () => {
       emoji: "👍"
     })
 
-    await expect(t.withIdentity(leeIdentity).query(api.chat.channelMessages, { channelId: design.id }))
+    await expect(t.withIdentity(leeIdentity).query(api.chat.channelMessages, messagePageArgs(design.id)).then((result) => result.page))
       .resolves.toEqual([
         expect.objectContaining({
           id: message.id,
           reactions: [{ emoji: "👍", count: 1, reactedByCurrentUser: true }]
         })
       ])
-    await expect(t.withIdentity(mayaIdentity).query(api.chat.channelMessages, { channelId: design.id }))
+    await expect(t.withIdentity(mayaIdentity).query(api.chat.channelMessages, messagePageArgs(design.id)).then((result) => result.page))
       .resolves.toEqual([
         expect.objectContaining({
           id: message.id,
@@ -593,7 +598,7 @@ describe("dogfood channel memberships", () => {
       emoji: "👍"
     })
 
-    await expect(t.withIdentity(leeIdentity).query(api.chat.channelMessages, { channelId: design.id }))
+    await expect(t.withIdentity(leeIdentity).query(api.chat.channelMessages, messagePageArgs(design.id)).then((result) => result.page))
       .resolves.toEqual([expect.objectContaining({ id: message.id, reactions: [] })])
   })
 
@@ -632,9 +637,8 @@ describe("dogfood channel memberships", () => {
     })
     expect(reply.parentMessage?.bodyPreview.length).toBeLessThanOrEqual(120)
 
-    await expect(t.withIdentity(leeIdentity).query(api.chat.channelMessages, { channelId: design.id }))
+    await expect(t.withIdentity(leeIdentity).query(api.chat.channelMessages, messagePageArgs(design.id)).then((result) => result.page))
       .resolves.toEqual([
-        expect.objectContaining({ id: parent.id, parentMessageId: null, parentMessage: null }),
         expect.objectContaining({
           id: reply.id,
           parentMessageId: parent.id,
@@ -643,7 +647,8 @@ describe("dogfood channel memberships", () => {
             authorDisplayName: "Maya Patel",
             deleted: false
           })
-        })
+        }),
+        expect.objectContaining({ id: parent.id, parentMessageId: null, parentMessage: null })
       ])
   })
 
@@ -675,7 +680,7 @@ describe("dogfood channel memberships", () => {
     })
     expect(message.attachments[0]?.url).toEqual(expect.any(String))
 
-    await expect(t.withIdentity(mayaIdentity).query(api.chat.channelMessages, { channelId: design.id }))
+    await expect(t.withIdentity(mayaIdentity).query(api.chat.channelMessages, messagePageArgs(design.id)).then((result) => result.page))
       .resolves.toEqual([
         expect.objectContaining({
           id: message.id,
@@ -722,7 +727,7 @@ describe("dogfood channel memberships", () => {
       messageId: parent.id
     })
 
-    await expect(t.withIdentity(leeIdentity).query(api.chat.channelMessages, { channelId: design.id }))
+    await expect(t.withIdentity(leeIdentity).query(api.chat.channelMessages, messagePageArgs(design.id)).then((result) => result.page))
       .resolves.toEqual([
         expect.objectContaining({
           id: reply.id,
@@ -736,6 +741,203 @@ describe("dogfood channel memberships", () => {
           }
         })
       ])
+  })
+
+  it("paginates through complete channel history with an explicit page-size limit", async () => {
+    const t = convexTest(schema, modules)
+    await t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: mayaIdentity.tokenIdentifier,
+      email: mayaIdentity.email,
+      displayName: mayaIdentity.name
+    })
+    const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design" })
+
+    await t.run(async (ctx) => {
+      const workspace = await ctx.db.query("workspaces").withIndex("by_key", (q) => q.eq("key", "aether-dogfood")).unique()
+      const maya = await ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", mayaIdentity.email)).unique()
+      if (workspace === null || maya === null) throw new Error("Seed records not found")
+      for (let index = 0; index < 225; index += 1) {
+        await ctx.db.insert("messages", {
+          workspaceId: workspace._id,
+          channelId: design.id,
+          authorUserId: maya._id,
+          authorDisplayName: maya.displayName,
+          body: `History ${index}`,
+          createdAt: 1_000 + index
+        })
+      }
+    })
+
+    const bodies: Array<string> = []
+    let cursor: string | null = null
+    let done = false
+    while (!done) {
+      const page: {
+        readonly page: Array<{ readonly body: string }>
+        readonly continueCursor: string
+        readonly isDone: boolean
+      } = await t.withIdentity(mayaIdentity).query(api.chat.channelMessages, messagePageArgs(design.id, 50, cursor))
+      bodies.push(...page.page.map((message) => message.body))
+      cursor = page.continueCursor
+      done = page.isDone
+    }
+
+    expect(bodies).toHaveLength(225)
+    expect(new Set(bodies)).toHaveLength(225)
+    expect(bodies[0]).toBe("History 224")
+    expect(bodies.at(-1)).toBe("History 0")
+    await expect(t.withIdentity(mayaIdentity).query(api.chat.channelMessages, messagePageArgs(design.id, 101)))
+      .rejects.toThrow("Message pages must contain between 1 and 100 items")
+  })
+
+  it("enforces exact channel, message, edit, and attachment metadata limits", async () => {
+    const t = convexTest(schema, modules)
+    await t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: mayaIdentity.tokenIdentifier,
+      email: mayaIdentity.email,
+      displayName: mayaIdentity.name
+    })
+
+    const boundaryChannel = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "c".repeat(80) })
+    await expect(t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "c".repeat(81) }))
+      .rejects.toThrow("Channel names can contain at most 80 characters")
+
+    const boundaryMessage = await t.withIdentity(mayaIdentity).mutation(api.chat.sendMessage, {
+      channelId: boundaryChannel.id,
+      body: "m".repeat(8_000)
+    })
+    await expect(t.withIdentity(mayaIdentity).mutation(api.chat.sendMessage, {
+      channelId: boundaryChannel.id,
+      body: "m".repeat(8_001)
+    })).rejects.toThrow("Message bodies can contain at most 8000 characters")
+    await expect(t.withIdentity(mayaIdentity).mutation(api.chat.editMessage, {
+      channelId: boundaryChannel.id,
+      messageId: boundaryMessage.id,
+      body: "e".repeat(8_000)
+    })).resolves.toMatchObject({ body: "e".repeat(8_000) })
+    await expect(t.withIdentity(mayaIdentity).mutation(api.chat.editMessage, {
+      channelId: boundaryChannel.id,
+      messageId: boundaryMessage.id,
+      body: "e".repeat(8_001)
+    })).rejects.toThrow("Message bodies can contain at most 8000 characters")
+
+    const storageId = await t.run((ctx) => ctx.storage.store(new Blob(["file"])))
+    await expect(t.withIdentity(mayaIdentity).mutation(api.chat.sendMessage, {
+      channelId: boundaryChannel.id,
+      body: "",
+      attachments: [{ storageId, name: "a".repeat(180) }]
+    })).resolves.toMatchObject({ attachments: [expect.objectContaining({ name: "a".repeat(180) })] })
+    await expect(t.withIdentity(mayaIdentity).mutation(api.chat.sendMessage, {
+      channelId: boundaryChannel.id,
+      body: "",
+      attachments: [{ storageId, name: "a".repeat(181) }]
+    })).rejects.toThrow("Attachment names can contain at most 180 characters")
+    await expect(t.withIdentity(mayaIdentity).mutation(api.chat.sendMessage, {
+      channelId: boundaryChannel.id,
+      body: "",
+      attachments: Array.from({ length: 5 }, () => ({ storageId, name: "file" }))
+    })).rejects.toThrow("Messages can include at most 4 attachments")
+  })
+
+  it("enforces the maximum channel count instead of hiding excess channels", async () => {
+    const t = convexTest(schema, modules)
+    await t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: mayaIdentity.tokenIdentifier,
+      email: mayaIdentity.email,
+      displayName: mayaIdentity.name
+    })
+    await t.run(async (ctx) => {
+      const workspace = await ctx.db.query("workspaces").withIndex("by_key", (q) => q.eq("key", "aether-dogfood")).unique()
+      if (workspace === null) throw new Error("Workspace not found")
+      for (let index = 1; index < 100; index += 1) {
+        await ctx.db.insert("channels", {
+          workspaceId: workspace._id,
+          key: `channel-${index}`,
+          name: `channel-${index}`,
+          visibility: "public",
+          createdAt: index
+        })
+      }
+    })
+
+    await expect(t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "one-too-many" }))
+      .rejects.toThrow("Workspaces can contain at most 100 channels")
+  })
+
+  it("validates read markers against a real message in the selected channel", async () => {
+    const t = convexTest(schema, modules)
+    for (const identity of [mayaIdentity, leeIdentity]) {
+      await t.mutation(internal.chat.ensureViewerForIdentity, {
+        tokenIdentifier: identity.tokenIdentifier,
+        email: identity.email,
+        displayName: identity.name
+      })
+    }
+    const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design" })
+    const product = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "product" })
+    await t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: design.id })
+    const productMessage = await t.withIdentity(mayaIdentity).mutation(api.chat.sendMessage, {
+      channelId: product.id,
+      body: "Product-only marker"
+    })
+
+    await expect(t.withIdentity(leeIdentity).mutation(api.chat.markChannelRead, {
+      channelId: design.id,
+      readThroughMessageId: productMessage.id
+    })).rejects.toThrow("Read-through message not found in this channel")
+  })
+
+  it("keeps unread and mention work bounded across a dense multi-channel dataset", async () => {
+    const t = convexTest(schema, modules)
+    for (const identity of [mayaIdentity, leeIdentity]) {
+      await t.mutation(internal.chat.ensureViewerForIdentity, {
+        tokenIdentifier: identity.tokenIdentifier,
+        email: identity.email,
+        displayName: identity.name
+      })
+    }
+
+    const channels: Array<{ readonly id: Id<"channels"> }> = []
+    for (let index = 0; index < 10; index += 1) {
+      const channel = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: `dense-${index}` })
+      await t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: channel.id })
+      channels.push(channel)
+    }
+
+    const workspaceId = await t.run(async (ctx) => {
+      const workspace = await ctx.db.query("workspaces").withIndex("by_key", (q) => q.eq("key", "aether-dogfood")).unique()
+      const maya = await ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", mayaIdentity.email)).unique()
+      const lee = await ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", leeIdentity.email)).unique()
+      if (workspace === null || maya === null || lee === null) throw new Error("Seed records not found")
+      for (const channel of channels) {
+        const membership = await ctx.db
+          .query("channelMemberships")
+          .withIndex("by_channel_user", (q) => q.eq("channelId", channel.id).eq("userId", lee._id))
+          .unique()
+        if (membership === null) throw new Error("Membership not found")
+        await ctx.db.patch(membership._id, { lastReadAt: 1 })
+      }
+      for (const [channelIndex, channel] of channels.entries()) {
+        for (let messageIndex = 0; messageIndex < 60; messageIndex += 1) {
+          const isBoundedOutMention = channelIndex === 0 && messageIndex === 0
+          const isRecentMention = channelIndex === 1 && messageIndex === 59
+          await ctx.db.insert("messages", {
+            workspaceId: workspace._id,
+            channelId: channel.id,
+            authorUserId: maya._id,
+            authorDisplayName: maya.displayName,
+            body: isBoundedOutMention || isRecentMention ? "@Lee review this" : `Dense context ${messageIndex}`,
+            createdAt: 100 + messageIndex
+          })
+        }
+      }
+      return workspace._id
+    })
+
+    const indicators = await t.withIdentity(leeIdentity).query(api.chat.channelIndicators, { workspaceId })
+    expect(indicators).toHaveLength(10)
+    expect(indicators.find((indicator) => indicator.channelId === channels[0]!.id)?.indicator).toBe("unread")
+    expect(indicators.find((indicator) => indicator.channelId === channels[1]!.id)?.indicator).toBe("mentioned")
   })
 
   it("collapses duplicate reaction rows from the same user", async () => {
@@ -780,7 +982,7 @@ describe("dogfood channel memberships", () => {
       })
     })
 
-    await expect(t.withIdentity(leeIdentity).query(api.chat.channelMessages, { channelId: design.id }))
+    await expect(t.withIdentity(leeIdentity).query(api.chat.channelMessages, messagePageArgs(design.id)).then((result) => result.page))
       .resolves.toEqual([
         expect.objectContaining({
           id: message.id,

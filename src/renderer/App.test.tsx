@@ -655,6 +655,63 @@ describe("App", () => {
     expect(resultOption.hasAttribute("data-message-highlighted")).toBe(false)
   })
 
+  it("labels search as loaded-history only and expands results after loading an older page", async () => {
+    const loadOlderChannelMessages = vi.fn()
+    const currentMessage = new ChannelMessage({
+      id: "message-current" as ChannelMessageId,
+      channelId,
+      authorType: "human",
+      authorId: userId,
+      authorDisplayName: "Maya Patel",
+      body: "Current launch note.",
+      createdAt: 10,
+      deletedAt: null
+    })
+    const props = {
+      createChannelMessage: () => Promise.resolve(),
+      deleteChannelMessage: () => Promise.resolve(),
+      loadOlderChannelMessages
+    }
+    const { rerender } = render(
+      <WorkspaceChat
+        {...props}
+        model={{ ...makeChatModel([currentMessage]), channelMessagesHasMore: true }}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Load older messages" }))
+    expect(loadOlderChannelMessages).toHaveBeenCalledTimes(1)
+    const search = await openMessageSearch()
+    expect(screen.getByText("Search covers loaded messages only; load older messages to search more history.")).toBeTruthy()
+    fireEvent.change(search, { target: { value: "archive" } })
+    expect(await screen.findByText("No matching messages.")).toBeTruthy()
+
+    rerender(
+      <WorkspaceChat
+        {...props}
+        model={{
+          ...makeChatModel([
+            new ChannelMessage({
+              id: "message-older" as ChannelMessageId,
+              channelId,
+              authorType: "human",
+              authorId: "human-2",
+              authorDisplayName: "Lee Chen",
+              body: "Archive decision from last week.",
+              createdAt: 2,
+              deletedAt: null
+            }),
+            currentMessage
+          ]),
+          channelMessagesHasMore: false
+        }}
+      />
+    )
+
+    expect(await screen.findAllByText("Archive decision from last week.")).toHaveLength(2)
+    expect(screen.getByText("Search covers loaded messages only.")).toBeTruthy()
+  })
+
   it("navigates message search results with the keyboard", async () => {
     render(
       <WorkspaceChat

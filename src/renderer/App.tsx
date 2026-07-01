@@ -196,6 +196,7 @@ export function WorkspaceChat(props: {
   readonly selectChannel?: SelectChatChannel
   readonly editChannelMessage?: ChatDataView["editChannelMessage"]
   readonly toggleMessageReaction?: ChatDataView["toggleMessageReaction"]
+  readonly loadOlderChannelMessages?: ChatDataView["loadOlderChannelMessages"]
   readonly canDeleteMessages?: boolean
   readonly canDeleteMessage?: ChatMessageGuard
   readonly canEditMessage?: ChatMessageGuard
@@ -211,6 +212,7 @@ export function WorkspaceChat(props: {
     deleteChannelMessage,
     editChannelMessage,
     toggleMessageReaction,
+    loadOlderChannelMessages,
     canDeleteMessages = true,
     canDeleteMessage,
     canEditMessage,
@@ -423,8 +425,12 @@ export function WorkspaceChat(props: {
         searchOpen={searchOpen}
         searchQuery={messageSearchQuery}
         searchState={messageSearchState}
+        searchHasMoreHistory={model.channelMessagesHasMore === true}
         activeSearchMessageId={activeSearchMessageId}
         operationError={operationError}
+        hasMoreMessages={model.channelMessagesHasMore === true}
+        loadingMoreMessages={model.channelMessagesLoadingMore === true}
+        onLoadOlderMessages={loadOlderChannelMessages}
         onMessageDraftChange={setMessageDraft}
         onSearchQueryChange={(query) => {
           setMessageSearchQuery(query)
@@ -921,8 +927,12 @@ function ChatPane(props: {
   readonly searchOpen: boolean
   readonly searchQuery: string
   readonly searchState: ChannelMessageSearchState
+  readonly searchHasMoreHistory: boolean
   readonly activeSearchMessageId: ChannelMessageId | null
   readonly operationError: string | null
+  readonly hasMoreMessages: boolean
+  readonly loadingMoreMessages: boolean
+  readonly onLoadOlderMessages?: () => void
   readonly attachments: ReadonlyArray<ChatMessageAttachment>
   readonly attachmentUploadAvailable: boolean
   readonly uploadingAttachment: boolean
@@ -957,8 +967,12 @@ function ChatPane(props: {
     searchOpen,
     searchQuery,
     searchState,
+    searchHasMoreHistory,
     activeSearchMessageId,
     operationError,
+    hasMoreMessages,
+    loadingMoreMessages,
+    onLoadOlderMessages,
     attachments,
     attachmentUploadAvailable,
     uploadingAttachment,
@@ -1000,6 +1014,7 @@ function ChatPane(props: {
         open={searchOpen}
         query={searchQuery}
         state={searchState}
+        hasMoreHistory={searchHasMoreHistory}
         activeSearchMessageId={activeSearchMessageId}
         disabled={loading}
         onQueryChange={onSearchQueryChange}
@@ -1018,6 +1033,15 @@ function ChatPane(props: {
                 <Hash className={classNames("channelHashIcon", iconClassName)} aria-hidden="true" />
                 <span>{channelName}.</span>
               </span>
+            </li>
+          )
+          : null}
+        {!loading && hasMoreMessages && onLoadOlderMessages !== undefined
+          ? (
+            <li className="flex justify-center px-4 py-2">
+              <Button type="button" variant="secondary" disabled={loadingMoreMessages} onClick={onLoadOlderMessages}>
+                {loadingMoreMessages ? "Loading older messages..." : "Load older messages"}
+              </Button>
             </li>
           )
           : null}
@@ -1090,12 +1114,13 @@ function ChannelMessageSearch(props: {
   readonly open: boolean
   readonly query: string
   readonly state: ChannelMessageSearchState
+  readonly hasMoreHistory: boolean
   readonly activeSearchMessageId: ChannelMessageId | null
   readonly disabled: boolean
   readonly onQueryChange: (query: string) => void
   readonly onSelectResult: (messageId: ChannelMessageId) => void
 }) {
-  const { channelName, open, query, state, activeSearchMessageId, disabled, onQueryChange, onSelectResult } = props
+  const { channelName, open, query, state, hasMoreHistory, activeSearchMessageId, disabled, onQueryChange, onSelectResult } = props
   const inputRef = useRef<HTMLInputElement>(null)
   const activeResultIndexRef = useRef(0)
   const [activeResultIndex, setActiveResultIndex] = useState(0)
@@ -1174,6 +1199,7 @@ function ChannelMessageSearch(props: {
             aria-controls="channel-message-search-results"
             aria-activedescendant={activeResultId}
             aria-invalid={state.status === "error"}
+            aria-describedby="channel-message-search-scope"
             onKeyDownCapture={(event) => {
               if (navigableResults.length === 0) return
               if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -1196,6 +1222,9 @@ function ChannelMessageSearch(props: {
               selectSearchResult(selectedResult)
             }}
           />
+          <p id="channel-message-search-scope" className="mb-0 mt-1.5 text-[11px] text-foreground-subtle">
+            Search covers loaded messages only{hasMoreHistory ? "; load older messages to search more history" : ""}.
+          </p>
           <ComboboxContent
             id="channel-message-search-results"
             className="messageSearchResults w-[min(680px,calc(100vw-120px))]"

@@ -1,4 +1,5 @@
 import { v } from "convex/values"
+import { paginationOptsValidator } from "convex/server"
 import { internal } from "./_generated/api"
 import type { Doc, Id } from "./_generated/dataModel"
 import { action, internalMutation, mutation, query, type ActionCtx, type MutationCtx, type QueryCtx } from "./_generated/server"
@@ -8,8 +9,13 @@ const DOGFOOD_WORKSPACE_NAME = "Aether Dogfood"
 const DOGFOOD_CHANNEL_KEY = "general"
 const DOGFOOD_CHANNEL_NAME = "general"
 const MAX_CHANNELS = 100
+const MAX_CHANNEL_NAME_LENGTH = 80
+const MAX_MESSAGE_BODY_LENGTH = 8_000
+const MAX_MESSAGE_PAGE_SIZE = 100
+const MAX_UNREAD_MESSAGES_PER_CHANNEL = 50
 const MAX_MESSAGE_ATTACHMENTS = 4
 const MAX_ATTACHMENT_NAME_LENGTH = 180
+const MAX_ATTACHMENT_SIZE_BYTES = 25 * 1024 * 1024
 const MAX_ALLOWLIST_REASON_LENGTH = 240
 const MESSAGE_REACTION_EMOJIS = ["👍", "🎉", "👀"] as const
 const MESSAGE_PARENT_PREVIEW_MAX_LENGTH = 120
@@ -64,8 +70,12 @@ const emailFromIdentity = (identity: ViewerIdentity): string | undefined =>
 const displayNameFromEmail = (email: string): string => email.split("@")[0] ?? "Aether User"
 
 const attachmentName = (name: string): string => {
-  const normalized = name.trim().replace(/\s+/g, " ").slice(0, MAX_ATTACHMENT_NAME_LENGTH)
-  return normalized.length === 0 ? "attachment" : normalized
+  const normalized = name.trim().replace(/\s+/g, " ")
+  if (normalized.length === 0) return "attachment"
+  if (normalized.length > MAX_ATTACHMENT_NAME_LENGTH) {
+    throw new Error(`Attachment names can contain at most ${MAX_ATTACHMENT_NAME_LENGTH} characters`)
+  }
+  return normalized
 }
 
 const attachmentKind = (contentType: string): "file" | "image" =>
@@ -82,10 +92,22 @@ const normalizeChannelName = (name: string): string =>
 const validateChannelName = (rawName: string): string => {
   const name = normalizeChannelName(rawName)
   if (name.length === 0) throw new Error("Channel name is required")
+  if (name.length > MAX_CHANNEL_NAME_LENGTH) {
+    throw new Error(`Channel names can contain at most ${MAX_CHANNEL_NAME_LENGTH} characters`)
+  }
   if (!/^[a-z0-9_-]+$/.test(name)) {
     throw new Error("Channel names can only use letters, numbers, dashes, and underscores")
   }
   return name
+}
+
+const validateMessageBody = (rawBody: string, options?: { readonly allowEmpty?: boolean }): string => {
+  const body = rawBody.trim()
+  if (body.length === 0 && options?.allowEmpty !== true) throw new Error("Message body is required")
+  if (body.length > MAX_MESSAGE_BODY_LENGTH) {
+    throw new Error(`Message bodies can contain at most ${MAX_MESSAGE_BODY_LENGTH} characters`)
+  }
+  return body
 }
 
 const channelKeyFromName = (name: string): string => normalizeChannelName(name)
@@ -479,6 +501,9 @@ const validateMessageAttachments = async (
   for (const attachment of attachments) {
     const metadata = await ctx.db.system.get("_storage", attachment.storageId)
     if (metadata === null) throw new Error("Attachment upload was not found")
+    if (metadata.size > MAX_ATTACHMENT_SIZE_BYTES) {
+      throw new Error(`Attachments can be at most ${MAX_ATTACHMENT_SIZE_BYTES} bytes`)
+    }
     const contentType = metadata.contentType ?? "application/octet-stream"
     validated.push({
       storageId: attachment.storageId,
@@ -683,10 +708,12 @@ export const channelIndicators = query({
       const lastReadAt = membership.lastReadAt ?? membership.createdAt
       let hasUnread = false
       let mentioned = false
-      const messages = ctx.db
+      const messages = await ctx.db
         .query("messages")
         .withIndex("by_channel_created_at", (q) => q.eq("channelId", channel.id).gt("createdAt", lastReadAt))
-      for await (const message of messages) {
+        .order("desc")
+        .take(MAX_UNREAD_MESSAGES_PER_CHANNEL)
+      for (const message of messages) {
         if (message.authorUserId === user._id) continue
         hasUnread = true
         if (mentionsDisplayName(message.body, user.displayName)) {
@@ -725,13 +752,12 @@ export const ensureChannelMember = mutation({
 export const markChannelRead = mutation({
   args: {
     channelId: v.id("channels"),
-    readThroughCreatedAt: v.number()
+    readThroughMessageId: v.id("messages")
   },
   handler: (ctx, args) => withDogfoodDiagnostics("markChannelRead", {
     channelId: args.channelId,
-    readThroughCreatedAt: args.readThroughCreatedAt
+    readThroughMessageId: args.readThroughMessageId
   }, async () => {
-    if (!Number.isFinite(args.readThroughCreatedAt)) throw new Error("Read-through timestamp must be finite")
     const user = await requireAllowedCurrentUser(ctx)
     const channel = await ctx.db.get(args.channelId)
     if (channel === null) throw new Error("Channel not found")
@@ -743,8 +769,13 @@ export const markChannelRead = mutation({
       .unique()
     if (membership === null) throw new Error("Current user is not a member of this channel")
 
-    if ((membership.lastReadAt ?? membership.createdAt) >= args.readThroughCreatedAt) return toChannelView(channel)
-    await ctx.db.patch(membership._id, { lastReadAt: args.readThroughCreatedAt })
+    const readThroughMessage = await ctx.db.get(args.readThroughMessageId)
+    if (readThroughMessage === null || readThroughMessage.channelId !== args.channelId) {
+      throw new Error("Read-through message not found in this channel")
+    }
+
+    if ((membership.lastReadAt ?? membership.createdAt) >= readThroughMessage.createdAt) return toChannelView(channel)
+    await ctx.db.patch(membership._id, { lastReadAt: readThroughMessage.createdAt })
     return toChannelView(channel)
   })
 })
@@ -773,6 +804,14 @@ export const createChannel = mutation({
       .unique()
     if (existing !== null) throw new Error("Channel already exists")
 
+    const existingChannels = await ctx.db
+      .query("channels")
+      .withIndex("by_workspace", (q) => q.eq("workspaceId", workspace._id))
+      .take(MAX_CHANNELS)
+    if (existingChannels.length >= MAX_CHANNELS) {
+      throw new Error(`Workspaces can contain at most ${MAX_CHANNELS} channels`)
+    }
+
     const now = Date.now()
     const channelId = await ctx.db.insert("channels", {
       workspaceId: workspace._id,
@@ -798,20 +837,29 @@ export const createChannel = mutation({
 
 export const channelMessages = query({
   args: {
-    channelId: v.id("channels")
+    channelId: v.id("channels"),
+    paginationOpts: paginationOptsValidator
   },
   handler: (ctx, args) => withDogfoodDiagnostics("channelMessages", { channelId: args.channelId }, async () => {
     const user = await requireAllowedCurrentUser(ctx)
 
     await requireChannelMember(ctx, { channelId: args.channelId, userId: user._id })
 
-    const messages = await ctx.db
+    if (!Number.isInteger(args.paginationOpts.numItems) || args.paginationOpts.numItems < 1 ||
+      args.paginationOpts.numItems > MAX_MESSAGE_PAGE_SIZE) {
+      throw new Error(`Message pages must contain between 1 and ${MAX_MESSAGE_PAGE_SIZE} items`)
+    }
+
+    const result = await ctx.db
       .query("messages")
       .withIndex("by_channel_created_at", (q) => q.eq("channelId", args.channelId))
       .order("desc")
-      .take(200)
+      .paginate(args.paginationOpts)
 
-    return toMessageViews(ctx, [...messages].reverse(), user._id)
+    return {
+      ...result,
+      page: await toMessageViews(ctx, result.page, user._id)
+    }
   })
 })
 
@@ -845,7 +893,7 @@ export const sendMessage = mutation({
     bodyLength: args.body.trim().length,
     attachmentCount: args.attachments?.length ?? 0
   }, async () => {
-    const body = args.body.trim()
+    const body = validateMessageBody(args.body, { allowEmpty: true })
     const attachments = await validateMessageAttachments(ctx, args.attachments)
     if (body.length === 0 && attachments.length === 0) throw new Error("Message body or attachment is required")
 
@@ -891,8 +939,7 @@ export const editMessage = mutation({
     messageId: args.messageId,
     bodyLength: args.body.trim().length
   }, async () => {
-    const body = args.body.trim()
-    if (body.length === 0) throw new Error("Message body is required")
+    const body = validateMessageBody(args.body)
 
     const user = await requireAllowedCurrentUser(ctx)
     const message = await ctx.db.get(args.messageId)
@@ -1080,36 +1127,45 @@ const toMessageViews = async (
   ctx: QueryCtx | MutationCtx,
   messages: ReadonlyArray<Doc<"messages">>,
   currentUserId: Id<"users">
-): Promise<ReadonlyArray<MessageView>> => {
+): Promise<Array<MessageView>> => {
   const authorNamesById = new Map<Id<"users">, string>()
   const reactionsByMessageId = new Map<Id<"messages">, Awaited<ReturnType<typeof reactionsForMessage>>>()
   const attachmentsByMessageId = new Map<Id<"messages">, Awaited<ReturnType<typeof attachmentsForMessage>>>()
   const parentsById = new Map<Id<"messages">, Doc<"messages"> | null>()
 
-  for (const message of messages) {
-    if (message.authorDisplayName !== undefined) continue
-    if (authorNamesById.has(message.authorUserId)) continue
-    const author = await ctx.db.get(message.authorUserId)
-    authorNamesById.set(message.authorUserId, author?.displayName ?? "Unknown")
-  }
+  const missingAuthorIds = Array.from(new Set(
+    messages.filter((message) => message.authorDisplayName === undefined).map((message) => message.authorUserId)
+  ))
+  const parentIds = Array.from(new Set(
+    messages.flatMap((message) => message.parentMessageId === undefined ? [] : [message.parentMessageId])
+  ))
 
-  for (const message of messages) {
-    reactionsByMessageId.set(message._id, await reactionsForMessage(ctx, { messageId: message._id, currentUserId }))
-  }
+  const [authors, reactions, attachmentViews, parents] = await Promise.all([
+    Promise.all(missingAuthorIds.map(async (authorId) => [authorId, await ctx.db.get(authorId)] as const)),
+    Promise.all(messages.map(async (message) => [
+      message._id,
+      await reactionsForMessage(ctx, { messageId: message._id, currentUserId })
+    ] as const)),
+    Promise.all(messages.map(async (message) => [message._id, await attachmentsForMessage(ctx, message)] as const)),
+    Promise.all(parentIds.map(async (parentId) => [parentId, await ctx.db.get(parentId)] as const))
+  ])
 
-  for (const message of messages) {
-    attachmentsByMessageId.set(message._id, await attachmentsForMessage(ctx, message))
-  }
+  authors.forEach(([authorId, author]) => authorNamesById.set(authorId, author?.displayName ?? "Unknown"))
+  reactions.forEach(([messageId, messageReactions]) => reactionsByMessageId.set(messageId, messageReactions))
+  attachmentViews.forEach(([messageId, attachments]) => attachmentsByMessageId.set(messageId, attachments))
+  parents.forEach(([parentId, parent]) => parentsById.set(parentId, parent))
 
-  for (const message of messages) {
-    if (message.parentMessageId === undefined || parentsById.has(message.parentMessageId)) continue
-    const parent = await ctx.db.get(message.parentMessageId)
-    parentsById.set(message.parentMessageId, parent)
-    if (parent !== null && parent.authorDisplayName === undefined && !authorNamesById.has(parent.authorUserId)) {
-      const author = await ctx.db.get(parent.authorUserId)
-      authorNamesById.set(parent.authorUserId, author?.displayName ?? "Unknown")
-    }
-  }
+  const missingParentAuthorIds = Array.from(new Set(
+    parents.flatMap(([, parent]) =>
+      parent !== null && parent.authorDisplayName === undefined && !authorNamesById.has(parent.authorUserId)
+        ? [parent.authorUserId]
+        : []
+    )
+  ))
+  const parentAuthors = await Promise.all(
+    missingParentAuthorIds.map(async (authorId) => [authorId, await ctx.db.get(authorId)] as const)
+  )
+  parentAuthors.forEach(([authorId, author]) => authorNamesById.set(authorId, author?.displayName ?? "Unknown"))
 
   return messages.map((message) => {
     const parent = message.parentMessageId === undefined ? null : parentsById.get(message.parentMessageId) ?? null

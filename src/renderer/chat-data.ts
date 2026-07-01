@@ -33,6 +33,8 @@ export type ChatDataModel = Pick<CollabSnapshot, "currentUser" | "workspace" | "
   readonly channelIndicators?: ReadonlyArray<ChatChannelIndicatorState>
   readonly channelMembersLoading?: boolean
   readonly channelMessagesLoading?: boolean
+  readonly channelMessagesHasMore?: boolean
+  readonly channelMessagesLoadingMore?: boolean
 }
 
 export type CreateChatChannel = (input: {
@@ -81,6 +83,7 @@ export type ChatDataView = {
   readonly deleteChannelMessage: DeleteChatMessage
   readonly editChannelMessage?: EditChatMessage
   readonly toggleMessageReaction?: ToggleChatMessageReaction
+  readonly loadOlderChannelMessages?: () => void
   readonly canDeleteMessages?: boolean
   readonly canDeleteMessage?: ChatMessageGuard
   readonly canEditMessage?: ChatMessageGuard
