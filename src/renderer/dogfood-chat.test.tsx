@@ -905,6 +905,7 @@ describe("ConvexDogfoodApp", () => {
   })
 
   it("passes compact dogfood mutation errors into the reused chat surface", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
     const { ConvexDogfoodApp } = await import("./dogfood-chat")
     mocks.auth.user = { id: "user-1" }
     mocks.convexAuth.isAuthenticated = true
@@ -916,6 +917,35 @@ describe("ConvexDogfoodApp", () => {
 
     expect(await screen.findByText(/^Could not send message\. Check your connection and try again\. Diagnostic: MUTATION-/)).toBeTruthy()
     expect(screen.queryByText(/secret mutation details/)).toBeNull()
+    const logs = JSON.stringify(warnSpy.mock.calls)
+    expect(logs).toContain("details redacted")
+    expect(logs).not.toContain("secret mutation details")
+    expect(logs).not.toContain("friend@example.com")
+    expect(logs).not.toContain("https://private.example")
+    expect(logs).not.toContain("Bearer token")
+    expect(logs).not.toContain("api_key")
+  })
+
+  it("sanitizes render-boundary failures and offers a recovery action", async () => {
+    const { DogfoodErrorBoundary } = await import("./dogfood-chat")
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+    const BrokenChat = () => {
+      throw new Error("secret render text https://private.example friend@example.com Bearer token api_key=oops")
+    }
+
+    render(<DogfoodErrorBoundary><BrokenChat /></DogfoodErrorBoundary>)
+
+    expect(screen.getByRole("heading", { name: "Chat Failed" })).toBeTruthy()
+    expect(screen.getByText("Something unexpected interrupted chat.")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Reload chat" })).toBeTruthy()
+    expect(screen.queryByText(/secret render text/)).toBeNull()
+    const logs = JSON.stringify(errorSpy.mock.calls)
+    expect(logs).toContain("details redacted")
+    expect(logs).not.toContain("secret render text")
+    expect(logs).not.toContain("private.example")
+    expect(logs).not.toContain("friend@example.com")
+    expect(logs).not.toContain("Bearer token")
+    expect(logs).not.toContain("api_key")
   })
 
   it("waits for Convex to authenticate before initializing the viewer", async () => {

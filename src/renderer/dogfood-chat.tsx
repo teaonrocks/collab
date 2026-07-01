@@ -410,7 +410,7 @@ function DogfoodShell(props: {
   )
 }
 
-class DogfoodErrorBoundary extends Component<
+export class DogfoodErrorBoundary extends Component<
   { readonly children: ReactNode },
   { readonly message: string | null }
 > {
@@ -421,15 +421,22 @@ class DogfoodErrorBoundary extends Component<
   }
 
   componentDidCatch(error: unknown, info: ErrorInfo) {
-    console.error("Dogfood chat failed", error, info)
+    const diagnostic = dogfoodDiagnostic("render", "try-again", error)
+    console.error("Dogfood chat failed", supportSafeDiagnostic(error), {
+      diagnostic,
+      componentStackPresent: (info.componentStack?.length ?? 0) > 0
+    })
   }
 
   render() {
     if (this.state.message !== null) {
       return (
         <DogfoodShell title="Chat Failed">
-          <p className="errorText max-w-[min(720px,calc(100vw-48px))] [overflow-wrap:anywhere] text-destructive-text">{this.state.message}</p>
+          <p className="errorText max-w-[min(720px,calc(100vw-48px))] [overflow-wrap:anywhere] text-destructive-text">Something unexpected interrupted chat.</p>
           <DogfoodDiagnosticDetails diagnostic={dogfoodDiagnostic("render", "try-again", this.state.message)} />
+          <button className={dogfoodPrimaryButtonClassName} type="button" onClick={() => window.location.reload()}>
+            Reload chat
+          </button>
         </DogfoodShell>
       )
     }
@@ -696,6 +703,11 @@ const safeErrorFingerprint = (cause: unknown): string => {
   return Math.abs(hash).toString(36).padStart(6, "0").slice(0, 6).toUpperCase()
 }
 
+const supportSafeDiagnostic = (cause: unknown): string => {
+  const kind = cause instanceof Error && cause.name.trim().length > 0 ? cause.name : "UnknownError"
+  return `${kind}: details redacted`
+}
+
 const logDogfoodDiagnostic = (
   context: string,
   cause: unknown,
@@ -704,7 +716,7 @@ const logDogfoodDiagnostic = (
   console.warn("Dogfood chat diagnostic", {
     context,
     diagnostic,
-    message: errorMessage(cause)
+    message: supportSafeDiagnostic(cause)
   })
 }
 

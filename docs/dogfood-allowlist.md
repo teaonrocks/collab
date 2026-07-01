@@ -1,29 +1,24 @@
 # Dogfood Allowlist Management
 
-Dogfood access is managed server-side in Convex. The renderer never receives the operator key,
+Dogfood access is managed server-side in Convex. The renderer never receives deployment credentials,
 allowlist contents, WorkOS secrets, Convex deploy keys, or raw auth claims.
 
-## Operator Setup
-
-Set a shared operator key in the production deployment:
-
-```sh
-pnpm convex env set --prod AETHER_ALLOWLIST_OPERATOR_KEY
-```
+## Operator Access
 
 `AETHER_ALLOWED_EMAILS` remains supported as a bootstrap list, but day-to-day changes should use the
-Convex allowlist functions below. Once the operator key is configured, keep `AETHER_ALLOWED_EMAILS`
+internal Convex allowlist function below from a shell authenticated to the production deployment. Keep `AETHER_ALLOWED_EMAILS`
 empty or limited to emergency bootstrap operators so removals are driven by Convex data instead of
 manual env edits.
 
 ## Add A User
 
-Run the mutation from an operator shell. Keep the key out of docs, screenshots, Linear comments, and
-terminal transcripts shared with dogfood users.
+Run the internal mutation from an operator shell. The required `operator` is the human owner/admin
+making the change; use a stable, recognizable name. Convex deployment authentication authorizes the
+command, so no shared secret appears in the command arguments or mutation payload.
 
 ```sh
-pnpm convex run --prod chat:updateDogfoodAllowlist '{
-  "operatorKey": "<shared-operator-key>",
+pnpm convex run --prod chat:administerDogfoodAllowlist '{
+  "operator": "Archer Chua",
   "email": "friend@example.com",
   "action": "add",
   "reason": "initial dogfood invite"
@@ -36,8 +31,8 @@ dogfood workspace.
 ## Remove A User
 
 ```sh
-pnpm convex run --prod chat:updateDogfoodAllowlist '{
-  "operatorKey": "<shared-operator-key>",
+pnpm convex run --prod chat:administerDogfoodAllowlist '{
+  "operator": "Archer Chua",
   "email": "friend@example.com",
   "action": "remove",
   "reason": "left dogfood group"
@@ -54,9 +49,11 @@ Each add or remove writes a `dogfoodAllowlistAudit` row with:
 
 - normalized email
 - action
-- operator label
+- attributable operator identity
 - optional reason
 - timestamp
 
 Use the Convex dashboard or a local inspection query when reviewing dogfood access changes. Audit rows
-intentionally do not store the operator key or renderer-visible secrets.
+intentionally do not store deployment credentials or renderer-visible secrets. Rejected calls emit a
+support-safe Convex failure event with the operation, action, reason length, and timestamp supplied by
+the platform; credentials and raw error details are never logged.

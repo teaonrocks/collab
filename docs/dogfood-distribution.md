@@ -77,7 +77,6 @@ and tester instructions.
    pnpm convex env set --prod WORKOS_API_KEY
    pnpm convex env set --prod WORKOS_CLIENT_ID
    pnpm convex env set --prod WORKOS_ENVIRONMENT_ID
-   pnpm convex env set --prod AETHER_ALLOWLIST_OPERATOR_KEY
    # Optional emergency bootstrap only:
    pnpm convex env set --prod AETHER_ALLOWED_EMAILS
    pnpm convex env list --prod --names-only

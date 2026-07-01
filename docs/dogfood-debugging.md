@@ -29,12 +29,15 @@ Renderer failures log `Dogfood chat diagnostic` in the dev console with:
 - `context`: the failing UI path.
 - `diagnostic.code`: the short code visible in the UI.
 - `diagnostic.at`: an ISO timestamp.
-- `message`: the sanitized client error message.
+- `message`: only the error kind plus an explicit `details redacted` marker.
 
 Convex function failures log `Dogfood Convex function failed` with:
 
 - `operation`: the Convex function that failed.
 - `context`: safe IDs, counts, or lengths such as `channelId`, `messageId`, `bodyLength`, and `attachmentCount`.
-- `error`: the thrown error message.
+- `error`: only the error kind plus an explicit redaction and support guidance.
 
-These logs intentionally avoid emails, token identifiers, raw auth claims, API keys, and environment values. Treat any new diagnostic field as public-support-safe before adding it.
+These friend-shareable logs intentionally avoid URLs, emails, token identifiers, raw auth claims,
+API keys, environment values, backend messages, and synthetic secret text. Render-boundary failures
+show a compact generic message, diagnostic code, and Reload chat recovery action. Treat any new
+diagnostic field as public-support-safe before adding it.

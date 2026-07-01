@@ -26,7 +26,6 @@ const leeIdentity = {
 
 beforeEach(() => {
   vi.stubEnv("AETHER_ALLOWED_EMAILS", "maya@example.com,lee@example.com")
-  vi.stubEnv("AETHER_ALLOWLIST_OPERATOR_KEY", "test-operator-key")
 })
 
 afterEach(() => {
@@ -35,7 +34,7 @@ afterEach(() => {
 })
 
 describe("dogfood channel memberships", () => {
-  it("adds dogfood allowlist entries through an operator-key protected flow and audits the change", async () => {
+  it("adds dogfood allowlist entries through deployment-scoped tooling and audits the operator", async () => {
     const t = convexTest(schema, modules)
     const diegoIdentity = {
       tokenIdentifier: "https://issuer.example|diego",
@@ -49,8 +48,8 @@ describe("dogfood channel memberships", () => {
       displayName: diegoIdentity.name
     })).rejects.toThrow("This email is not on the Aether dogfood allowlist")
 
-    await expect(t.mutation(api.chat.updateDogfoodAllowlist, {
-      operatorKey: "test-operator-key",
+    await expect(t.mutation(internal.chat.administerDogfoodAllowlist, {
+      operator: "Archer Chua",
       email: "  Diego@Example.com ",
       action: "add",
       reason: "  first dogfood group  "
@@ -78,14 +77,14 @@ describe("dogfood channel memberships", () => {
     expect(records.entry).toMatchObject({
       email: "diego@example.com",
       active: true,
-      createdBy: "operator-key",
-      updatedBy: "operator-key"
+      createdBy: "Archer Chua",
+      updatedBy: "Archer Chua"
     })
     expect(records.audit).toEqual([
       expect.objectContaining({
         email: "diego@example.com",
         action: "add",
-        operator: "operator-key",
+        operator: "Archer Chua",
         reason: "first dogfood group"
       })
     ])
@@ -99,8 +98,8 @@ describe("dogfood channel memberships", () => {
       displayName: leeIdentity.name
     })
 
-    await expect(t.mutation(api.chat.updateDogfoodAllowlist, {
-      operatorKey: "test-operator-key",
+    await expect(t.mutation(internal.chat.administerDogfoodAllowlist, {
+      operator: "Archer Chua",
       email: "Lee@Example.com",
       action: "remove",
       reason: "offboarded"
@@ -129,14 +128,15 @@ describe("dogfood channel memberships", () => {
     ])
   })
 
-  it("rejects allowlist management without the server-side operator key", async () => {
+  it("rejects allowlist management without an attributable operator and logs no credentials", async () => {
     const t = convexTest(schema, modules)
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
-    await expect(t.mutation(api.chat.updateDogfoodAllowlist, {
-      operatorKey: "wrong-key",
+    await expect(t.mutation(internal.chat.administerDogfoodAllowlist, {
+      operator: "   ",
       email: "friend@example.com",
       action: "add"
-    })).rejects.toThrow("Dogfood allowlist operator key is invalid")
+    })).rejects.toThrow("Operator identity must contain between 1 and 120 characters")
 
     const audit = await t.run((ctx) =>
       ctx.db
@@ -145,6 +145,10 @@ describe("dogfood channel memberships", () => {
         .collect()
     )
     expect(audit).toEqual([])
+    const serializedLogs = JSON.stringify(errorSpy.mock.calls)
+    expect(serializedLogs).toContain("administerDogfoodAllowlist")
+    expect(serializedLogs).not.toContain("friend@example.com")
+    expect(serializedLogs).not.toContain("Operator identity must")
   })
 
   it("logs sanitized Convex diagnostic context when a dogfood function fails", async () => {
@@ -156,20 +160,27 @@ describe("dogfood channel memberships", () => {
       displayName: mayaIdentity.name
     })
 
-    await expect(t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design!" }))
+    const unsafeInput = "https://private.example/friend@example.com?token=secret&api_key=oops"
+    await expect(t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: unsafeInput }))
       .rejects.toThrow("Channel names can only use letters, numbers, dashes, and underscores")
 
     expect(errorSpy).toHaveBeenCalledWith("Dogfood Convex function failed", expect.objectContaining({
       operation: "createChannel",
       context: expect.objectContaining({
-        nameLength: "7",
+        nameLength: String(unsafeInput.length),
         visibility: "public"
       }),
-      error: "Channel names can only use letters, numbers, dashes, and underscores"
+      error: "Error: details redacted; use the diagnostic context and timestamp for support"
     }))
     const serializedLogs = JSON.stringify(errorSpy.mock.calls)
     expect(serializedLogs).not.toContain(mayaIdentity.email)
     expect(serializedLogs).not.toContain(mayaIdentity.tokenIdentifier)
+    expect(serializedLogs).not.toContain("Channel names can only")
+    expect(serializedLogs).not.toContain("https://private.example/path?token=secret")
+    expect(serializedLogs).not.toContain("secret mutation details")
+    expect(serializedLogs).not.toContain("friend@example.com")
+    expect(serializedLogs).not.toContain("token=secret")
+    expect(serializedLogs).not.toContain("api_key=oops")
   })
 
   it("normalizes channel names and rejects empty, duplicate, and unsupported names", async () => {

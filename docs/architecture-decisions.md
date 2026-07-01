@@ -187,7 +187,7 @@ deferred.
 #### Gate Access With A Server-Side Email Allowlist
 
 Only allowlisted, authenticated users may read or mutate chat data. The initial environment list is
-now a bootstrap mechanism; regular changes use the operator-key-protected Convex mutation and audit
+now a bootstrap mechanism; regular changes use deployment-scoped internal Convex tooling and an attributable audit
 table documented in `docs/dogfood-allowlist.md`. Invite links and WorkOS organization membership are
 still deferred.
 

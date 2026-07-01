@@ -60,16 +60,6 @@ const bootstrapAllowedEmails = (): ReadonlySet<string> =>
       .filter((email) => email.length > 0)
   )
 
-const requireAllowlistOperatorKey = (operatorKey: string): void => {
-  const expected = process.env.AETHER_ALLOWLIST_OPERATOR_KEY
-  if (expected === undefined || expected.trim().length === 0) {
-    throw new Error("Dogfood allowlist operator key is not configured")
-  }
-  if (operatorKey !== expected) {
-    throw new Error("Dogfood allowlist operator key is invalid")
-  }
-}
-
 const emailFromIdentity = (identity: ViewerIdentity): string | undefined =>
   identity.email ??
   stringClaim(identity, "properties.email") ??
@@ -209,6 +199,11 @@ const workOsField = (body: unknown, key: string): string | undefined => {
 
 type DogfoodDiagnosticContext = Record<string, string | number | boolean | null | undefined>
 
+const supportSafeDiagnosticError = (cause: unknown): string => {
+  const kind = cause instanceof Error && cause.name.trim().length > 0 ? cause.name : "UnknownError"
+  return `${kind}: details redacted; use the diagnostic context and timestamp for support`
+}
+
 const withDogfoodDiagnostics = async <Result>(
   operation: string,
   context: DogfoodDiagnosticContext,
@@ -224,7 +219,7 @@ const withDogfoodDiagnostics = async <Result>(
           .filter(([, value]) => value !== undefined)
           .map(([key, value]) => [key, value === null ? null : String(value)])
       ),
-      error: cause instanceof Error ? cause.message : "Unknown error"
+      error: supportSafeDiagnosticError(cause)
     })
     throw cause
   }
@@ -603,21 +598,23 @@ export const cleanupAbandonedAttachmentUpload = internalMutation({
   }
 })
 
-export const updateDogfoodAllowlist = mutation({
+export const administerDogfoodAllowlist = internalMutation({
   args: {
-    operatorKey: v.string(),
+    operator: v.string(),
     email: v.string(),
     action: v.union(v.literal("add"), v.literal("remove")),
     reason: v.optional(v.string())
   },
-  handler: (ctx, args) => withDogfoodDiagnostics("updateDogfoodAllowlist", {
+  handler: (ctx, args) => withDogfoodDiagnostics("administerDogfoodAllowlist", {
     action: args.action,
     reasonLength: args.reason?.trim().length ?? 0
   }, async () => {
-    requireAllowlistOperatorKey(args.operatorKey)
+    const operator = args.operator.trim().replace(/\s+/g, " ")
+    if (operator.length === 0 || operator.length > 120) {
+      throw new Error("Operator identity must contain between 1 and 120 characters")
+    }
     const email = normalizeViewerEmail(args.email)
     const now = Date.now()
-    const operator = "operator-key"
     const reason = allowlistReason(args.reason)
     const existing = await ctx.db
       .query("dogfoodAllowlistEntries")
