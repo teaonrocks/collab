@@ -1513,11 +1513,8 @@ function ChannelMessageRow(props: {
                 {message.attachments.length === 0 ? null : <MessageAttachmentList attachments={message.attachments} />}
               </>
             )}
-        {!deleted && !editing && onToggleReaction !== undefined
-          ? <MessageReactions message={message} onToggleReaction={onToggleReaction} />
-          : null}
       </div>
-      {deleted || editing || !actionsAvailable
+      {deleted || editing || (onToggleReaction === undefined && !actionsAvailable)
         ? null
         : (
           <div
@@ -1528,20 +1525,27 @@ function ChannelMessageRow(props: {
             aria-label={`Message actions for ${message.authorDisplayName}`}
             onClick={(event) => event.stopPropagation()}
           >
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className={messageActionButtonClassName}
-              aria-label={`More actions for message from ${message.authorDisplayName}`}
-              onClick={(event) => {
-                const rect = event.currentTarget.getBoundingClientRect()
-                const x = Math.max(MESSAGE_CONTEXT_MENU_OFFSET, rect.right - MESSAGE_CONTEXT_MENU_WIDTH)
-                onOpenMenu(x, rect.bottom + MESSAGE_CONTEXT_MENU_OFFSET)
-              }}
-            >
-              <Ellipsis className={iconClassName} aria-hidden="true" />
-            </Button>
+            {onToggleReaction === undefined
+              ? null
+              : <MessageReactions message={message} onToggleReaction={onToggleReaction} />}
+            {actionsAvailable
+              ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className={messageActionButtonClassName}
+                  aria-label={`More actions for message from ${message.authorDisplayName}`}
+                  onClick={(event) => {
+                    const rect = event.currentTarget.getBoundingClientRect()
+                    const x = Math.max(MESSAGE_CONTEXT_MENU_OFFSET, rect.right - MESSAGE_CONTEXT_MENU_WIDTH)
+                    onOpenMenu(x, rect.bottom + MESSAGE_CONTEXT_MENU_OFFSET)
+                  }}
+                >
+                  <Ellipsis className={iconClassName} aria-hidden="true" />
+                </Button>
+              )
+              : null}
           </div>
         )}
     </article>
@@ -1684,7 +1688,7 @@ function MessageReactions(props: {
   const visibleEmojis = Array.from(new Set([...reactions.map((reaction) => reaction.emoji), ...reactionPalette]))
 
   return (
-    <div className="messageReactions mt-1 flex min-w-0 flex-wrap items-center gap-1" aria-label={`Reactions for message from ${message.authorDisplayName}`}>
+    <div className="messageReactions flex min-w-0 items-center" aria-label={`Reactions for message from ${message.authorDisplayName}`}>
       {visibleEmojis.map((emoji) => {
         const reaction = reactionByEmoji.get(emoji)
         const count = reaction?.count ?? 0
@@ -1694,8 +1698,7 @@ function MessageReactions(props: {
             key={emoji}
             type="button"
             className={classNames(
-              "messageReaction inline-flex h-6 min-w-6 items-center justify-center gap-1 rounded-control border border-border bg-surface-canvas px-1.5 text-xs leading-none text-foreground-muted hover:border-border-strong hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-              count === 0 && "opacity-0 group-hover/message:opacity-100 group-has-[:focus-visible]/message:opacity-100",
+              "messageReaction inline-flex size-[34px] min-h-[30px] items-center justify-center gap-1 rounded-none border-0 border-l border-surface-rail bg-surface-raised px-1.5 text-xs leading-none text-foreground-muted first:border-l-0 hover:bg-surface-muted hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
               active && "border-foreground bg-surface-muted text-foreground"
             )}
             aria-pressed={active}

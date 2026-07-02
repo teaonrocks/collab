@@ -37,11 +37,7 @@
 - Do not edit generated build output under `out/`; regenerate it with `pnpm build`.
 - Add or update colocated tests for changed RPC contracts, transport behavior, repo persistence, atoms, or UI behavior.
 
-## Commit Attribution
-AI commits MUST include:
-```
-Co-Authored-By: (the agent's name and attribution byline)
-```
+
 
 <!-- convex-ai-start -->
 

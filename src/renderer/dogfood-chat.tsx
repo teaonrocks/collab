@@ -40,8 +40,8 @@ const dogfoodShellClassName =
   "loadingShell grid min-h-screen w-full place-items-center overflow-hidden bg-surface-canvas p-6 font-sans text-foreground"
 const dogfoodAuthPanelClassName =
   "dogfoodAuthPanel flex w-[min(420px,100%)] flex-col items-start gap-3.5 rounded-card border border-border bg-surface-canvas p-5 shadow-panel [&_div]:m-0 [&_div]:text-sm [&_div]:leading-[1.45] [&_div]:text-foreground-muted [&_h1]:m-0 [&_h1]:text-lg [&_h1]:leading-tight [&_h1]:text-foreground [&_p]:m-0 [&_p]:text-sm [&_p]:leading-[1.45] [&_p]:text-foreground-muted"
-const dogfoodAuthBareClassName =
-  "dogfoodAuthBare flex w-[min(420px,100%)] flex-col items-center gap-[18px] [&_div]:flex [&_div]:justify-center [&_h1]:m-0 [&_h1]:text-center [&_h1]:text-[32px] [&_h1]:font-extrabold [&_h1]:leading-[1.1] [&_h1]:text-foreground-strong"
+const dogfoodPlainStateClassName =
+  "dogfoodPlainState flex w-[min(420px,100%)] flex-col items-center gap-4 text-center [&_div]:m-0 [&_div]:flex [&_div]:h-10 [&_div]:items-center [&_div]:justify-center [&_div]:text-sm [&_div]:leading-[1.45] [&_div]:text-foreground-muted [&_h1]:m-0 [&_h1]:text-lg [&_h1]:leading-tight [&_h1]:text-foreground"
 const dogfoodPrimaryButtonClassName =
   "dogfoodPrimaryButton min-h-9 cursor-pointer rounded-panel border border-foreground-strong bg-foreground-strong px-3.5 font-[inherit] font-bold text-foreground-inverse disabled:cursor-default disabled:border-foreground-subtle disabled:bg-foreground-subtle"
 const dogfoodSecondaryButtonClassName =
@@ -290,12 +290,12 @@ function ConvexDogfoodChat() {
   )
 
   if (auth.isLoading) {
-    return <DogfoodShell title="Checking Session">Loading your Aether session...</DogfoodShell>
+    return <DogfoodShell title="Checking Session" variant="plain">Loading your Aether session...</DogfoodShell>
   }
 
   if (auth.user === null) {
     return (
-      <DogfoodShell title="Aether Dogfood" variant="bare">
+      <DogfoodShell title="Welcome to Aether" variant="plain">
         <button
           type="button"
           className={dogfoodPrimaryButtonClassName}
@@ -309,7 +309,7 @@ function ConvexDogfoodChat() {
   }
 
   if (!convexAuth.isAuthenticated) {
-    return <DogfoodShell title="Checking Session">Waiting for your AuthKit session to reach Convex...</DogfoodShell>
+    return <DogfoodShell title="Checking Session" variant="plain">Waiting for your AuthKit session to reach Convex...</DogfoodShell>
   }
 
   if (error !== null) {
@@ -337,7 +337,7 @@ function ConvexDogfoodChat() {
 
   if (!viewerReady) {
     return (
-      <DogfoodShell title="Preparing Workspace">
+      <DogfoodShell title="Preparing Workspace" variant="plain">
         {ensureAttempt > 0
           ? "Retrying dogfood access and reconnecting to the shared channel..."
           : "Checking your dogfood access and setting up the shared channel..."}
@@ -346,11 +346,11 @@ function ConvexDogfoodChat() {
   }
 
   if (workspace === null) {
-    return <DogfoodShell title="Preparing Workspace">Setting up the shared channel...</DogfoodShell>
+    return <DogfoodShell title="Preparing Workspace" variant="plain">Setting up the shared channel...</DogfoodShell>
   }
 
   if (model === null) {
-    return <DogfoodShell title="Loading Chat">Waiting for realtime messages...</DogfoodShell>
+    return <DogfoodShell title="Loading Chat" variant="plain">Waiting for realtime messages...</DogfoodShell>
   }
 
   return (
@@ -402,12 +402,12 @@ function DogfoodDiagnosticDetails(props: { readonly diagnostic: DogfoodDiagnosti
 function DogfoodShell(props: {
   readonly title: string
   readonly children: ReactNode
-  readonly variant?: "panel" | "bare"
+  readonly variant?: "panel" | "plain"
 }) {
-  const variant = props.variant ?? "panel"
   return (
     <main className={dogfoodShellClassName}>
-      <section className={variant === "bare" ? dogfoodAuthBareClassName : dogfoodAuthPanelClassName} aria-live="polite">
+      <section className={props.variant === "plain" ? dogfoodPlainStateClassName : dogfoodAuthPanelClassName} aria-live="polite">
+        {props.variant === "plain" ? null : <span className="text-xs font-bold uppercase tracking-[0.08em] text-foreground-subtle">Aether Dogfood</span>}
         <h1>{props.title}</h1>
         <div>{props.children}</div>
       </section>

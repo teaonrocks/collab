@@ -1567,12 +1567,13 @@ describe("App", () => {
     expect((await screen.findAllByLabelText("Deselect message from Maya Patel")).length).toBeGreaterThan(0)
   })
 
-  it("shows only the icon More button in the inline message actions", async () => {
+  it("shows reaction buttons beside the icon More button in the inline message actions", async () => {
     const { container } = render(
       <WorkspaceChat
         model={makeChatModel()}
         createChannelMessage={() => Promise.resolve()}
         deleteChannelMessage={() => Promise.resolve()}
+        toggleMessageReaction={() => Promise.resolve()}
       />
     )
 
@@ -1580,8 +1581,9 @@ describe("App", () => {
     const actions = container.querySelector(".messageActions")
     expect(actions).not.toBeNull()
     const buttons = Array.from(actions!.querySelectorAll("button"))
-    expect(buttons).toHaveLength(1)
-    expect(buttons[0]?.textContent).toBe("")
+    expect(buttons).toHaveLength(4)
+    expect(buttons.slice(0, 3).map((button) => button.textContent)).toEqual(["👍", "🎉", "👀"])
+    expect(buttons[3]?.textContent).toBe("")
     expect(screen.getByLabelText("More actions for message from Maya Patel")).toBeTruthy()
   })
 
@@ -1616,6 +1618,7 @@ describe("App", () => {
     expect(reaction.textContent).toContain("2")
 
     const message = reaction.closest(".channelMessage")
+    expect(reaction.closest(".messageActions")).not.toBeNull()
     expect(message?.className).toContain("has-[:focus-visible]:bg-surface-muted")
     expect(message?.className).not.toContain("focus-within:bg-surface-muted")
 

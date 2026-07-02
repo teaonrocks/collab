@@ -629,7 +629,7 @@ describe("ConvexDogfoodApp", () => {
 
     render(<ConvexDogfoodApp />)
 
-    expect(screen.getByRole("heading", { name: "Aether Dogfood" })).toBeTruthy()
+    expect(screen.getByRole("heading", { name: "Welcome to Aether" })).toBeTruthy()
     expect(screen.getByRole("button", { name: "Sign in" })).toBeTruthy()
   })
 
