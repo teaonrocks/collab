@@ -2,8 +2,8 @@ import { RpcClient } from "@effect/rpc"
 import { Effect, Layer } from "effect"
 import { CollabRpcs } from "../shared/collab-rpc"
 import { type IpcClientPort, layerIpcClient } from "../shared/rpc-client"
-import { layerChatDataFromCollabApi } from "./chat-data"
 import { CollabApi } from "./collab-api"
+import { layerLegacyChatDataFromCollabApi } from "./legacy-chat-data"
 
 export const layerCollabApi: Layer.Layer<CollabApi, never, RpcClient.Protocol> = Layer.scoped(
   CollabApi,
@@ -56,5 +56,5 @@ export const CollabApiLive: Layer.Layer<CollabApi> = layerCollabApi.pipe(Layer.p
 
 export const RendererDataLive = Layer.merge(
   CollabApiLive,
-  layerChatDataFromCollabApi.pipe(Layer.provide(CollabApiLive))
+  layerLegacyChatDataFromCollabApi.pipe(Layer.provide(CollabApiLive))
 )

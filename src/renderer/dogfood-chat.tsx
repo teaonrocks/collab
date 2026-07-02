@@ -3,23 +3,26 @@ import { useAction, useConvexAuth, useMutation, usePaginatedQuery, useQuery } fr
 import { Component, type ErrorInfo, type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import { api } from "../../convex/_generated/api"
 import type { Id } from "../../convex/_generated/dataModel"
-import type { ChatDataView } from "./chat-data"
-import {
-  Channel,
-  type ChannelId,
-  ChannelMessage,
-  ChannelMessageAttachment,
-  type ChannelMessageId,
-  ChannelMessageParent,
-  ChannelMessageReaction,
-  HumanAccount,
-  type HumanAccountId,
-  Workspace,
-  type WorkspaceId
-} from "../shared/collab-rpc"
-import { WorkspaceChat } from "./App"
+import type { ChatMessageAttachment } from "./chat-data"
 import { authKitSignOutReturnTo } from "./authkit-redirect"
+import {
+  dogfoodChatToChatData,
+  type DogfoodChannelMemberView,
+  type DogfoodChannelMessageView,
+  type DogfoodChannelView,
+  type DogfoodWorkspaceView
+} from "./dogfood-chat-adapter"
 import { openExternalUrl } from "./electron-shell"
+import { WorkspaceChat } from "./workspace-chat"
+
+export { dogfoodChatToChatData } from "./dogfood-chat-adapter"
+export type {
+  DogfoodChannelMemberView,
+  DogfoodChannelMessageView,
+  DogfoodChannelView,
+  DogfoodMessageAttachmentView,
+  DogfoodWorkspaceView
+} from "./dogfood-chat-adapter"
 
 type ConvexDogfoodError = {
   readonly message: string
@@ -34,8 +37,6 @@ type DogfoodDiagnostic = {
   readonly source: "auth" | "viewer" | "channel" | "mutation" | "render"
   readonly retry: "sign-in" | "try-again" | "automatic" | "message-action"
 }
-const dogfoodMessageReactionEmojis = new Set<string>(["👍", "🎉", "👀"])
-
 const dogfoodShellClassName =
   "loadingShell grid min-h-screen w-full place-items-center overflow-hidden bg-surface-canvas p-6 font-sans text-foreground"
 const dogfoodAuthPanelClassName =
@@ -46,68 +47,6 @@ const dogfoodPrimaryButtonClassName =
   "dogfoodPrimaryButton min-h-9 cursor-pointer rounded-panel border border-foreground-strong bg-foreground-strong px-3.5 font-[inherit] font-bold text-foreground-inverse disabled:cursor-default disabled:border-foreground-subtle disabled:bg-foreground-subtle"
 const dogfoodSecondaryButtonClassName =
   "dogfoodSecondaryButton min-h-9 cursor-pointer rounded-panel border border-border-strong bg-surface-canvas px-3.5 font-[inherit] font-bold text-foreground"
-
-export type DogfoodChannelView = {
-  readonly id: Id<"channels">
-  readonly key: string
-  readonly name: string
-  readonly visibility: "public" | "private"
-  readonly createdAt: number
-}
-
-export type DogfoodWorkspaceView = {
-  readonly currentUser: {
-    readonly id: Id<"users">
-    readonly displayName: string
-  }
-  readonly workspace: {
-    readonly id: Id<"workspaces">
-    readonly name: string
-  }
-  readonly channel: {
-    readonly id: Id<"channels">
-    readonly name: string
-    readonly visibility: "public" | "private"
-  }
-}
-
-export type DogfoodChannelMessageView = {
-  readonly id: Id<"messages">
-  readonly channelId: Id<"channels">
-  readonly authorUserId: Id<"users">
-  readonly authorDisplayName: string
-  readonly body: string
-  readonly parentMessageId?: Id<"messages"> | null
-  readonly parentMessage?: {
-    readonly id: Id<"messages">
-    readonly authorDisplayName: string
-    readonly bodyPreview: string
-    readonly deleted: boolean
-  } | null
-  readonly createdAt: number
-  readonly editedAt?: number | null
-  readonly reactions?: ReadonlyArray<{
-    readonly emoji: string
-    readonly count: number
-    readonly reactedByCurrentUser: boolean
-  }>
-  readonly attachments?: ReadonlyArray<DogfoodMessageAttachmentView>
-}
-
-export type DogfoodMessageAttachmentView = {
-  readonly storageId: Id<"_storage">
-  readonly name: string
-  readonly contentType: string
-  readonly size: number
-  readonly kind: "file" | "image"
-  readonly url: string | null
-}
-
-export type DogfoodChannelMemberView = {
-  readonly id: Id<"users">
-  readonly displayName: string
-  readonly joinedAt: number
-}
 
 export function ConvexDogfoodApp() {
   return (
@@ -139,6 +78,7 @@ function ConvexDogfoodChat() {
   const [signInOpening, setSignInOpening] = useState(false)
   const [ensureAttempt, setEnsureAttempt] = useState(0)
   const lastReadMarkerRef = useRef<string | null>(null)
+  const storageIdsRef = useRef(new Map<string, Id<"_storage">>())
   const authUserId = auth.user?.id ?? null
   const sessionReady = authUserId !== null && convexAuth.isAuthenticated
   const viewerReady = sessionReady && ensuredUserId === authUserId && error === null
@@ -255,37 +195,46 @@ function ConvexDogfoodChat() {
     () => workspace === undefined || workspace === null || channelList === undefined || activeChannelId === undefined
       ? null
       : dogfoodChatToChatData({
-        workspace,
-        channels: channelList,
-        selectedChannelId: activeChannelId,
-        messages,
-        members: members ?? [],
-        channelIndicators: channelIndicators ?? [],
-        messagesLoading: messagePagination.status === "LoadingFirstPage",
-        messagesHasMore: messagePagination.status === "CanLoadMore" || messagePagination.status === "LoadingMore",
-        messagesLoadingMore: messagePagination.status === "LoadingMore",
-        loadOlderMessages: () => messagePagination.loadMore(50),
-        membersLoading: members === undefined,
-        createChannel: async (input) => {
-          const channel = await createChannel(input)
-          setCreatedChannels((existing) => mergeDogfoodChannels(existing, [channel]))
-          setJoinedChannelIds((existing) => new Set([...existing, channel.id]))
-          setSelectedChannelId(channel.id)
-          return channel
-        },
-        selectChannel: (channelId) => setSelectedChannelId(channelId),
-        sendMessage,
-        uploadMessageAttachment: (file) => uploadDogfoodAttachment(
-          generateAttachmentUploadUrl,
-          registerAttachmentUpload,
-          deleteAttachmentUpload,
-          file
-        ),
-        discardMessageAttachment: (attachment) => deleteAttachmentUpload({ storageId: toConvexStorageId(attachment.storageId) }),
-        editMessage,
-        deleteMessage,
-        toggleMessageReaction
-      }),
+          workspace,
+          channels: channelList,
+          selectedChannelId: activeChannelId,
+          messages,
+          members: members ?? [],
+          channelIndicators: channelIndicators ?? [],
+          messagesLoading: messagePagination.status === "LoadingFirstPage",
+          messagesHasMore: messagePagination.status === "CanLoadMore" || messagePagination.status === "LoadingMore",
+          messagesLoadingMore: messagePagination.status === "LoadingMore",
+          loadOlderMessages: () => messagePagination.loadMore(50),
+          membersLoading: members === undefined,
+          createChannel: async (input) => {
+            const channel = await createChannel(input)
+            setCreatedChannels((existing) => mergeDogfoodChannels(existing, [channel]))
+            setJoinedChannelIds((existing) => new Set([...existing, channel.id]))
+            setSelectedChannelId(channel.id)
+            return channel
+          },
+          selectChannel: (channelId) => setSelectedChannelId(channelId),
+          sendMessage,
+          uploadMessageAttachment: (file) => uploadDogfoodAttachment(
+            generateAttachmentUploadUrl,
+            registerAttachmentUpload,
+            deleteAttachmentUpload,
+            storageIdsRef.current,
+            file
+          ),
+          discardMessageAttachment: (attachment) => deleteAttachmentUpload({
+            storageId: requiredStorageId(storageIdsRef.current, attachment.storageId)
+          }),
+          resolveStorageId: (storageId) => requiredStorageId(storageIdsRef.current, storageId),
+          editMessage,
+          deleteMessage,
+          toggleMessageReaction: ({ channelId, messageId, emoji }) => toggleMessageReaction({
+            channelId,
+            messageId,
+            emoji: toDogfoodMessageReactionEmoji(emoji)
+          }),
+          operationErrorMessage: dogfoodOperationErrorMessage
+        }),
     [activeChannelId, channelIndicators, channelList, createChannel, deleteAttachmentUpload, deleteMessage, editMessage, generateAttachmentUploadUrl, members, messagePagination, messages, registerAttachmentUpload, sendMessage, toggleMessageReaction, workspace]
   )
 
@@ -450,199 +399,6 @@ export class DogfoodErrorBoundary extends Component<
   }
 }
 
-export const dogfoodChatToChatData = (input: {
-  readonly workspace: DogfoodWorkspaceView
-  readonly channels: ReadonlyArray<DogfoodChannelView>
-  readonly selectedChannelId: Id<"channels">
-  readonly messages: ReadonlyArray<DogfoodChannelMessageView>
-  readonly members?: ReadonlyArray<DogfoodChannelMemberView>
-  readonly channelIndicators?: ReadonlyArray<{
-    readonly channelId: Id<"channels">
-    readonly indicator: "unread" | "mentioned"
-  }>
-  readonly messagesLoading?: boolean
-  readonly messagesHasMore?: boolean
-  readonly messagesLoadingMore?: boolean
-  readonly membersLoading?: boolean
-  readonly createChannel?: (input: { readonly name: string; readonly visibility?: "public" | "private" }) => Promise<DogfoodChannelView>
-  readonly selectChannel?: (channelId: Id<"channels">) => void
-  readonly sendMessage: (input: {
-    readonly channelId: Id<"channels">
-    readonly body: string
-    readonly parentMessageId?: Id<"messages">
-    readonly attachments?: Array<{
-      readonly storageId: Id<"_storage">
-      readonly name: string
-    }>
-  }) => Promise<unknown>
-  readonly uploadMessageAttachment?: (file: File) => Promise<ChannelMessageAttachment>
-  readonly discardMessageAttachment?: (attachment: ChannelMessageAttachment) => Promise<unknown>
-  readonly editMessage: (input: {
-    readonly channelId: Id<"channels">
-    readonly messageId: Id<"messages">
-    readonly body: string
-  }) => Promise<unknown>
-  readonly deleteMessage: (input: {
-    readonly channelId: Id<"channels">
-    readonly messageId: Id<"messages">
-  }) => Promise<unknown>
-  readonly toggleMessageReaction?: (input: {
-    readonly channelId: Id<"channels">
-    readonly messageId: Id<"messages">
-    readonly emoji: DogfoodMessageReactionEmoji
-  }) => Promise<unknown>
-  readonly loadOlderMessages?: () => void
-}): ChatDataView => {
-  const currentUserId = toHumanAccountId(input.workspace.currentUser.id)
-  const workspaceId = toWorkspaceId(input.workspace.workspace.id)
-  const selectedChannel =
-    input.channels.find((channel) => channel.id === input.selectedChannelId) ??
-    input.channels.find((channel) => channel.id === input.workspace.channel.id) ?? {
-      id: input.workspace.channel.id,
-      key: "general",
-      name: input.workspace.channel.name,
-      visibility: input.workspace.channel.visibility,
-      createdAt: 0
-    }
-  const channelId = toChannelId(selectedChannel.id)
-
-  return {
-    model: {
-      currentUser: new HumanAccount({
-        id: currentUserId,
-        displayName: input.workspace.currentUser.displayName,
-        email: "",
-        createdAt: 0
-      }),
-      workspace: new Workspace({
-        id: workspaceId,
-        name: input.workspace.workspace.name,
-        createdAt: 0
-      }),
-      channel: new Channel({
-        id: channelId,
-        workspaceId,
-        name: selectedChannel.name,
-        visibility: selectedChannel.visibility,
-        createdBy: currentUserId,
-        createdAt: selectedChannel.createdAt
-      }),
-      channels: input.channels.map((channel) => new Channel({
-        id: toChannelId(channel.id),
-        workspaceId,
-        name: channel.name,
-        visibility: channel.visibility,
-        createdBy: currentUserId,
-        createdAt: channel.createdAt
-      })),
-      channelMessages: input.messages.map(toLegacyChannelMessage),
-      channelMembers: input.members?.map((member) => ({
-        id: toHumanAccountId(member.id),
-        displayName: member.displayName
-      })),
-      channelIndicators: input.channelIndicators?.map((state) => ({
-        channelId: toChannelId(state.channelId),
-        indicator: state.indicator
-      })),
-      channelMembersLoading: input.membersLoading ?? false,
-      channelMessagesLoading: input.messagesLoading ?? false,
-      channelMessagesHasMore: input.messagesHasMore ?? false,
-      channelMessagesLoadingMore: input.messagesLoadingMore ?? false
-    },
-    createChannel: input.createChannel === undefined
-      ? undefined
-      : async ({ name, visibility }) => {
-        const channel = await input.createChannel!({ name, visibility })
-        return new Channel({
-          id: toChannelId(channel.id),
-          workspaceId,
-          name: channel.name,
-          visibility: channel.visibility,
-          createdBy: currentUserId,
-          createdAt: channel.createdAt
-        })
-      },
-    selectChannel: input.selectChannel === undefined
-      ? undefined
-      : (channelId) => input.selectChannel?.(toConvexChannelId(channelId)),
-    createChannelMessage: ({ channelId, body, parentMessageId, attachments }) => input.sendMessage({
-      channelId: toConvexChannelId(channelId),
-      body,
-      parentMessageId: parentMessageId == null ? undefined : toConvexMessageId(parentMessageId),
-      attachments: attachments?.map((attachment) => ({
-        storageId: toConvexStorageId(attachment.storageId),
-        name: attachment.name
-      }))
-    }),
-    uploadMessageAttachment: input.uploadMessageAttachment,
-    discardMessageAttachment: input.discardMessageAttachment,
-    editChannelMessage: ({ channelId, messageId, body }) =>
-      input.editMessage({ channelId: toConvexChannelId(channelId), messageId: toConvexMessageId(messageId), body }),
-    deleteChannelMessage: ({ channelId, messageId }) =>
-      input.deleteMessage({ channelId: toConvexChannelId(channelId), messageId: toConvexMessageId(messageId) }),
-    toggleMessageReaction: input.toggleMessageReaction === undefined
-      ? undefined
-      : ({ channelId, messageId, emoji }) => input.toggleMessageReaction!({
-        channelId: toConvexChannelId(channelId),
-        messageId: toConvexMessageId(messageId),
-        emoji: toDogfoodMessageReactionEmoji(emoji)
-      }),
-    loadOlderChannelMessages: input.loadOlderMessages,
-    operationErrorMessage: (operation, cause) => dogfoodOperationErrorMessage(operation, cause),
-    canEditMessage: (message) => message.authorId === currentUserId,
-    canDeleteMessage: (message) => message.authorId === currentUserId
-  }
-}
-
-const toLegacyChannelMessage = (message: DogfoodChannelMessageView): ChannelMessage =>
-  new ChannelMessage({
-    id: toChannelMessageId(message.id),
-    channelId: toChannelId(message.channelId),
-    authorType: "human",
-    authorId: message.authorUserId,
-    authorDisplayName: message.authorDisplayName,
-    body: message.body,
-    createdAt: message.createdAt,
-    editedAt: message.editedAt ?? null,
-    deletedAt: null,
-    parentMessageId: message.parentMessageId == null ? null : toChannelMessageId(message.parentMessageId),
-    parentMessage: message.parentMessage == null
-      ? null
-      : new ChannelMessageParent({
-        id: toChannelMessageId(message.parentMessage.id),
-        authorDisplayName: message.parentMessage.authorDisplayName,
-        bodyPreview: message.parentMessage.bodyPreview,
-        deleted: message.parentMessage.deleted
-      }),
-    reactions: (message.reactions ?? []).map((reaction) => new ChannelMessageReaction(reaction)),
-    attachments: (message.attachments ?? []).map(toLegacyMessageAttachment)
-  })
-
-const toLegacyMessageAttachment = (attachment: DogfoodMessageAttachmentView): ChannelMessageAttachment =>
-  new ChannelMessageAttachment({
-    id: String(attachment.storageId),
-    storageId: String(attachment.storageId),
-    name: attachment.name,
-    contentType: attachment.contentType,
-    size: attachment.size,
-    kind: attachment.kind,
-    url: attachment.url
-  })
-
-const toHumanAccountId = (id: Id<"users">): HumanAccountId => String(id) as HumanAccountId
-
-const toWorkspaceId = (id: Id<"workspaces">): WorkspaceId => String(id) as WorkspaceId
-
-const toChannelId = (id: Id<"channels">): ChannelId => String(id) as ChannelId
-
-const toChannelMessageId = (id: Id<"messages">): ChannelMessageId => String(id) as ChannelMessageId
-
-const toConvexChannelId = (id: ChannelId): Id<"channels"> => String(id) as Id<"channels">
-
-const toConvexMessageId = (id: ChannelMessageId): Id<"messages"> => String(id) as Id<"messages">
-
-const toConvexStorageId = (id: string): Id<"_storage"> => String(id) as Id<"_storage">
-
 const uploadDogfoodAttachment = async (
   generateAttachmentUploadUrl: (input: Record<string, never>) => Promise<{
     readonly uploadUrl: string
@@ -663,8 +419,9 @@ const uploadDogfoodAttachment = async (
     readonly storageId: Id<"_storage">
     readonly intentId?: Id<"attachmentUploadIntents">
   }) => Promise<unknown>,
+  storageIds: Map<string, Id<"_storage">>,
   file: File
-): Promise<ChannelMessageAttachment> => {
+): Promise<ChatMessageAttachment> => {
   const { uploadUrl, intentId } = await generateAttachmentUploadUrl({})
   const contentType = file.type.length === 0 ? "application/octet-stream" : file.type
   const response = await fetch(uploadUrl, {
@@ -674,9 +431,9 @@ const uploadDogfoodAttachment = async (
   })
   if (!response.ok) throw new Error(`Attachment upload failed (${response.status})`)
 
-  const body = await response.json() as { readonly storageId?: string }
-  if (body.storageId === undefined || body.storageId.length === 0) throw new Error("Attachment upload did not return a storage id")
-  const storageId = toConvexStorageId(body.storageId)
+  const body: unknown = await response.json()
+  const storageId = storageIdFromUploadResponse(body)
+  storageIds.set(String(storageId), storageId)
   let registration: Awaited<ReturnType<typeof registerAttachmentUpload>> | undefined
   let registrationFailure: unknown
   for (let attempt = 0; attempt < 3 && registration === undefined; attempt += 1) {
@@ -692,20 +449,43 @@ const uploadDogfoodAttachment = async (
     throw registrationFailure instanceof Error ? registrationFailure : new Error("Attachment registration failed")
   }
 
-  return new ChannelMessageAttachment({
-    id: body.storageId,
-    storageId: body.storageId,
+  return {
+    id: String(storageId),
+    storageId: String(storageId),
     name: file.name.trim().length === 0 ? "attachment" : file.name,
     contentType,
     size: file.size,
     kind: contentType.toLowerCase().startsWith("image/") ? "image" : "file",
     url: null
-  })
+  }
 }
 
 const toDogfoodMessageReactionEmoji = (emoji: string): DogfoodMessageReactionEmoji => {
-  if (dogfoodMessageReactionEmojis.has(emoji)) return emoji as DogfoodMessageReactionEmoji
-  throw new Error("Unsupported reaction emoji")
+  switch (emoji) {
+    case "👍":
+    case "🎉":
+    case "👀":
+      return emoji
+    default:
+      throw new Error("Unsupported reaction emoji")
+  }
+}
+
+const requiredStorageId = (storageIds: ReadonlyMap<string, Id<"_storage">>, id: string): Id<"_storage"> => {
+  const storageId = storageIds.get(id)
+  if (storageId === undefined) throw new Error("Unknown attachment storage id")
+  return storageId
+}
+
+const storageIdFromUploadResponse = (body: unknown): Id<"_storage"> => {
+  if (typeof body !== "object" || body === null || !("storageId" in body)) {
+    throw new Error("Attachment upload did not return a storage id")
+  }
+  const storageId = body.storageId
+  if (typeof storageId !== "string" || storageId.length === 0) {
+    throw new Error("Attachment upload did not return a storage id")
+  }
+  return storageId as Id<"_storage">
 }
 
 const latestMessageId = (messages: ReadonlyArray<DogfoodChannelMessageView>): Id<"messages"> | null =>

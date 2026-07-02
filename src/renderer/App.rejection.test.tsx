@@ -16,7 +16,7 @@ import {
   type WorkspaceId
 } from "../shared/collab-rpc"
 import { App } from "./App"
-import { layerChatDataFromCollabApi } from "./chat-data"
+import { layerLegacyChatDataFromCollabApi as layerChatDataFromCollabApi } from "./legacy-chat-data"
 import { CollabApi } from "./collab-api"
 import { runtime } from "./collab-atoms"
 

@@ -1,16 +1,16 @@
 import { Atom } from "@effect-atom/atom"
 import { Effect, Stream } from "effect"
-import { ChatData } from "./chat-data"
 import { CollabApi } from "./collab-api"
 import { RendererDataLive } from "./collab-api-live"
+import { LegacyChatData } from "./legacy-chat-data"
 
 export const runtime = Atom.runtime(RendererDataLive)
 
 const api = Effect.serviceFunctions(CollabApi)
-const chatData = Effect.serviceFunctions(ChatData)
+const chatData = Effect.serviceFunctions(LegacyChatData)
 
 export const snapshot = runtime.atom(
-  Stream.unwrap(Effect.map(ChatData, (svc) => svc.changes()))
+  Stream.unwrap(Effect.map(LegacyChatData, (svc) => svc.changes()))
 )
 
 export const registerAgent = runtime.fn(api.registerAgent, { concurrent: true })

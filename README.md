@@ -35,8 +35,11 @@ React renderer -> WorkOS AuthKit -> Convex
 - `src/shared/auth-redirect-policy.ts` validates AuthKit URLs and native callback URLs.
 - `src/renderer/main.tsx` selects the configured dogfood app or a configuration-required screen.
 - `src/renderer/convex-auth.tsx` connects AuthKit to Convex.
-- `src/renderer/dogfood-chat.tsx` adapts Convex queries and mutations to the shared chat UI model.
-- `src/renderer/App.tsx` contains the active shared `WorkspaceChat` surface.
+- `src/renderer/dogfood-chat.tsx` owns AuthKit/Convex query orchestration and dogfood app states.
+- `src/renderer/dogfood-chat-adapter.ts` maps typed Convex results and mutations to the plain active-chat contract without snapshot-era schema objects.
+- `src/renderer/chat-data.ts` defines the renderer-owned active-chat view model and operations.
+- `src/renderer/workspace-chat.tsx` contains the shared `WorkspaceChat` surface, with pure presentation-model helpers in `workspace-chat-model.ts`.
+- `src/renderer/App.tsx` and `legacy-chat-data.ts` isolate the retained Effect snapshot fixture from the active production graph.
 - `convex/schema.ts` and `convex/chat.ts` own the current data model and server behavior.
 
 The repository still contains the earlier snapshot-shaped `@effect/rpc`, `effect-atom`, and local
@@ -124,8 +127,8 @@ Tests are colocated with their source. The main coverage groups are:
 
 - `convex/chat.test.ts`: auth/allowlist behavior, channels, membership, unread state, messages,
   replies, reactions, and attachments;
-- `src/renderer/App.test.tsx`: shared chat behavior and interaction states;
-- `src/renderer/dogfood-chat.test.tsx`: Convex-to-UI adaptation and authenticated app states;
+- `src/renderer/App.test.tsx`: shared chat behavior and the retained snapshot-fixture entrypoint;
+- `src/renderer/dogfood-chat.test.tsx`: plain Convex-to-active-chat adaptation and authenticated app states;
 - `scripts/check-convex-bindings.test.ts`: offline stale Convex module-binding detection;
 - `src/renderer/dogfood-distribution.test.ts`: release command, frozen-install CI, revision handoff,
   runtime documentation, and two-account smoke-contract checks;

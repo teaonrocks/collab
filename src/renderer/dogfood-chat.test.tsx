@@ -4,14 +4,14 @@ import { getFunctionName } from "convex/server"
 import type { ComponentType } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Id } from "../../convex/_generated/dataModel"
-import { ChannelMessage, ChannelMessageAttachment, ChannelMessageReaction } from "../shared/collab-rpc"
+import type { ChatMessage } from "./chat-data"
 import {
   dogfoodChatToChatData,
   type DogfoodChannelMemberView,
   type DogfoodChannelMessageView,
   type DogfoodChannelView,
   type DogfoodWorkspaceView
-} from "./dogfood-chat"
+} from "./dogfood-chat-adapter"
 
 const mocks = vi.hoisted(() => ({
   auth: {
@@ -95,13 +95,13 @@ vi.mock("convex/react", () => ({
   }
 }))
 
-vi.mock("./App", () => ({
+vi.mock("./workspace-chat", () => ({
   WorkspaceChat: ((props: {
     readonly model: {
       readonly workspace: { readonly name: string }
       readonly channel: { readonly id: string }
       readonly channels: ReadonlyArray<{ readonly id: string; readonly name: string }>
-      readonly channelMessages: ReadonlyArray<ChannelMessage>
+      readonly channelMessages: ReadonlyArray<ChatMessage>
       readonly channelMembers?: ReadonlyArray<{ readonly id: string; readonly displayName: string }>
       readonly channelIndicators?: ReadonlyArray<{ readonly channelId: string; readonly indicator: "unread" | "mentioned" }>
       readonly channelMembersLoading?: boolean
@@ -122,8 +122,8 @@ vi.mock("./App", () => ({
   readonly deleteChannelMessage: (input: { readonly channelId: string; readonly messageId: string }) => Promise<unknown>
   readonly toggleMessageReaction?: (input: { readonly channelId: string; readonly messageId: string; readonly emoji: string }) => Promise<unknown>
   readonly operationErrorMessage?: (operation: "send" | "edit" | "delete" | "react", cause: unknown) => string
-  readonly canEditMessage?: (message: ChannelMessage) => boolean
-  readonly canDeleteMessage?: (message: ChannelMessage) => boolean
+  readonly canEditMessage?: (message: ChatMessage) => boolean
+  readonly canDeleteMessage?: (message: ChatMessage) => boolean
   readonly profileMenuActions?: ReadonlyArray<{ readonly label: string; readonly onSelect: () => void }>
   readonly loadOlderChannelMessages?: () => void
 }) => {
@@ -366,13 +366,12 @@ describe("dogfoodChatToChatData", () => {
     })
 
     expect(chatData.model.currentUser.displayName).toBe("Maya Patel")
-    expect(chatData.model.workspace.name).toBe("Aether Dogfood")
-    expect(chatData.model.channel.name).toBe("general")
+    expect(chatData.model.currentUser).toEqual({ id: "user-1", displayName: "Maya Patel" })
+    expect(chatData.model.workspace).toEqual({ name: "Aether Dogfood" })
+    expect(chatData.model.channel).toEqual({ id: "channel-1", name: "general", visibility: "private" })
     expect(chatData.model.channels.map((channel) => channel.name)).toEqual(["general", "design"])
     expect(chatData.model.channelMembers?.map((member) => member.displayName)).toEqual(["Lee Chen", "Maya Patel"])
-    expect(chatData.model.channel.createdBy).toBe(chatData.model.currentUser.id)
     expect(chatData.model.channelMessages).toHaveLength(1)
-    expect(chatData.model.channelMessages[0]).toBeInstanceOf(ChannelMessage)
     expect(chatData.model.channelMessages[0]).toMatchObject({
       authorType: "human",
       authorDisplayName: "Maya Patel",
@@ -454,7 +453,7 @@ describe("dogfoodChatToChatData", () => {
     })
 
     expect(chatData.model.channelMessages[0]?.attachments).toEqual([
-      new ChannelMessageAttachment({
+      {
         id: "storage-1",
         storageId: "storage-1",
         name: "brief.png",
@@ -462,7 +461,7 @@ describe("dogfoodChatToChatData", () => {
         size: 4096,
         kind: "image",
         url: "https://files.example/brief.png"
-      })
+      }
     ])
 
     await chatData.createChannelMessage({
@@ -510,7 +509,7 @@ describe("dogfoodChatToChatData", () => {
     })
 
     expect(chatData.model.channelMessages[0]?.reactions).toEqual([
-      new ChannelMessageReaction({ emoji: "👍", count: 2, reactedByCurrentUser: true })
+      { emoji: "👍", count: 2, reactedByCurrentUser: true }
     ])
 
     await chatData.toggleMessageReaction?.({

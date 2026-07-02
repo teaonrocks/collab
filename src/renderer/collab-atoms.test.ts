@@ -12,7 +12,10 @@ import {
   WorkspaceAgent,
   type WorkspaceId
 } from "../shared/collab-rpc"
-import { layerChatDataFromCollabApi, toChatDataModel } from "./chat-data"
+import {
+  layerLegacyChatDataFromCollabApi as layerChatDataFromCollabApi,
+  toLegacyChatDataModel as toChatDataModel
+} from "./legacy-chat-data"
 import { CollabApi } from "./collab-api"
 import { registerAgent, runtime, snapshot as snapshotAtom } from "./collab-atoms"
 

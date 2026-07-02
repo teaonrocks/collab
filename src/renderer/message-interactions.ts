@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from "react"
-import type { ChannelId, ChannelMessage, ChannelMessageId } from "../shared/collab-rpc"
+import type { ChatChannelId, ChatMessage, ChatMessageId } from "./chat-data"
 
 export type MessageMenuState = {
-  readonly messageId: ChannelMessageId
+  readonly messageId: ChatMessageId
   readonly x: number
   readonly y: number
 } | null
 
 export type EditingMessageState = {
-  readonly messageId: ChannelMessageId
+  readonly messageId: ChatMessageId
   readonly draft: string
   readonly saving: boolean
 } | null
@@ -23,22 +23,22 @@ export type MessageRowState = {
 }
 
 export type MessageInteractionView = {
-  readonly selectedMessageIds: ReadonlyArray<ChannelMessageId>
-  readonly selectedMessageIdSet: ReadonlySet<ChannelMessageId>
-  readonly topSelectedMessageId: ChannelMessageId | null
-  readonly menuMessage: ChannelMessage | null
-  readonly pendingDeleteMessage: ChannelMessage | null
-  readonly getRowState: (message: ChannelMessage) => MessageRowState
+  readonly selectedMessageIds: ReadonlyArray<ChatMessageId>
+  readonly selectedMessageIdSet: ReadonlySet<ChatMessageId>
+  readonly topSelectedMessageId: ChatMessageId | null
+  readonly menuMessage: ChatMessage | null
+  readonly pendingDeleteMessage: ChatMessage | null
+  readonly getRowState: (message: ChatMessage) => MessageRowState
 }
 
 export type DeleteChannelMessage = (input: {
-  readonly channelId: ChannelId
-  readonly messageId: ChannelMessageId
+  readonly channelId: ChatChannelId
+  readonly messageId: ChatMessageId
 }) => Promise<unknown>
 
 export type EditChannelMessage = (input: {
-  readonly channelId: ChannelId
-  readonly messageId: ChannelMessageId
+  readonly channelId: ChatChannelId
+  readonly messageId: ChatMessageId
   readonly body: string
 }) => Promise<unknown>
 
@@ -46,8 +46,8 @@ type ChannelOperation = "edit" | "delete"
 type OperationErrorMessage = (operation: ChannelOperation, cause: unknown) => string
 
 export function useMessageInteractions(input: {
-  readonly channelId: ChannelId
-  readonly messages: ReadonlyArray<ChannelMessage>
+  readonly channelId: ChatChannelId
+  readonly messages: ReadonlyArray<ChatMessage>
   readonly deleteChannelMessage: DeleteChannelMessage
   readonly editChannelMessage?: EditChannelMessage
   readonly operationErrorMessage?: OperationErrorMessage
@@ -61,9 +61,9 @@ export function useMessageInteractions(input: {
     operationErrorMessage,
     setOperationError
   } = input
-  const [selectedMessageIds, setSelectedMessageIds] = useState<ReadonlyArray<ChannelMessageId>>([])
+  const [selectedMessageIds, setSelectedMessageIds] = useState<ReadonlyArray<ChatMessageId>>([])
   const [editingMessage, setEditingMessage] = useState<EditingMessageState>(null)
-  const [pendingDeleteMessageId, setPendingDeleteMessageId] = useState<ChannelMessageId | null>(null)
+  const [pendingDeleteMessageId, setPendingDeleteMessageId] = useState<ChatMessageId | null>(null)
   const [messageMenu, setMessageMenu] = useState<MessageMenuState>(null)
   const view = useMemo(
     () => createMessageInteractionView(messages, selectedMessageIds, editingMessage, pendingDeleteMessageId, messageMenu),
@@ -105,11 +105,11 @@ export function useMessageInteractions(input: {
     }
   }, [messageMenu])
 
-  const toggleMessageSelection = (messageId: ChannelMessageId) => {
+  const toggleMessageSelection = (messageId: ChatMessageId) => {
     setSelectedMessageIds((ids) => toggleMessageId(ids, messageId))
   }
 
-  const requestDeleteMessage = (messageId: ChannelMessageId) => {
+  const requestDeleteMessage = (messageId: ChatMessageId) => {
     setPendingDeleteMessageId(messageId)
     setMessageMenu(null)
   }
@@ -137,7 +137,7 @@ export function useMessageInteractions(input: {
       })
   }
 
-  const startEditingMessage = (message: ChannelMessage) => {
+  const startEditingMessage = (message: ChatMessage) => {
     setEditingMessage({ messageId: message.id, draft: message.body, saving: false })
     setMessageMenu(null)
   }
@@ -169,7 +169,7 @@ export function useMessageInteractions(input: {
       })
   }
 
-  const openMessageMenu = (messageId: ChannelMessageId, x: number, y: number) => {
+  const openMessageMenu = (messageId: ChatMessageId, x: number, y: number) => {
     setMessageMenu({ messageId, x, y })
   }
 
@@ -199,10 +199,10 @@ export function useMessageInteractions(input: {
 }
 
 export const createMessageInteractionView = (
-  messages: ReadonlyArray<ChannelMessage>,
-  selectedMessageIds: ReadonlyArray<ChannelMessageId>,
+  messages: ReadonlyArray<ChatMessage>,
+  selectedMessageIds: ReadonlyArray<ChatMessageId>,
   editingMessage: EditingMessageState,
-  pendingDeleteMessageId: ChannelMessageId | null,
+  pendingDeleteMessageId: ChatMessageId | null,
   messageMenu: MessageMenuState
 ): MessageInteractionView => {
   const liveMessages = messages.filter(isLiveMessage)
@@ -236,20 +236,20 @@ export const createMessageInteractionView = (
   }
 }
 
-export const isLiveMessage = (message: ChannelMessage): boolean => message.deletedAt === null
+export const isLiveMessage = (message: ChatMessage): boolean => message.deletedAt === null
 
 export const toggleMessageId = (
-  messageIds: ReadonlyArray<ChannelMessageId>,
-  messageId: ChannelMessageId
-): ReadonlyArray<ChannelMessageId> =>
+  messageIds: ReadonlyArray<ChatMessageId>,
+  messageId: ChatMessageId
+): ReadonlyArray<ChatMessageId> =>
   messageIds.includes(messageId)
     ? messageIds.filter((id) => id !== messageId)
     : [...messageIds, messageId]
 
 export const pruneSelectedMessageIds = (
-  selectedMessageIds: ReadonlyArray<ChannelMessageId>,
-  messages: ReadonlyArray<ChannelMessage>
-): ReadonlyArray<ChannelMessageId> => {
+  selectedMessageIds: ReadonlyArray<ChatMessageId>,
+  messages: ReadonlyArray<ChatMessage>
+): ReadonlyArray<ChatMessageId> => {
   if (selectedMessageIds.length === 0) return selectedMessageIds
   const liveMessageIds = new Set(messages.filter(isLiveMessage).map((message) => message.id))
   const nextSelectedMessageIds = selectedMessageIds.filter((id) => liveMessageIds.has(id))

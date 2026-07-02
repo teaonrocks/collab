@@ -1,17 +1,20 @@
-import type { RpcClientError } from "@effect/rpc/RpcClientError"
-import { Context, Effect, Layer, Stream } from "effect"
-import type {
-  Channel,
-  ChannelMessageAttachment,
-  ChannelId,
-  ChannelMessage,
-  ChannelMessageId,
-  CollabError,
-  CollabNotFound,
-  CollabPolicyDenied,
-  CollabSnapshot
-} from "../shared/collab-rpc"
-import { CollabApi } from "./collab-api"
+export type ChatChannelId = string
+export type ChatMessageId = string
+
+export type ChatCurrentUser = {
+  readonly id: string
+  readonly displayName: string
+}
+
+export type ChatWorkspace = {
+  readonly name: string
+}
+
+export type ChatChannel = {
+  readonly id: ChatChannelId
+  readonly name: string
+  readonly visibility: "public" | "private"
+}
 
 export type ChatChannelMember = {
   readonly id: string
@@ -21,14 +24,55 @@ export type ChatChannelMember = {
 export type ChatChannelIndicator = "unread" | "mentioned"
 
 export type ChatChannelIndicatorState = {
-  readonly channelId: ChannelId
+  readonly channelId: ChatChannelId
   readonly indicator: ChatChannelIndicator
 }
 
-export type ChatMessageAttachment = ChannelMessageAttachment
+export type ChatMessageReaction = {
+  readonly emoji: string
+  readonly count: number
+  readonly reactedByCurrentUser: boolean
+}
 
-export type ChatDataModel = Pick<CollabSnapshot, "currentUser" | "workspace" | "channel" | "channelMessages"> & {
-  readonly channels: ReadonlyArray<Channel>
+export type ChatMessageAttachment = {
+  readonly id: string
+  readonly storageId: string
+  readonly name: string
+  readonly contentType: string
+  readonly size: number
+  readonly kind: "file" | "image"
+  readonly url: string | null
+}
+
+export type ChatMessageParent = {
+  readonly id: ChatMessageId
+  readonly authorDisplayName: string
+  readonly bodyPreview: string
+  readonly deleted: boolean
+}
+
+export type ChatMessage = {
+  readonly id: ChatMessageId
+  readonly channelId: ChatChannelId
+  readonly authorType: "human" | "agent" | "system"
+  readonly authorId: string
+  readonly authorDisplayName: string
+  readonly body: string
+  readonly createdAt: number
+  readonly editedAt: number | null
+  readonly deletedAt: number | null
+  readonly parentMessageId: ChatMessageId | null
+  readonly parentMessage: ChatMessageParent | null
+  readonly reactions: ReadonlyArray<ChatMessageReaction>
+  readonly attachments: ReadonlyArray<ChatMessageAttachment>
+}
+
+export type ChatDataModel = {
+  readonly currentUser: ChatCurrentUser
+  readonly workspace: ChatWorkspace
+  readonly channel: ChatChannel
+  readonly channels: ReadonlyArray<ChatChannel>
+  readonly channelMessages: ReadonlyArray<ChatMessage>
   readonly channelMembers?: ReadonlyArray<ChatChannelMember>
   readonly channelIndicators?: ReadonlyArray<ChatChannelIndicatorState>
   readonly channelMembersLoading?: boolean
@@ -39,38 +83,38 @@ export type ChatDataModel = Pick<CollabSnapshot, "currentUser" | "workspace" | "
 
 export type CreateChatChannel = (input: {
   readonly name: string
-  readonly visibility?: Channel["visibility"]
-}) => Promise<Channel>
+  readonly visibility?: ChatChannel["visibility"]
+}) => Promise<ChatChannel>
 
-export type SelectChatChannel = (channelId: ChannelId) => void
+export type SelectChatChannel = (channelId: ChatChannelId) => void
 
 export type CreateChatMessage = (input: {
-  readonly channelId: ChannelId
+  readonly channelId: ChatChannelId
   readonly body: string
-  readonly parentMessageId?: ChannelMessageId | null
+  readonly parentMessageId?: ChatMessageId | null
   readonly attachments?: ReadonlyArray<ChatMessageAttachment>
 }) => Promise<unknown>
 
 export type UploadChatMessageAttachment = (file: File) => Promise<ChatMessageAttachment>
 
 export type EditChatMessage = (input: {
-  readonly channelId: ChannelId
-  readonly messageId: ChannelMessageId
+  readonly channelId: ChatChannelId
+  readonly messageId: ChatMessageId
   readonly body: string
 }) => Promise<unknown>
 
 export type DeleteChatMessage = (input: {
-  readonly channelId: ChannelId
-  readonly messageId: ChannelMessageId
+  readonly channelId: ChatChannelId
+  readonly messageId: ChatMessageId
 }) => Promise<unknown>
 
 export type ToggleChatMessageReaction = (input: {
-  readonly channelId: ChannelId
-  readonly messageId: ChannelMessageId
+  readonly channelId: ChatChannelId
+  readonly messageId: ChatMessageId
   readonly emoji: string
 }) => Promise<unknown>
 
-export type ChatMessageGuard = (message: ChannelMessage) => boolean
+export type ChatMessageGuard = (message: ChatMessage) => boolean
 export type ChatOperation = "send" | "edit" | "delete" | "react" | "attach"
 export type ChatOperationErrorMessage = (operation: ChatOperation, cause: unknown) => string
 
@@ -80,7 +124,7 @@ export type ChatDataView = {
   readonly selectChannel?: SelectChatChannel
   readonly createChannelMessage: CreateChatMessage
   readonly uploadMessageAttachment?: UploadChatMessageAttachment
-  readonly discardMessageAttachment?: (attachment: ChannelMessageAttachment) => Promise<unknown>
+  readonly discardMessageAttachment?: (attachment: ChatMessageAttachment) => Promise<unknown>
   readonly deleteChannelMessage: DeleteChatMessage
   readonly editChannelMessage?: EditChatMessage
   readonly toggleMessageReaction?: ToggleChatMessageReaction
@@ -90,41 +134,3 @@ export type ChatDataView = {
   readonly canEditMessage?: ChatMessageGuard
   readonly operationErrorMessage?: ChatOperationErrorMessage
 }
-
-type ChatEffectError = CollabNotFound | CollabPolicyDenied | CollabError | RpcClientError
-
-export class ChatData extends Context.Tag("renderer/ChatData")<
-  ChatData,
-  {
-    readonly changes: () => Stream.Stream<ChatDataModel, RpcClientError>
-    readonly createChannelMessage: (input: {
-      readonly channelId: ChannelId
-      readonly body: string
-      readonly parentMessageId?: ChannelMessageId | null
-    }) => Effect.Effect<ChannelMessage, ChatEffectError>
-    readonly deleteChannelMessage: (input: {
-      readonly channelId: ChannelId
-      readonly messageId: ChannelMessageId
-    }) => Effect.Effect<ChannelMessage, ChatEffectError>
-  }
->() {}
-
-export const layerChatDataFromCollabApi: Layer.Layer<ChatData, never, CollabApi> = Layer.effect(
-  ChatData,
-  Effect.map(CollabApi, (api) =>
-    ChatData.of({
-      changes: () => api.changes().pipe(Stream.map(toChatDataModel)),
-      createChannelMessage: api.createChannelMessage,
-      deleteChannelMessage: api.deleteChannelMessage
-    })
-  )
-)
-
-export const toChatDataModel = (snapshot: CollabSnapshot): ChatDataModel => ({
-  currentUser: snapshot.currentUser,
-  workspace: snapshot.workspace,
-  channel: snapshot.channel,
-  channels: [snapshot.channel],
-  channelMessages: snapshot.channelMessages,
-  channelMessagesLoading: false
-})

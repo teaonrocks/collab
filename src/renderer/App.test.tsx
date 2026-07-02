@@ -19,7 +19,10 @@ import {
   type WorkspaceId
 } from "../shared/collab-rpc"
 import { App, WorkspaceChat } from "./App"
-import { layerChatDataFromCollabApi, toChatDataModel } from "./chat-data"
+import {
+  layerLegacyChatDataFromCollabApi as layerChatDataFromCollabApi,
+  toLegacyChatDataModel as toChatDataModel
+} from "./legacy-chat-data"
 import { CollabApi } from "./collab-api"
 import { runtime } from "./collab-atoms"
 
@@ -227,7 +230,7 @@ describe("App", () => {
       createdBy: userId,
       createdAt: 3
     })
-    const selections: Array<ChannelId> = []
+    const selections: Array<string> = []
 
     render(
       <WorkspaceChat
@@ -1077,7 +1080,7 @@ describe("App", () => {
   })
 
   it("filters and inserts mention suggestions from the composer with the keyboard", async () => {
-    const calls: Array<{ readonly channelId: ChannelId; readonly body: string }> = []
+    const calls: Array<{ readonly channelId: string; readonly body: string }> = []
     render(
       <WorkspaceChat
         model={{
@@ -1588,7 +1591,7 @@ describe("App", () => {
   })
 
   it("renders compact message reactions and toggles the selected emoji", async () => {
-    const calls: Array<{ readonly messageId: ChannelMessageId; readonly emoji: string }> = []
+    const calls: Array<{ readonly messageId: string; readonly emoji: string }> = []
     render(
       <WorkspaceChat
         model={makeChatModel([
