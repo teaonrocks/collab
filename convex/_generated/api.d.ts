@@ -9,6 +9,9 @@
  */
 
 import type * as chat from "../chat.js";
+import type * as chat_access from "../chat_access.js";
+import type * as chat_message_projection from "../chat_message_projection.js";
+import type * as chat_message_transactions from "../chat_message_transactions.js";
 
 import type {
   ApiFromModules,
@@ -18,6 +21,9 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   chat: typeof chat;
+  chat_access: typeof chat_access;
+  chat_message_projection: typeof chat_message_projection;
+  chat_message_transactions: typeof chat_message_transactions;
 }>;
 
 /**

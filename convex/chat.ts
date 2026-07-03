@@ -2,8 +2,26 @@ import { v } from "convex/values"
 import { paginationOptsValidator } from "convex/server"
 import { internal } from "./_generated/api"
 import type { Doc, Id } from "./_generated/dataModel"
-import { action, internalMutation, mutation, query, type ActionCtx, type MutationCtx, type QueryCtx } from "./_generated/server"
+import { action, internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server"
 import { isAcceptedAttachmentContentType, MESSAGE_ATTACHMENT_POLICY } from "../src/shared/attachment-policy"
+import {
+  getUserByEmail,
+  getUserByTokenIdentifier,
+  normalizeViewerEmail,
+  requireAllowedCurrentUser,
+  requireAllowedEmail,
+  requireChannelMember,
+  requireIdentity,
+  requireWorkspaceMember,
+  resolveWorkOsViewer
+} from "./chat_access"
+import { toMessageViews } from "./chat_message_projection"
+import {
+  deleteMessageTransaction,
+  editMessageTransaction,
+  sendMessageTransaction,
+  toggleMessageReactionTransaction
+} from "./chat_message_transactions"
 
 const DOGFOOD_WORKSPACE_KEY = "aether-dogfood"
 const DOGFOOD_WORKSPACE_NAME = "Aether Dogfood"
@@ -11,15 +29,12 @@ const DOGFOOD_CHANNEL_KEY = "general"
 const DOGFOOD_CHANNEL_NAME = "general"
 const MAX_CHANNELS = 100
 const MAX_CHANNEL_NAME_LENGTH = 80
-const MAX_MESSAGE_BODY_LENGTH = 8_000
 const MAX_MESSAGE_PAGE_SIZE = 100
 const MAX_MESSAGE_SEARCH_QUERY_LENGTH = 120
 const MAX_MESSAGE_SEARCH_RESULTS = 20
-const MAX_BATCHED_REACTION_ROWS = 5_000
 const ATTACHMENT_UPLOAD_TTL_MS = 24 * 60 * 60 * 1000
 const MAX_ALLOWLIST_REASON_LENGTH = 240
 const MESSAGE_REACTION_EMOJIS = ["👍", "🎉", "👀"] as const
-const MESSAGE_PARENT_PREVIEW_MAX_LENGTH = 120
 
 const messageReactionEmoji = v.union(
   v.literal(MESSAGE_REACTION_EMOJIS[0]),
@@ -31,46 +46,6 @@ const messageAttachmentInput = v.object({
   storageId: v.id("_storage"),
   name: v.string()
 })
-
-type AuthIdentity = Awaited<ReturnType<QueryCtx["auth"]["getUserIdentity"]>>
-type ViewerIdentity = NonNullable<AuthIdentity>
-
-const normalizeEmail = (email: string): string => email.trim().toLowerCase()
-
-const workOsUserEndpoint = "https://api.workos.com/user_management/users"
-
-const stringClaim = (identity: ViewerIdentity, key: string): string | undefined => {
-  const value = identity[key]
-  return typeof value === "string" ? value : undefined
-}
-
-const bootstrapAllowedEmails = (): ReadonlySet<string> =>
-  new Set(
-    (process.env.AETHER_ALLOWED_EMAILS ?? "")
-      .split(",")
-      .map(normalizeEmail)
-      .filter((email) => email.length > 0)
-  )
-
-const emailFromIdentity = (identity: ViewerIdentity): string | undefined =>
-  identity.email ??
-  stringClaim(identity, "properties.email") ??
-  stringClaim(identity, "email_address") ??
-  stringClaim(identity, "preferred_username")
-
-const displayNameFromEmail = (email: string): string => email.split("@")[0] ?? "Aether User"
-
-const attachmentName = (name: string): string => {
-  const normalized = name.trim().replace(/\s+/g, " ")
-  if (normalized.length === 0) return "attachment"
-  if (normalized.length > MESSAGE_ATTACHMENT_POLICY.maxNameLength) {
-    throw new Error(`Attachment names can contain at most ${MESSAGE_ATTACHMENT_POLICY.maxNameLength} characters`)
-  }
-  return normalized
-}
-
-const attachmentKind = (contentType: string): "file" | "image" =>
-  contentType.toLowerCase().startsWith("image/") ? "image" : "file"
 
 const validateAttachmentMetadata = (metadata: { readonly size: number }, declaredContentType?: string) => {
   if (metadata.size > MESSAGE_ATTACHMENT_POLICY.maxSizeBytes) {
@@ -103,125 +78,7 @@ const validateChannelName = (rawName: string): string => {
   return name
 }
 
-const validateMessageBody = (rawBody: string, options?: { readonly allowEmpty?: boolean }): string => {
-  const body = rawBody.trim()
-  if (body.length === 0 && options?.allowEmpty !== true) throw new Error("Message body is required")
-  if (body.length > MAX_MESSAGE_BODY_LENGTH) {
-    throw new Error(`Message bodies can contain at most ${MAX_MESSAGE_BODY_LENGTH} characters`)
-  }
-  return body
-}
-
 const channelKeyFromName = (name: string): string => normalizeChannelName(name)
-
-const mentionCandidates = (displayName: string): ReadonlyArray<string> => {
-  const normalized = displayName.trim().toLowerCase()
-  const firstName = normalized.split(/\s+/)[0] ?? ""
-  return Array.from(new Set([`@${normalized}`, firstName.length === 0 ? "" : `@${firstName}`]))
-    .filter((value) => value.length > 1)
-}
-
-const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-
-const mentionsDisplayName = (body: string, displayName: string): boolean =>
-  mentionCandidates(displayName).some((candidate) => {
-    const mention = new RegExp(`(^|[^A-Za-z0-9_])${escapeRegExp(candidate)}($|[^A-Za-z0-9_])`, "i")
-    return mention.test(body)
-  })
-
-const syncMessageMentions = async (
-  ctx: MutationCtx,
-  input: {
-    readonly channelId: Id<"channels">
-    readonly messageId: Id<"messages">
-    readonly messageCreatedAt: number
-    readonly body: string
-    readonly authorUserId: Id<"users">
-  }
-) => {
-  const existing = await ctx.db
-    .query("messageMentions")
-    .withIndex("by_message", (q) => q.eq("messageId", input.messageId))
-    .collect()
-  for (const mention of existing) await ctx.db.delete(mention._id)
-
-  if (input.body.length === 0) return
-  const memberships = await ctx.db
-    .query("channelMemberships")
-    .withIndex("by_channel", (q) => q.eq("channelId", input.channelId))
-    .collect()
-  for (const membership of memberships) {
-    if (membership.userId === input.authorUserId) continue
-    const member = await ctx.db.get(membership.userId)
-    if (member === null || !mentionsDisplayName(input.body, member.displayName)) continue
-    await ctx.db.insert("messageMentions", {
-      channelId: input.channelId,
-      messageId: input.messageId,
-      userId: member._id,
-      messageCreatedAt: input.messageCreatedAt
-    })
-  }
-}
-
-const displayNameFromIdentity = (identity: ViewerIdentity, email: string): string => {
-  const name = (identity.name ?? stringClaim(identity, "properties.name"))?.trim()
-  if (name !== undefined && name.length > 0) return name
-  return displayNameFromEmail(email)
-}
-
-const requireIdentity = async (ctx: QueryCtx | MutationCtx | ActionCtx): Promise<ViewerIdentity> => {
-  const identity = await ctx.auth.getUserIdentity()
-  if (identity === null) throw new Error("Not authenticated")
-  return identity
-}
-
-const isEmailAllowlisted = async (ctx: QueryCtx | MutationCtx, email: string): Promise<boolean> => {
-  const entry = await ctx.db
-    .query("dogfoodAllowlistEntries")
-    .withIndex("by_email", (q) => q.eq("email", email))
-    .unique()
-  if (entry !== null) return entry.active
-  return bootstrapAllowedEmails().has(email)
-}
-
-const requireAllowedEmail = async (ctx: QueryCtx | MutationCtx, rawEmail: string): Promise<string> => {
-  if (rawEmail === undefined || rawEmail.trim().length === 0) {
-    throw new Error("Authenticated user is missing an email address")
-  }
-
-  const email = normalizeEmail(rawEmail)
-  if (!(await isEmailAllowlisted(ctx, email))) {
-    throw new Error("This email is not on the Aether dogfood allowlist")
-  }
-  return email
-}
-
-const normalizeViewerEmail = (rawEmail: string | undefined): string => {
-  if (rawEmail === undefined || rawEmail.trim().length === 0) {
-    throw new Error("Authenticated user is missing an email address")
-  }
-  return normalizeEmail(rawEmail)
-}
-
-const getUserByTokenIdentifier = (ctx: QueryCtx | MutationCtx, tokenIdentifier: string) =>
-  ctx.db.query("users").withIndex("by_token_identifier", (q) => q.eq("tokenIdentifier", tokenIdentifier)).unique()
-
-const getUserByEmail = (ctx: QueryCtx | MutationCtx, email: string) =>
-  ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", email)).unique()
-
-const requireAllowedCurrentUser = async (ctx: QueryCtx | MutationCtx): Promise<Doc<"users">> => {
-  const identity = await requireIdentity(ctx)
-  const user = await getUserByTokenIdentifier(ctx, identity.tokenIdentifier)
-  if (user === null) throw new Error("Current user has not been initialized")
-  await requireAllowedEmail(ctx, user.email)
-  return user
-}
-
-const workOsField = (body: unknown, key: string): string | undefined => {
-  if (typeof body !== "object" || body === null || !Object.hasOwn(body, key)) return undefined
-  const value = (body as Record<string, unknown>)[key]
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined
-}
 
 type DogfoodDiagnosticContext = Record<string, string | number | boolean | null | undefined>
 
@@ -249,32 +106,6 @@ const withDogfoodDiagnostics = async <Result>(
     })
     throw cause
   }
-}
-
-const resolveWorkOsViewer = async (identity: ViewerIdentity): Promise<{ readonly email: string; readonly displayName: string }> => {
-  const identityEmail = emailFromIdentity(identity)
-  if (identityEmail !== undefined && identityEmail.trim().length > 0) {
-    const email = normalizeViewerEmail(identityEmail)
-    return { email, displayName: displayNameFromIdentity(identity, email) }
-  }
-
-  const apiKey = process.env.WORKOS_API_KEY
-  if (apiKey === undefined || apiKey.trim().length === 0) {
-    throw new Error("WorkOS API key is not configured")
-  }
-
-  const response = await fetch(`${workOsUserEndpoint}/${encodeURIComponent(identity.subject)}`, {
-    headers: { Authorization: `Bearer ${apiKey}` }
-  })
-  if (!response.ok) {
-    throw new Error(`Could not load WorkOS user profile (${response.status})`)
-  }
-
-  const body = await response.json() as unknown
-  const rawEmail = workOsField(body, "email")
-  if (rawEmail === undefined) throw new Error("WorkOS user profile is missing an email address")
-  const email = normalizeViewerEmail(rawEmail)
-  return { email, displayName: workOsField(body, "name") ?? displayNameFromEmail(email) }
 }
 
 const getDefaultWorkspace = (ctx: QueryCtx | MutationCtx) =>
@@ -487,85 +318,6 @@ const ensureSharedChannelMemberships = async (
   for (const channelId of channelIds) {
     await ensureChannelMembership(ctx, { channelId, userId: input.userId, now: input.now })
   }
-}
-
-const requireWorkspaceMember = async (
-  ctx: QueryCtx | MutationCtx,
-  input: {
-    readonly workspaceId: Id<"workspaces">
-    readonly userId: Id<"users">
-  }
-) => {
-  const membership = await ctx.db
-    .query("workspaceMemberships")
-    .withIndex("by_workspace_user", (q) => q.eq("workspaceId", input.workspaceId).eq("userId", input.userId))
-    .unique()
-
-  if (membership === null) throw new Error("Current user is not a member of this workspace")
-  return membership
-}
-
-const requireChannelMember = async (
-  ctx: QueryCtx | MutationCtx,
-  input: {
-    readonly channelId: Id<"channels">
-    readonly userId: Id<"users">
-  }
-) => {
-  const channel = await ctx.db.get(input.channelId)
-  if (channel === null) throw new Error("Channel not found")
-  await requireWorkspaceMember(ctx, { workspaceId: channel.workspaceId, userId: input.userId })
-  const channelMembership = await ctx.db
-    .query("channelMemberships")
-    .withIndex("by_channel_user", (q) => q.eq("channelId", input.channelId).eq("userId", input.userId))
-    .unique()
-
-  if (channelMembership === null) throw new Error("Current user is not a member of this channel")
-  return channel
-}
-
-const validateMessageAttachments = async (
-  ctx: MutationCtx,
-  userId: Id<"users">,
-  attachments: ReadonlyArray<{ readonly storageId: Id<"_storage">; readonly name: string }> | undefined
-) => {
-  if (attachments === undefined) return []
-  if (attachments.length > MESSAGE_ATTACHMENT_POLICY.maxFiles) {
-    throw new Error(`Messages can include at most ${MESSAGE_ATTACHMENT_POLICY.maxFiles} attachments`)
-  }
-
-  const validated: Array<{
-    readonly storageId: Id<"_storage">
-    readonly name: string
-    readonly contentType: string
-    readonly size: number
-    readonly kind: "file" | "image"
-  }> = []
-
-  for (const attachment of attachments) {
-    if (validated.some((item) => item.storageId === attachment.storageId)) {
-      throw new Error("The same upload cannot be attached more than once")
-    }
-    const upload = await ctx.db
-      .query("attachmentUploads")
-      .withIndex("by_storage_id", (q) => q.eq("storageId", attachment.storageId))
-      .unique()
-    if (upload === null || upload.uploaderUserId !== userId || upload.claimedMessageId !== undefined) {
-      throw new Error("Attachment upload is not owned by the current user or has already been claimed")
-    }
-    const metadata = await ctx.db.system.get("_storage", attachment.storageId)
-    if (metadata === null) throw new Error("Attachment upload was not found")
-    const contentType = validateAttachmentMetadata(metadata, upload.contentType)
-    validated.push({
-      storageId: attachment.storageId,
-      name: attachmentName(attachment.name),
-      contentType,
-      size: metadata.size,
-      kind: attachmentKind(contentType)
-    })
-  }
-
-  return validated
 }
 
 export const generateAttachmentUploadUrl = mutation({
@@ -1088,59 +840,7 @@ export const sendMessage = mutation({
     parentMessageId: args.parentMessageId,
     bodyLength: args.body.trim().length,
     attachmentCount: args.attachments?.length ?? 0
-  }, async () => {
-    const user = await requireAllowedCurrentUser(ctx)
-    const body = validateMessageBody(args.body, { allowEmpty: true })
-    const attachments = await validateMessageAttachments(ctx, user._id, args.attachments)
-    if (body.length === 0 && attachments.length === 0) throw new Error("Message body or attachment is required")
-
-    const channel = await requireChannelMember(ctx, { channelId: args.channelId, userId: user._id })
-    if (args.parentMessageId !== undefined) {
-      const parent = await ctx.db.get(args.parentMessageId)
-      if (
-        parent === null ||
-        parent.workspaceId !== channel.workspaceId ||
-        parent.channelId !== args.channelId
-      ) {
-        throw new Error("Parent message not found")
-      }
-    }
-
-    const messageId = await ctx.db.insert("messages", {
-      workspaceId: channel.workspaceId,
-      channelId: args.channelId,
-      authorUserId: user._id,
-      authorDisplayName: user.displayName,
-      body,
-      ...(args.parentMessageId === undefined ? {} : { parentMessageId: args.parentMessageId }),
-      ...(attachments.length === 0 ? {} : { attachments }),
-      reactionBatchReady: true,
-      createdAt: Date.now()
-    })
-    const message = await ctx.db.get(messageId)
-    if (message === null) throw new Error("Message not found after insert")
-    await syncMessageMentions(ctx, {
-      channelId: message.channelId,
-      messageId: message._id,
-      messageCreatedAt: message.createdAt,
-      body: message.body,
-      authorUserId: message.authorUserId
-    })
-    const senderMembership = await ctx.db
-      .query("channelMemberships")
-      .withIndex("by_channel_user", (q) => q.eq("channelId", message.channelId).eq("userId", user._id))
-      .unique()
-    if (senderMembership !== null && (senderMembership.lastReadAt ?? senderMembership.createdAt) < message.createdAt) {
-      await ctx.db.patch(senderMembership._id, { lastReadAt: message.createdAt })
-    }
-    for (const attachment of attachments) {
-      const upload = await ctx.db.query("attachmentUploads")
-        .withIndex("by_storage_id", (q) => q.eq("storageId", attachment.storageId)).unique()
-      if (upload !== null) await ctx.db.patch(upload._id, { claimedMessageId: messageId })
-    }
-
-    return toMessageView(ctx, message, user._id)
-  })
+  }, () => sendMessageTransaction(ctx, args))
 })
 
 export const editMessage = mutation({
@@ -1153,28 +853,7 @@ export const editMessage = mutation({
     channelId: args.channelId,
     messageId: args.messageId,
     bodyLength: args.body.trim().length
-  }, async () => {
-    const body = validateMessageBody(args.body)
-
-    const user = await requireAllowedCurrentUser(ctx)
-    const message = await ctx.db.get(args.messageId)
-    if (message === null || message.channelId !== args.channelId) throw new Error("Message not found")
-
-    await requireChannelMember(ctx, { channelId: message.channelId, userId: user._id })
-    if (message.authorUserId !== user._id) throw new Error("Only the original author can edit this message")
-
-    await ctx.db.patch(args.messageId, { body, editedAt: Date.now() })
-    await syncMessageMentions(ctx, {
-      channelId: message.channelId,
-      messageId: message._id,
-      messageCreatedAt: message.createdAt,
-      body,
-      authorUserId: message.authorUserId
-    })
-    const updated = await ctx.db.get(args.messageId)
-    if (updated === null) throw new Error("Message not found after edit")
-    return toMessageView(ctx, updated, user._id)
-  })
+  }, () => editMessageTransaction(ctx, args))
 })
 
 export const deleteMessage = mutation({
@@ -1185,35 +864,7 @@ export const deleteMessage = mutation({
   handler: (ctx, args) => withDogfoodDiagnostics("deleteMessage", {
     channelId: args.channelId,
     messageId: args.messageId
-  }, async () => {
-    const user = await requireAllowedCurrentUser(ctx)
-    const message = await ctx.db.get(args.messageId)
-    if (message === null || message.channelId !== args.channelId) throw new Error("Message not found")
-
-    await requireChannelMember(ctx, { channelId: message.channelId, userId: user._id })
-    if (message.authorUserId !== user._id) throw new Error("Only the original author can delete this message")
-
-    const reactions = await ctx.db
-      .query("messageReactions")
-      .withIndex("by_message", (q) => q.eq("messageId", args.messageId))
-      .collect()
-    for (const reaction of reactions) {
-      await ctx.db.delete(reaction._id)
-    }
-    const mentions = await ctx.db
-      .query("messageMentions")
-      .withIndex("by_message", (q) => q.eq("messageId", args.messageId))
-      .collect()
-    for (const mention of mentions) await ctx.db.delete(mention._id)
-    for (const attachment of message.attachments ?? []) {
-      await ctx.storage.delete(attachment.storageId)
-      const upload = await ctx.db.query("attachmentUploads")
-        .withIndex("by_storage_id", (q) => q.eq("storageId", attachment.storageId)).unique()
-      if (upload !== null) await ctx.db.delete(upload._id)
-    }
-    await ctx.db.delete(args.messageId)
-    return { messageId: args.messageId }
-  })
+  }, () => deleteMessageTransaction(ctx, args))
 })
 
 export const toggleMessageReaction = mutation({
@@ -1226,278 +877,8 @@ export const toggleMessageReaction = mutation({
     channelId: args.channelId,
     messageId: args.messageId,
     emoji: args.emoji
-  }, async () => {
-    const user = await requireAllowedCurrentUser(ctx)
-    const message = await ctx.db.get(args.messageId)
-    if (message === null || message.channelId !== args.channelId) throw new Error("Message not found")
-
-    const channel = await requireChannelMember(ctx, { channelId: message.channelId, userId: user._id })
-    const existing = await ctx.db
-      .query("messageReactions")
-      .withIndex("by_message_user_emoji", (q) =>
-        q.eq("messageId", args.messageId).eq("userId", user._id).eq("emoji", args.emoji)
-      )
-      .collect()
-
-    if (existing.length === 0) {
-      await ctx.db.insert("messageReactions", {
-        workspaceId: channel.workspaceId,
-        channelId: message.channelId,
-        messageId: message._id,
-        userId: user._id,
-        emoji: args.emoji,
-        messageCreatedAt: message.createdAt,
-        createdAt: Date.now()
-      })
-    } else {
-      for (const reaction of existing) {
-        await ctx.db.delete(reaction._id)
-      }
-    }
-
-    return toMessageView(ctx, message, user._id)
-  })
+  }, () => toggleMessageReactionTransaction(ctx, args))
 })
-
-type MessageView = {
-  readonly id: Doc<"messages">["_id"]
-  readonly channelId: Doc<"messages">["channelId"]
-  readonly authorUserId: Doc<"messages">["authorUserId"]
-  readonly authorDisplayName: string
-  readonly body: string
-  readonly parentMessageId: Id<"messages"> | null
-  readonly parentMessage: {
-    readonly id: Id<"messages">
-    readonly authorDisplayName: string
-    readonly bodyPreview: string
-    readonly deleted: boolean
-  } | null
-  readonly createdAt: number
-  readonly editedAt: number | null
-  readonly reactions: ReadonlyArray<{
-    readonly emoji: string
-    readonly count: number
-    readonly reactedByCurrentUser: boolean
-  }>
-  readonly attachments: ReadonlyArray<{
-    readonly storageId: Id<"_storage">
-    readonly name: string
-    readonly contentType: string
-    readonly size: number
-    readonly kind: "file" | "image"
-    readonly url: string | null
-  }>
-}
-
-const messageReactionRank = (emoji: string): number => {
-  const index = MESSAGE_REACTION_EMOJIS.findIndex((candidate) => candidate === emoji)
-  return index === -1 ? MESSAGE_REACTION_EMOJIS.length : index
-}
-
-const reactionsForMessage = async (
-  ctx: QueryCtx | MutationCtx,
-  input: {
-    readonly messageId: Id<"messages">
-    readonly currentUserId: Id<"users">
-  }
-) => {
-  const reactions = await ctx.db
-    .query("messageReactions")
-    .withIndex("by_message", (q) => q.eq("messageId", input.messageId))
-    .collect()
-  return aggregateReactionRows(reactions, input.currentUserId)
-}
-
-type ReactionRow = Doc<"messageReactions">
-type ReactionCount = { userIds: Set<Id<"users">>; reactedByCurrentUser: boolean }
-
-const aggregateReactionRows = (
-  reactions: ReadonlyArray<ReactionRow>,
-  currentUserId: Id<"users">
-) => {
-  const counts = new Map<string, ReactionCount>()
-
-  for (const reaction of reactions) {
-    const existing: ReactionCount = counts.get(reaction.emoji) ?? {
-      userIds: new Set(),
-      reactedByCurrentUser: false
-    }
-    existing.userIds.add(reaction.userId)
-    counts.set(reaction.emoji, {
-      userIds: existing.userIds,
-      reactedByCurrentUser: existing.reactedByCurrentUser || reaction.userId === currentUserId
-    })
-  }
-
-  return Array.from(counts, ([emoji, state]) => ({
-    emoji,
-    count: state.userIds.size,
-    reactedByCurrentUser: state.reactedByCurrentUser
-  })).sort((left, right) => messageReactionRank(left.emoji) - messageReactionRank(right.emoji) || left.emoji.localeCompare(right.emoji))
-}
-
-const reactionsForMessages = async (
-  ctx: QueryCtx | MutationCtx,
-  messages: ReadonlyArray<Doc<"messages">>,
-  currentUserId: Id<"users">
-): Promise<Map<Id<"messages">, ReturnType<typeof aggregateReactionRows>>> => {
-  const byMessageId = new Map<Id<"messages">, ReturnType<typeof aggregateReactionRows>>()
-  if (messages.length === 0) return byMessageId
-  if (messages.length === 1) {
-    byMessageId.set(messages[0]!._id, await reactionsForMessage(ctx, {
-      messageId: messages[0]!._id,
-      currentUserId
-    }))
-    return byMessageId
-  }
-
-  const batchReady = messages.filter((message) => message.reactionBatchReady === true)
-  const fallback = messages.filter((message) => message.reactionBatchReady !== true)
-  if (batchReady.length > 0) {
-    const channelId = batchReady[0]!.channelId
-    const createdAt = batchReady.map((message) => message.createdAt)
-    const messageIds = new Set(batchReady.map((message) => message._id))
-    const rows = await ctx.db
-      .query("messageReactions")
-      .withIndex("by_channel_and_message_created_at", (q) =>
-        q.eq("channelId", channelId).gte("messageCreatedAt", Math.min(...createdAt)).lte("messageCreatedAt", Math.max(...createdAt)))
-      .take(MAX_BATCHED_REACTION_ROWS + 1)
-
-    if (rows.length <= MAX_BATCHED_REACTION_ROWS) {
-      const rowsByMessageId = new Map<Id<"messages">, Array<ReactionRow>>()
-      for (const row of rows) {
-        if (!messageIds.has(row.messageId)) continue
-        const messageRows = rowsByMessageId.get(row.messageId) ?? []
-        messageRows.push(row)
-        rowsByMessageId.set(row.messageId, messageRows)
-      }
-      for (const message of batchReady) {
-        byMessageId.set(message._id, aggregateReactionRows(rowsByMessageId.get(message._id) ?? [], currentUserId))
-      }
-    } else {
-      fallback.push(...batchReady)
-    }
-  }
-
-  const fallbackReactions = await Promise.all(fallback.map(async (message) => [
-    message._id,
-    await reactionsForMessage(ctx, { messageId: message._id, currentUserId })
-  ] as const))
-  fallbackReactions.forEach(([messageId, reactions]) => byMessageId.set(messageId, reactions))
-  return byMessageId
-}
-
-const trimParentPreview = (body: string): string => {
-  const normalized = body.replace(/\s+/g, " ").trim()
-  if (normalized.length <= MESSAGE_PARENT_PREVIEW_MAX_LENGTH) return normalized
-  return `${normalized.slice(0, MESSAGE_PARENT_PREVIEW_MAX_LENGTH - 3)}...`
-}
-
-const attachmentsForMessage = async (
-  ctx: QueryCtx | MutationCtx,
-  message: Doc<"messages">
-) => {
-  const attachments = message.attachments ?? []
-  const views: Array<{
-    readonly storageId: Id<"_storage">
-    readonly name: string
-    readonly contentType: string
-    readonly size: number
-    readonly kind: "file" | "image"
-    readonly url: string | null
-  }> = []
-
-  for (const attachment of attachments) {
-    views.push({
-      ...attachment,
-      url: await ctx.storage.getUrl(attachment.storageId)
-    })
-  }
-
-  return views
-}
-
-const toMessageViews = async (
-  ctx: QueryCtx | MutationCtx,
-  messages: ReadonlyArray<Doc<"messages">>,
-  currentUserId: Id<"users">
-): Promise<Array<MessageView>> => {
-  const authorNamesById = new Map<Id<"users">, string>()
-  const reactionsByMessageId = new Map<Id<"messages">, Awaited<ReturnType<typeof reactionsForMessage>>>()
-  const attachmentsByMessageId = new Map<Id<"messages">, Awaited<ReturnType<typeof attachmentsForMessage>>>()
-  const parentsById = new Map<Id<"messages">, Doc<"messages"> | null>()
-
-  const missingAuthorIds = Array.from(new Set(
-    messages.filter((message) => message.authorDisplayName === undefined).map((message) => message.authorUserId)
-  ))
-  const parentIds = Array.from(new Set(
-    messages.flatMap((message) => message.parentMessageId === undefined ? [] : [message.parentMessageId])
-  ))
-
-  const [authors, reactionsByMessage, attachmentViews, parents] = await Promise.all([
-    Promise.all(missingAuthorIds.map(async (authorId) => [authorId, await ctx.db.get(authorId)] as const)),
-    reactionsForMessages(ctx, messages, currentUserId),
-    Promise.all(messages.map(async (message) => [message._id, await attachmentsForMessage(ctx, message)] as const)),
-    Promise.all(parentIds.map(async (parentId) => [parentId, await ctx.db.get(parentId)] as const))
-  ])
-
-  authors.forEach(([authorId, author]) => authorNamesById.set(authorId, author?.displayName ?? "Unknown"))
-  reactionsByMessage.forEach((messageReactions, messageId) => reactionsByMessageId.set(messageId, messageReactions))
-  attachmentViews.forEach(([messageId, attachments]) => attachmentsByMessageId.set(messageId, attachments))
-  parents.forEach(([parentId, parent]) => parentsById.set(parentId, parent))
-
-  const missingParentAuthorIds = Array.from(new Set(
-    parents.flatMap(([, parent]) =>
-      parent !== null && parent.authorDisplayName === undefined && !authorNamesById.has(parent.authorUserId)
-        ? [parent.authorUserId]
-        : []
-    )
-  ))
-  const parentAuthors = await Promise.all(
-    missingParentAuthorIds.map(async (authorId) => [authorId, await ctx.db.get(authorId)] as const)
-  )
-  parentAuthors.forEach(([authorId, author]) => authorNamesById.set(authorId, author?.displayName ?? "Unknown"))
-
-  return messages.map((message) => {
-    const parent = message.parentMessageId === undefined ? null : parentsById.get(message.parentMessageId) ?? null
-    return {
-      id: message._id,
-      channelId: message.channelId,
-      authorUserId: message.authorUserId,
-      authorDisplayName: message.authorDisplayName ?? authorNamesById.get(message.authorUserId) ?? "Unknown",
-      body: message.body,
-      parentMessageId: message.parentMessageId ?? null,
-      parentMessage: message.parentMessageId === undefined
-        ? null
-        : parent === null
-          ? {
-            id: message.parentMessageId,
-            authorDisplayName: "Original message",
-            bodyPreview: "",
-            deleted: true
-          }
-          : {
-            id: parent._id,
-            authorDisplayName: parent.authorDisplayName ?? authorNamesById.get(parent.authorUserId) ?? "Unknown",
-            bodyPreview: trimParentPreview(parent.body),
-            deleted: false
-          },
-      createdAt: message.createdAt,
-      editedAt: message.editedAt ?? null,
-      reactions: reactionsByMessageId.get(message._id) ?? [],
-      attachments: attachmentsByMessageId.get(message._id) ?? []
-    }
-  })
-}
-
-const toMessageView = async (
-  ctx: QueryCtx | MutationCtx,
-  message: Doc<"messages">,
-  currentUserId: Id<"users">
-): Promise<MessageView> => {
-  const [view] = await toMessageViews(ctx, [message], currentUserId)
-  return view!
-}
 
 const toChannelView = (channel: Doc<"channels">) => ({
   id: channel._id,
