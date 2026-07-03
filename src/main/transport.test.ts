@@ -185,6 +185,11 @@ describe("layerIpc transport (client <-> server over a MessagePort)", () => {
 
     expect(error._tag).toBe("CollabPolicyDenied")
     expect((error as CollabPolicyDenied).action).toBe("agent_run.create_draft")
+    expect({ ...error }).toEqual({
+      _tag: "CollabPolicyDenied",
+      action: "agent_run.create_draft",
+      detail: "The selected agent is not enabled in this channel."
+    })
 
     channel.port1.close()
     channel.port2.close()

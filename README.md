@@ -44,8 +44,9 @@ React renderer -> WorkOS AuthKit -> Convex
 
 The repository still contains the earlier snapshot-shaped `@effect/rpc`, `effect-atom`, and local
 JSON implementation under `src/shared`, `src/main`, and `src/renderer`. Those modules are retained
-as tested fixtures and are not started by the production entrypoints. Do not reconnect the local
-JSON store as a runtime fallback without a new architecture decision.
+as tested fixtures and are not started by the production entrypoints. The accepted agent runtime
+contract is Convex-native; do not reconnect or extend the local JSON/RPC path as a production agent
+fallback.
 
 ## Project Layout
 
@@ -146,6 +147,8 @@ manual release steps because they require repository authority and two real Auth
 
 - [`docs/architecture-decisions.md`](docs/architecture-decisions.md): consolidated implemented and
   parked architecture decisions, including the retained agent-collaboration model.
+- [`docs/agent-runtime-contract.md`](docs/agent-runtime-contract.md): COL-21's Convex-native agent
+  seam, legacy RPC inventory, field dispositions, and serializable error contract.
 - [`docs/dogfood-distribution.md`](docs/dogfood-distribution.md): current checkout-based dogfood
   setup and update path.
 - [`docs/dogfood-allowlist.md`](docs/dogfood-allowlist.md): audited server-side access management.

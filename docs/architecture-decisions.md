@@ -8,9 +8,10 @@ without being mistaken for the current implementation plan.
 
 ### Status
 
-Parked. These decisions remain the intended vocabulary and policy background for future agent work,
-but they are not implemented by the current chat runtime. Any future agent milestone should review
-and explicitly reaffirm or replace them before implementation.
+Parked product policy with an accepted runtime seam. These decisions remain vocabulary and policy
+background for future agent work, but they are not implemented by the current chat runtime. COL-21
+accepted a Convex-native agent contract and explicitly declined to migrate the old snapshot RPC.
+See `docs/agent-runtime-contract.md` for the field-by-field disposition and implementation seam.
 
 ### Context
 
@@ -61,10 +62,11 @@ defaults are:
   or another explicit platform trigger. They do not receive ambient channel events by default.
 - The payload contains only authorized context and run-scoped grants. Agents do not speak
   unsolicited in a normal channel.
-- A manual interaction creates a draft thread before contacting a provider. Users select, review,
-  and edit included messages or artifacts, then explicitly start the run.
-- Drafts may remain indefinitely subject to workspace retention; a draft does not have to become a
-  run.
+- An explicit `@agent` mention in an ordinary channel message is the initial manual trigger. Convex
+  validates policy and creates the run server-side; the snapshot-era `DraftThreadCreate` then
+  `AgentRunStart` flow is not migrated.
+- Human replies remain shallow parent-message links and are not agent threads. A future agent
+  conversation container needs its own visibility and participation decision before implementation.
 - During execution, an agent may request more context only within its pre-granted scope. Live actor
   permissions, workspace/channel policy, agent grants, and context limits continue to apply.
 - Every follow-up that asks an agent to do more work is a new `AgentRun`, even if it appears in the
@@ -152,6 +154,10 @@ run history, forks, publication approval, and memory management understandable.
 
 Ambient monitoring, cross-workspace agents, nested channels, cross-channel forks, personal connected
 accounts, and invisible automatic memory remain deferred unless a later ADR replaces these limits.
+
+The runtime consequences are recorded in `docs/agent-runtime-contract.md`: Convex owns agent state,
+policy, orchestration, and audit; the renderer receives transport-neutral views through the active
+chat seam; and the retained Effect RPC remains a historical fixture pending COL-46.
 
 ## ADR 002: Convex And AuthKit Dogfood Chat
 
