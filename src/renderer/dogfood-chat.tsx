@@ -3,7 +3,7 @@ import { useAction, useConvex, useConvexAuth, useMutation, usePaginatedQuery, us
 import { Component, type ErrorInfo, type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import { api } from "../../convex/_generated/api"
 import type { Id } from "../../convex/_generated/dataModel"
-import type { ChatMessageAttachment } from "./chat-data"
+import { uploadAttachment } from "./attachment-draft"
 import { authKitSignOutReturnTo } from "./authkit-redirect"
 import {
   dogfoodChatToChatData,
@@ -216,13 +216,15 @@ function ConvexDogfoodChat() {
           },
           selectChannel: (channelId) => setSelectedChannelId(channelId),
           sendMessage,
-          uploadMessageAttachment: (file) => uploadDogfoodAttachment(
-            generateAttachmentUploadUrl,
-            registerAttachmentUpload,
-            deleteAttachmentUpload,
-            storageIdsRef.current,
-            file
-          ),
+          uploadMessageAttachment: (file) => uploadAttachment({
+            file,
+            generateUploadUrl: () => generateAttachmentUploadUrl({}),
+            register: (input) => registerAttachmentUpload(input),
+            deleteUpload: (input) => deleteAttachmentUpload(input),
+            storageIdFromResponse: storageIdFromUploadResponse,
+            rememberStorageId: (storageId) => storageIdsRef.current.set(String(storageId), storageId),
+            storageIdToString: String
+          }),
           discardMessageAttachment: (attachment) => deleteAttachmentUpload({
             storageId: requiredStorageId(storageIdsRef.current, attachment.storageId)
           }),
@@ -398,67 +400,6 @@ export class DogfoodErrorBoundary extends Component<
     }
 
     return this.props.children
-  }
-}
-
-const uploadDogfoodAttachment = async (
-  generateAttachmentUploadUrl: (input: Record<string, never>) => Promise<{
-    readonly uploadUrl: string
-    readonly intentId: Id<"attachmentUploadIntents">
-  }>,
-  registerAttachmentUpload: (input: {
-    readonly intentId: Id<"attachmentUploadIntents">
-    readonly storageId: Id<"_storage">
-    readonly contentType: string
-  }) => Promise<{
-    readonly status: "registered"
-    readonly storageId: Id<"_storage">
-  } | {
-    readonly status: "rejected"
-    readonly reason: string
-  }>,
-  deleteAttachmentUpload: (input: {
-    readonly storageId: Id<"_storage">
-    readonly intentId?: Id<"attachmentUploadIntents">
-  }) => Promise<unknown>,
-  storageIds: Map<string, Id<"_storage">>,
-  file: File
-): Promise<ChatMessageAttachment> => {
-  const { uploadUrl, intentId } = await generateAttachmentUploadUrl({})
-  const contentType = file.type.length === 0 ? "application/octet-stream" : file.type
-  const response = await fetch(uploadUrl, {
-    method: "POST",
-    headers: { "Content-Type": contentType },
-    body: file
-  })
-  if (!response.ok) throw new Error(`Attachment upload failed (${response.status})`)
-
-  const body: unknown = await response.json()
-  const storageId = storageIdFromUploadResponse(body)
-  storageIds.set(String(storageId), storageId)
-  let registration: Awaited<ReturnType<typeof registerAttachmentUpload>> | undefined
-  let registrationFailure: unknown
-  for (let attempt = 0; attempt < 3 && registration === undefined; attempt += 1) {
-    try {
-      registration = await registerAttachmentUpload({ intentId, storageId, contentType })
-    } catch (cause) {
-      registrationFailure = cause
-    }
-  }
-  if (registration === undefined || registration.status === "rejected") {
-    await deleteAttachmentUpload({ intentId, storageId }).catch(() => {})
-    if (registration?.status === "rejected") throw new Error(registration.reason)
-    throw registrationFailure instanceof Error ? registrationFailure : new Error("Attachment registration failed")
-  }
-
-  return {
-    id: String(storageId),
-    storageId: String(storageId),
-    name: file.name.trim().length === 0 ? "attachment" : file.name,
-    contentType,
-    size: file.size,
-    kind: contentType.toLowerCase().startsWith("image/") ? "image" : "file",
-    url: null
   }
 }
 

@@ -13,11 +13,17 @@ system table, derives content type, size, and `file`/`image` kind server-side, a
 metadata on the message.
 
 Each file is limited to 25 MB. Allowed types are PNG, JPEG, GIF, WebP, PDF, and plain text. The UI
-preflights the same policy, while Convex enforces it from the stored size and registered type.
+preflights the same policy, while Convex enforces it from the stored size and registered type. Both
+layers consume `src/shared/attachment-policy.ts`, so file count, size, and content-type policy have
+one executable source of truth.
 Registered uploads may be claimed exactly once and only by their uploader.
 Registration is idempotent for the same uploader and content type so the renderer can safely retry
 after a lost response. After three failed registration attempts, the renderer uses the intent to
 make an ownership-checked deletion request for the returned storage id.
+
+Renderer draft ownership lives in `src/renderer/attachment-draft.ts`. That module owns upload
+batches, registration retries, channel generations, removal, send settlement, and abandoned-upload
+cleanup; the composer only renders its state and invokes its choose, remove, and send operations.
 
 Timeline reads hydrate each stored attachment with `ctx.storage.getUrl(storageId)`. Those signed
 URLs are treated as display-only values; the renderer never stores them back into message state.

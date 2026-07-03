@@ -19,6 +19,8 @@ import {
 } from "lucide-react"
 import { type FormEvent, type RefObject, useEffect, useMemo, useRef, useState } from "react"
 import "./App.css"
+import { MESSAGE_ATTACHMENT_POLICY } from "../shared/attachment-policy"
+import { useAttachmentDraft } from "./attachment-draft"
 import type {
   ChatChannel,
   ChatChannelId,
@@ -88,7 +90,6 @@ const MESSAGE_CONTEXT_MENU_OFFSET = 6
 const COMPOSER_MIN_HEIGHT = 44
 const COMPOSER_MAX_HEIGHT = 140
 const MESSAGE_EDIT_MAX_HEIGHT = 180
-const MAX_COMPOSER_ATTACHMENTS = 4
 const normalizeChannelName = (name: string): string =>
   name.trim().replace(/^#+/, "").replace(/\s+/g, "-").toLowerCase()
 
@@ -199,19 +200,13 @@ export function WorkspaceChat(props: {
   const [activeSearchMessageId, setActiveSearchMessageId] = useState<ChatMessageId | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const [replyParent, setReplyParent] = useState<ChatMessage | null>(null)
-  const [pendingAttachments, setPendingAttachments] = useState<ReadonlyArray<ChatMessageAttachment>>([])
-  const [uploadingAttachment, setUploadingAttachment] = useState(false)
-  const composerScopeRef = useRef({ channelId: model.channel.id, generation: 0 })
-  if (composerScopeRef.current.channelId !== model.channel.id) {
-    composerScopeRef.current = {
-      channelId: model.channel.id,
-      generation: composerScopeRef.current.generation + 1
-    }
-  }
-  const pendingAttachmentsRef = useRef(pendingAttachments)
-  pendingAttachmentsRef.current = pendingAttachments
-  const discardMessageAttachmentRef = useRef(discardMessageAttachment)
-  discardMessageAttachmentRef.current = discardMessageAttachment
+  const attachmentDraft = useAttachmentDraft({
+    channelId: model.channel.id,
+    upload: uploadMessageAttachment,
+    discard: discardMessageAttachment,
+    operationErrorMessage,
+    reportError: setOperationError
+  })
   const view = useMemo(() => createChannelViewModel(model), [model])
   const localMessageSearchState = useMemo(
     () => searchChannelMessages(model.channelMessages, messageSearchQuery),
@@ -281,8 +276,6 @@ export function WorkspaceChat(props: {
   }, [messageSearchQuery, model.channel.id, searchChannelHistory])
 
   useEffect(() => {
-    const abandoned = pendingAttachmentsRef.current
-    for (const attachment of abandoned) void discardMessageAttachmentRef.current?.(attachment).catch(() => {})
     setMessageDraft("")
     setOperationError(null)
     setChannelOperationError(null)
@@ -290,15 +283,7 @@ export function WorkspaceChat(props: {
     setMessageSearchQuery("")
     setActiveSearchMessageId(null)
     setReplyParent(null)
-    setPendingAttachments([])
-    setUploadingAttachment(false)
   }, [model.channel.id])
-
-  useEffect(() => () => {
-    for (const attachment of pendingAttachmentsRef.current) {
-      void discardMessageAttachmentRef.current?.(attachment).catch(() => {})
-    }
-  }, [])
 
   useEffect(() => {
     if (replyParent === null) return
@@ -378,68 +363,20 @@ export function WorkspaceChat(props: {
   }
 
   const sendChannelMessage = () => {
-    if (channelMessagesLoading || uploadingAttachment) return
+    if (channelMessagesLoading || attachmentDraft.uploading) return
     const body = messageDraft.trim()
-    if (body.length === 0 && pendingAttachments.length === 0) return
-    const composerGeneration = composerScopeRef.current.generation
+    if (body.length === 0 && attachmentDraft.attachments.length === 0) return
     setOperationError(null)
-    void createChannelMessage({
+    void attachmentDraft.send((attachments) => createChannelMessage({
       channelId: model.channel.id,
       body,
       parentMessageId: replyParent?.id ?? null,
-      ...(pendingAttachments.length === 0 ? {} : { attachments: pendingAttachments })
-    })
-      .then(() => {
-        if (composerScopeRef.current.generation !== composerGeneration) return
+      ...(attachments.length === 0 ? {} : { attachments })
+    }))
+      .then((result) => {
+        if (result !== "success") return
         setMessageDraft("")
         setReplyParent(null)
-        setPendingAttachments([])
-      })
-      .catch((cause) => {
-        if (composerScopeRef.current.generation !== composerGeneration) return
-        if (operationErrorMessage !== undefined) setOperationError(operationErrorMessage("send", cause))
-      })
-  }
-
-  const addAttachments = (files: ReadonlyArray<File>) => {
-    if (uploadMessageAttachment === undefined || files.length === 0) return
-    const slots = MAX_COMPOSER_ATTACHMENTS - pendingAttachments.length
-    const selectedFiles = files.slice(0, Math.max(0, slots))
-    if (selectedFiles.length === 0 || selectedFiles.length < files.length) {
-      setOperationError(`Messages can include at most ${MAX_COMPOSER_ATTACHMENTS} attachments.`)
-      if (selectedFiles.length === 0) return
-    } else {
-      setOperationError(null)
-    }
-    const invalidFile = selectedFiles.find((file) =>
-      file.size > 25 * 1024 * 1024 || !["image/gif", "image/jpeg", "image/png", "image/webp", "application/pdf", "text/plain"].includes(file.type.toLowerCase())
-    )
-    if (invalidFile !== undefined) {
-      setOperationError("Attachments must be PNG, JPEG, GIF, WebP, PDF, or plain text and no larger than 25 MB.")
-      return
-    }
-    const composerGeneration = composerScopeRef.current.generation
-    setUploadingAttachment(true)
-    void Promise.allSettled(selectedFiles.map((file) => uploadMessageAttachment(file)))
-      .then(async (results) => {
-        const attachments = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : [])
-        if (composerScopeRef.current.generation !== composerGeneration) {
-          await Promise.allSettled(attachments.map((attachment) => discardMessageAttachmentRef.current?.(attachment)))
-          return
-        }
-        if (results.some((result) => result.status === "rejected")) {
-          await Promise.allSettled(attachments.map((attachment) => discardMessageAttachmentRef.current?.(attachment)))
-          throw new Error("One or more attachment uploads failed")
-        }
-        setPendingAttachments((existing) => [...existing, ...attachments].slice(0, MAX_COMPOSER_ATTACHMENTS))
-        setOperationError(null)
-      })
-      .catch((cause: unknown) => {
-        if (composerScopeRef.current.generation !== composerGeneration) return
-        setOperationError(operationErrorMessage?.("attach", cause) ?? "Could not upload attachment. Check your connection and try again.")
-      })
-      .finally(() => {
-        if (composerScopeRef.current.generation === composerGeneration) setUploadingAttachment(false)
       })
   }
 
@@ -528,16 +465,12 @@ export function WorkspaceChat(props: {
         onSaveEditMessage={messageInteractions.saveEditingMessage}
         onDeleteMessage={messageInteractions.requestDeleteMessage}
         replyParent={replyParent}
-        attachments={pendingAttachments}
-        attachmentUploadAvailable={uploadMessageAttachment !== undefined}
-        uploadingAttachment={uploadingAttachment}
+        attachments={attachmentDraft.attachments}
+        attachmentUploadAvailable={attachmentDraft.uploadAvailable}
+        uploadingAttachment={attachmentDraft.uploading}
         onCancelReply={() => setReplyParent(null)}
-        onChooseAttachments={addAttachments}
-        onRemoveAttachment={(attachmentId) => setPendingAttachments((attachments) => {
-          const removed = attachments.find((attachment) => attachment.id === attachmentId)
-          if (removed !== undefined) void discardMessageAttachment?.(removed).catch(() => {})
-          return attachments.filter((attachment) => attachment.id !== attachmentId)
-        })}
+        onChooseAttachments={attachmentDraft.choose}
+        onRemoveAttachment={attachmentDraft.remove}
         onToggleReaction={toggleMessageReaction === undefined ? undefined : toggleReaction}
         mentionMembers={visibleMembers}
         mentionMembersLoading={channelMembersLoading}
@@ -1926,7 +1859,7 @@ function MessageComposer(props: {
   const [cursorIndex, setCursorIndex] = useState(draft.length)
   const [activeMentionIndex, setActiveMentionIndex] = useState(0)
   const [dismissedMentionKey, setDismissedMentionKey] = useState<string | null>(null)
-  const canAttach = attachmentUploadAvailable && !disabled && !uploadingAttachment && attachments.length < MAX_COMPOSER_ATTACHMENTS
+  const canAttach = attachmentUploadAvailable && !disabled && !uploadingAttachment && attachments.length < MESSAGE_ATTACHMENT_POLICY.maxFiles
   const canSend = (draft.trim().length > 0 || attachments.length > 0) && !disabled && !uploadingAttachment
   const mentionRequest = useMemo(() => getMentionRequest(draft, cursorIndex), [cursorIndex, draft])
   const mentionKey = mentionRequest === null ? null : `${mentionRequest.triggerIndex}:${mentionRequest.query}`
@@ -2057,7 +1990,7 @@ function MessageComposer(props: {
             ref={fileInputRef}
             className="sr-only"
             type="file"
-            accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain"
+            accept={MESSAGE_ATTACHMENT_POLICY.acceptedContentTypes.join(",")}
             multiple
             tabIndex={-1}
             onChange={(event) => {

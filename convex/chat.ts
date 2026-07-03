@@ -3,6 +3,7 @@ import { paginationOptsValidator } from "convex/server"
 import { internal } from "./_generated/api"
 import type { Doc, Id } from "./_generated/dataModel"
 import { action, internalMutation, mutation, query, type ActionCtx, type MutationCtx, type QueryCtx } from "./_generated/server"
+import { isAcceptedAttachmentContentType, MESSAGE_ATTACHMENT_POLICY } from "../src/shared/attachment-policy"
 
 const DOGFOOD_WORKSPACE_KEY = "aether-dogfood"
 const DOGFOOD_WORKSPACE_NAME = "Aether Dogfood"
@@ -15,18 +16,7 @@ const MAX_MESSAGE_PAGE_SIZE = 100
 const MAX_MESSAGE_SEARCH_QUERY_LENGTH = 120
 const MAX_MESSAGE_SEARCH_RESULTS = 20
 const MAX_BATCHED_REACTION_ROWS = 5_000
-const MAX_MESSAGE_ATTACHMENTS = 4
-const MAX_ATTACHMENT_NAME_LENGTH = 180
-const MAX_ATTACHMENT_SIZE_BYTES = 25 * 1024 * 1024
 const ATTACHMENT_UPLOAD_TTL_MS = 24 * 60 * 60 * 1000
-const ALLOWED_ATTACHMENT_CONTENT_TYPES = new Set([
-  "image/gif",
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "application/pdf",
-  "text/plain"
-])
 const MAX_ALLOWLIST_REASON_LENGTH = 240
 const MESSAGE_REACTION_EMOJIS = ["👍", "🎉", "👀"] as const
 const MESSAGE_PARENT_PREVIEW_MAX_LENGTH = 120
@@ -73,8 +63,8 @@ const displayNameFromEmail = (email: string): string => email.split("@")[0] ?? "
 const attachmentName = (name: string): string => {
   const normalized = name.trim().replace(/\s+/g, " ")
   if (normalized.length === 0) return "attachment"
-  if (normalized.length > MAX_ATTACHMENT_NAME_LENGTH) {
-    throw new Error(`Attachment names can contain at most ${MAX_ATTACHMENT_NAME_LENGTH} characters`)
+  if (normalized.length > MESSAGE_ATTACHMENT_POLICY.maxNameLength) {
+    throw new Error(`Attachment names can contain at most ${MESSAGE_ATTACHMENT_POLICY.maxNameLength} characters`)
   }
   return normalized
 }
@@ -83,11 +73,11 @@ const attachmentKind = (contentType: string): "file" | "image" =>
   contentType.toLowerCase().startsWith("image/") ? "image" : "file"
 
 const validateAttachmentMetadata = (metadata: { readonly size: number }, declaredContentType?: string) => {
-  if (metadata.size > MAX_ATTACHMENT_SIZE_BYTES) {
+  if (metadata.size > MESSAGE_ATTACHMENT_POLICY.maxSizeBytes) {
     throw new Error("Attachments can be at most 25 MB")
   }
   const contentType = declaredContentType?.toLowerCase()
-  if (contentType === undefined || !ALLOWED_ATTACHMENT_CONTENT_TYPES.has(contentType)) {
+  if (contentType === undefined || !isAcceptedAttachmentContentType(contentType)) {
     throw new Error("Attachments must be a PNG, JPEG, GIF, WebP, PDF, or plain-text file")
   }
   return contentType
@@ -540,8 +530,8 @@ const validateMessageAttachments = async (
   attachments: ReadonlyArray<{ readonly storageId: Id<"_storage">; readonly name: string }> | undefined
 ) => {
   if (attachments === undefined) return []
-  if (attachments.length > MAX_MESSAGE_ATTACHMENTS) {
-    throw new Error(`Messages can include at most ${MAX_MESSAGE_ATTACHMENTS} attachments`)
+  if (attachments.length > MESSAGE_ATTACHMENT_POLICY.maxFiles) {
+    throw new Error(`Messages can include at most ${MESSAGE_ATTACHMENT_POLICY.maxFiles} attachments`)
   }
 
   const validated: Array<{
