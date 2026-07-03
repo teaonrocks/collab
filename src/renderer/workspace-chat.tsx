@@ -367,12 +367,13 @@ export function WorkspaceChat(props: {
     }
   }
 
-  const toggleReaction = (message: ChatMessage, emoji: string) => {
-    if (toggleMessageReaction === undefined) return
-    void toggleMessageReaction({ channelId: model.channel.id, messageId: message.id, emoji })
+  const toggleReaction = (message: ChatMessage, emoji: string): Promise<void> => {
+    if (toggleMessageReaction === undefined) return Promise.resolve()
+    return toggleMessageReaction({ channelId: model.channel.id, messageId: message.id, emoji })
       .then(() => setOperationError(null))
       .catch((cause: unknown) => {
         setOperationError(operationErrorMessage?.("react", cause) ?? "Could not update reaction.")
+        throw cause
       })
   }
 
@@ -1011,7 +1012,7 @@ function ChatPane(props: {
   readonly onChooseAttachments: (files: ReadonlyArray<File>) => void
   readonly onRemoveAttachment: (attachmentId: string) => void
   readonly onCancelReply: () => void
-  readonly onToggleReaction?: (message: ChatMessage, emoji: string) => void
+  readonly onToggleReaction?: (message: ChatMessage, emoji: string) => Promise<void>
   readonly mentionMembers: ReadonlyArray<ChatChannelMember>
   readonly mentionMembersLoading: boolean
   readonly canDeleteMessage: ChatMessageGuard
@@ -1409,7 +1410,7 @@ function ChannelMessageRow(props: {
   readonly editSaving: boolean
   readonly onOpenMenu: (x: number, y: number) => void
   readonly onFocusParent: (messageId: ChatMessageId) => void
-  readonly onToggleReaction?: (emoji: string) => void
+  readonly onToggleReaction?: (emoji: string) => Promise<void>
   readonly highlighted: boolean
   readonly onNextSearchResult: () => void
   readonly refCallback: (element: HTMLElement | null) => void
@@ -1555,6 +1556,9 @@ function ChannelMessageRow(props: {
                   ? null
                   : <p className={messageBodyClassName}>{message.body}</p>}
                 {message.attachments.length === 0 ? null : <MessageAttachmentList attachments={message.attachments} />}
+                {message.reactions.length === 0 && onToggleReaction === undefined
+                  ? null
+                  : <MessageReactions message={message} onToggleReaction={onToggleReaction} />}
               </>
             )}
       </div>
@@ -1571,7 +1575,7 @@ function ChannelMessageRow(props: {
           >
             {onToggleReaction === undefined
               ? null
-              : <MessageReactions message={message} onToggleReaction={onToggleReaction} />}
+              : <MessageReactionPicker message={message} onToggleReaction={onToggleReaction} />}
             {actionsAvailable
               ? (
                 <Button
@@ -1722,40 +1726,100 @@ const formatAttachmentSize = (size: number): string => {
   return `${(size / (1024 * 1024)).toFixed(size < 10 * 1024 * 1024 ? 1 : 0)} MB`
 }
 
-function MessageReactions(props: {
+function MessageReactionPicker(props: {
   readonly message: ChatMessage
-  readonly onToggleReaction: (emoji: string) => void
+  readonly onToggleReaction: (emoji: string) => Promise<void>
 }) {
   const { message, onToggleReaction } = props
-  const reactions = message.reactions
-  const reactionByEmoji = new Map(reactions.map((reaction) => [reaction.emoji, reaction]))
-  const visibleEmojis = Array.from(new Set([...reactions.map((reaction) => reaction.emoji), ...reactionPalette]))
 
   return (
-    <div className="messageReactions flex min-w-0 items-center" aria-label={`Reactions for message from ${message.authorDisplayName}`}>
-      {visibleEmojis.map((emoji) => {
-        const reaction = reactionByEmoji.get(emoji)
-        const count = reaction?.count ?? 0
-        const active = reaction?.reactedByCurrentUser === true
-        return (
+    <div className="messageReactionPicker flex min-w-0 items-center" aria-label={`Add a reaction to message from ${message.authorDisplayName}`}>
+      {reactionPalette.map((emoji) => (
           <button
             key={emoji}
             type="button"
-            className={classNames(
-              "messageReaction inline-flex size-[34px] min-h-[30px] items-center justify-center gap-1 rounded-none border-0 border-l border-surface-rail bg-surface-raised px-1.5 text-xs leading-none text-foreground-muted first:border-l-0 hover:bg-surface-muted hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
-              active && "border-foreground bg-surface-muted text-foreground"
-            )}
-            aria-pressed={active}
-            aria-label={`${active ? "Remove" : "Add"} ${emoji} reaction to message from ${message.authorDisplayName}`}
+            className="messageReactionPickerButton inline-flex size-[34px] min-h-[30px] items-center justify-center rounded-none border-0 border-l border-surface-rail bg-surface-raised px-1.5 text-xs leading-none text-foreground-muted first:border-l-0 hover:bg-surface-muted hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
+            aria-label={`Add ${emoji} reaction to message from ${message.authorDisplayName}`}
             onClick={(event) => {
               event.stopPropagation()
-              onToggleReaction(emoji)
+              void onToggleReaction(emoji)
             }}
           >
             <span aria-hidden="true">{emoji}</span>
-            {count > 0 ? <span>{count}</span> : null}
           </button>
+      ))}
+    </div>
+  )
+}
+
+function MessageReactions(props: {
+  readonly message: ChatMessage
+  readonly onToggleReaction?: (emoji: string) => Promise<void>
+}) {
+  const { message, onToggleReaction } = props
+  const [optimisticState, setOptimisticState] = useState<Record<string, boolean>>({})
+  const reactionByEmoji = useMemo(
+    () => new Map(message.reactions.map((reaction) => [reaction.emoji, reaction])),
+    [message.reactions]
+  )
+
+  useEffect(() => {
+    setOptimisticState((current) => {
+      const next = { ...current }
+      let changed = false
+      for (const [emoji, target] of Object.entries(current)) {
+        if ((reactionByEmoji.get(emoji)?.reactedByCurrentUser ?? false) === target) {
+          delete next[emoji]
+          changed = true
+        }
+      }
+      return changed ? next : current
+    })
+  }, [reactionByEmoji])
+
+  const visibleEmojis = Array.from(new Set([...message.reactions.map((reaction) => reaction.emoji), ...Object.keys(optimisticState)]))
+  if (visibleEmojis.length === 0) return null
+
+  return (
+    <div className="messageReactions mt-1.5 flex min-w-0 flex-wrap items-center gap-1" aria-label={`Reactions for message from ${message.authorDisplayName}`}>
+      {visibleEmojis.map((emoji) => {
+        const reaction = reactionByEmoji.get(emoji)
+        const serverActive = reaction?.reactedByCurrentUser ?? false
+        const active = optimisticState[emoji] ?? serverActive
+        const serverCount = reaction?.count ?? 0
+        const count = serverCount + (active === serverActive ? 0 : active ? 1 : -1)
+        if (count <= 0 && !active) return null
+        const content = <><span aria-hidden="true">{emoji}</span><span>{count}</span></>
+        const className = classNames(
+          "messageReaction inline-flex min-h-6 items-center justify-center gap-1 rounded-control border border-border bg-surface-muted px-2 py-0.5 text-xs leading-none text-foreground-muted",
+          active && "border-border-strong bg-surface-muted-hover text-foreground",
+          onToggleReaction !== undefined && "cursor-pointer hover:border-border-strong hover:bg-surface-rail hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         )
+        return onToggleReaction === undefined
+          ? <span key={emoji} className={className}>{content}</span>
+          : (
+            <button
+              key={emoji}
+              type="button"
+              className={className}
+              aria-pressed={active}
+              aria-label={`${active ? "Remove" : "Add"} ${emoji} reaction to message from ${message.authorDisplayName}`}
+              onClick={(event) => {
+                event.stopPropagation()
+                const target = !active
+                setOptimisticState((current) => ({ ...current, [emoji]: target }))
+                void onToggleReaction(emoji).catch(() => {
+                  setOptimisticState((current) => {
+                    const next = { ...current }
+                    delete next[emoji]
+                    return next
+                  })
+                })
+              }}
+            >
+              {content}
+            </button>
+          )
       })}
     </div>
   )

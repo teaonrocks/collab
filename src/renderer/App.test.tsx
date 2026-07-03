@@ -1583,7 +1583,7 @@ describe("App", () => {
     expect(screen.getByLabelText("More actions for message from Maya Patel")).toBeTruthy()
   })
 
-  it("renders compact message reactions and toggles the selected emoji", async () => {
+  it("renders message reactions under the message and toggles the selected emoji", async () => {
     const calls: Array<{ readonly messageId: string; readonly emoji: string }> = []
     render(
       <WorkspaceChat
@@ -1612,15 +1612,48 @@ describe("App", () => {
     const reaction = await screen.findByRole("button", { name: "Remove 👍 reaction to message from Maya Patel" })
     expect(reaction.getAttribute("aria-pressed")).toBe("true")
     expect(reaction.textContent).toContain("2")
+    expect(reaction.className).toContain("hover:bg-surface-rail")
+    expect(reaction.className).toContain("hover:text-foreground")
 
     const message = reaction.closest(".channelMessage")
-    expect(reaction.closest(".messageActions")).not.toBeNull()
+    expect(reaction.closest(".messageContent")).not.toBeNull()
+    expect(reaction.closest(".messageActions")).toBeNull()
     expect(message?.className).toContain("has-[:focus-visible]:bg-surface-muted")
     expect(message?.className).not.toContain("focus-within:bg-surface-muted")
 
     fireEvent.click(reaction)
 
+    expect(within(screen.getByLabelText("Reactions for message from Maya Patel")).getByRole("button", { name: "Add 👍 reaction to message from Maya Patel" }).textContent).toContain("1")
     await waitFor(() => expect(calls).toEqual([{ messageId, emoji: "👍" }]))
+  })
+
+  it("rolls back an optimistic reaction and shows an error when the mutation fails", async () => {
+    render(
+      <WorkspaceChat
+        model={makeChatModel([
+          new ChannelMessage({
+            id: messageId,
+            channelId,
+            authorType: "human",
+            authorId: userId,
+            authorDisplayName: "Maya Patel",
+            body: "The partner brief needs a concise risk summary.",
+            createdAt: 2,
+            deletedAt: null,
+            reactions: [new ChannelMessageReaction({ emoji: "👍", count: 2, reactedByCurrentUser: true })]
+          })
+        ])}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+        toggleMessageReaction={() => Promise.reject(new Error("offline"))}
+      />
+    )
+
+    fireEvent.click(await screen.findByRole("button", { name: "Remove 👍 reaction to message from Maya Patel" }))
+
+    expect(within(screen.getByLabelText("Reactions for message from Maya Patel")).getByRole("button", { name: "Add 👍 reaction to message from Maya Patel" }).textContent).toContain("1")
+    expect(await screen.findByText("Could not update reaction.")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Remove 👍 reaction to message from Maya Patel" }).textContent).toContain("2")
   })
 
   it("waits for delete confirmation before deleting a message", async () => {
