@@ -1,41 +1,51 @@
 // @vitest-environment happy-dom
-import { Atom } from "@effect-atom/atom"
-import { RegistryProvider } from "@effect-atom/atom-react"
 import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
-import { Effect, Layer, Stream } from "effect"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import {
-  Channel,
-  type ChannelId,
-  ChannelMessage,
-  ChannelMessageAttachment,
-  ChannelMessageParent,
-  type ChannelMessageId,
-  ChannelMessageReaction,
-  CollabSnapshot,
-  HumanAccount,
-  type HumanAccountId,
-  Workspace,
-  type WorkspaceId
-} from "../shared/collab-rpc"
-import { App, WorkspaceChat } from "./App"
-import {
-  layerLegacyChatDataFromCollabApi as layerChatDataFromCollabApi,
-  toLegacyChatDataModel as toChatDataModel
-} from "./legacy-chat-data"
-import { CollabApi } from "./collab-api"
-import { runtime } from "./collab-atoms"
+import type {
+  ChatChannel,
+  ChatDataModel,
+  ChatMessage,
+  ChatMessageAttachment,
+  ChatMessageParent,
+  ChatMessageReaction
+} from "./chat-data"
+import { WorkspaceChat } from "./workspace-chat"
 
 afterEach(cleanup)
 
-const userId = "human-1" as HumanAccountId
-const workspaceId = "workspace-1" as WorkspaceId
-const channelId = "channel-1" as Channel["id"]
-const secondChannelId = "channel-2" as Channel["id"]
-const messageId = "message-1" as ChannelMessageId
+const userId = "human-1"
+const workspaceId = "workspace-1"
+const channelId = "channel-1"
+const secondChannelId = "channel-2"
+const messageId = "message-1"
 
-const makeSnapshot = (messages: ReadonlyArray<ChannelMessage> = [
-  new ChannelMessage({
+const makeChannel = <T extends ChatChannel>(channel: T): ChatChannel => ({
+  id: channel.id,
+  name: channel.name,
+  visibility: channel.visibility
+})
+
+type MessageFixture = Pick<
+  ChatMessage,
+  "id" | "channelId" | "authorType" | "authorId" | "authorDisplayName" | "body" | "createdAt"
+> & Partial<Omit<ChatMessage, "id" | "channelId" | "authorType" | "authorId" | "authorDisplayName" | "body" | "createdAt">>
+
+const makeMessage = (message: MessageFixture): ChatMessage => ({
+  editedAt: null,
+  deletedAt: null,
+  parentMessageId: null,
+  parentMessage: null,
+  reactions: [],
+  attachments: [],
+  ...message
+})
+
+const makeAttachment = <T extends ChatMessageAttachment>(attachment: T): ChatMessageAttachment => attachment
+const makeParent = <T extends ChatMessageParent>(parent: T): ChatMessageParent => parent
+const makeReaction = <T extends ChatMessageReaction>(reaction: T): ChatMessageReaction => reaction
+
+const makeChatModel = (messages: ReadonlyArray<ChatMessage> = [
+  makeMessage({
     id: messageId,
     channelId,
     authorType: "human",
@@ -45,92 +55,32 @@ const makeSnapshot = (messages: ReadonlyArray<ChannelMessage> = [
     createdAt: 2,
     deletedAt: null
   })
-]) =>
-  new CollabSnapshot({
-    currentUser: new HumanAccount({
-      id: userId,
-      displayName: "Maya Patel",
-      email: "maya@example.test",
-      createdAt: 1
-    }),
-    workspace: new Workspace({
-      id: workspaceId,
-      name: "Aether Labs",
-      createdAt: 1
-    }),
-    workspaceRole: "admin",
-    channel: new Channel({
-      id: channelId,
-      workspaceId,
-      name: "origination",
-      visibility: "private",
-      createdBy: userId,
-      createdAt: 1
-    }),
-    channelRole: "admin",
-    channelMessages: messages,
-    workspaceAgents: [],
-    channelAgentEnablements: [],
-    threads: [],
-    threadMessages: [],
-    agentRuns: [],
-    auditEvents: []
-  })
+]): ChatDataModel => ({
+  currentUser: { id: userId, displayName: "Maya Patel" },
+  workspace: { name: "Aether Labs" },
+  channel: makeChannel({ id: channelId, name: "origination", visibility: "private" }),
+  channels: [makeChannel({ id: channelId, name: "origination", visibility: "private" })],
+  channelMessages: messages,
+  channelMessagesLoading: false
+})
 
-const makeChatModel = (messages?: ReadonlyArray<ChannelMessage>) => toChatDataModel(makeSnapshot(messages))
-
-const renderApp = (model: CollabSnapshot) => {
+const renderWorkspaceChat = (model: ChatDataModel) => {
   const calls: Array<{ method: string; args: unknown }> = []
-  const layer = Layer.succeed(
-    CollabApi,
-    CollabApi.of({
-      snapshot: () => Effect.succeed(model),
-      registerAgent: () => Effect.die("not used"),
-      enableAgent: () => Effect.die("not used"),
-      createChannelMessage: (input) => {
-        calls.push({ method: "createChannelMessage", args: input })
-        return Effect.succeed(new ChannelMessage({
-          id: "message-2" as ChannelMessageId,
-          channelId: input.channelId,
-          authorType: "human",
-          authorId: userId,
-          authorDisplayName: "Maya Patel",
-          body: input.body,
-          createdAt: 12,
-          deletedAt: null
-        }))
-      },
-      deleteChannelMessage: (input) => {
-        calls.push({ method: "deleteChannelMessage", args: input.messageId })
-        return Effect.succeed(new ChannelMessage({
-          id: input.messageId,
-          channelId: input.channelId,
-          authorType: "human",
-          authorId: userId,
-          authorDisplayName: "Maya Patel",
-          body: "The partner brief needs a concise risk summary.",
-          createdAt: 2,
-          deletedAt: 13
-        }))
-      },
-      createDraftThread: () => Effect.die("not used"),
-      startRun: () => Effect.die("not used"),
-      changes: () => Stream.make(model)
-    })
-  )
   render(
-    <RegistryProvider
-      initialValues={[Atom.initialValue(runtime.layer, mockRendererDataLayer(layer))]}
-      scheduleTask={(f) => f()}
-    >
-      <App />
-    </RegistryProvider>
+    <WorkspaceChat
+      model={model}
+      createChannelMessage={(input) => {
+        calls.push({ method: "createChannelMessage", args: input })
+        return Promise.resolve()
+      }}
+      deleteChannelMessage={(input) => {
+        calls.push({ method: "deleteChannelMessage", args: input.messageId })
+        return Promise.resolve()
+      }}
+    />
   )
   return calls
 }
-
-const mockRendererDataLayer = (layer: Layer.Layer<CollabApi>) =>
-  Layer.merge(layer, layerChatDataFromCollabApi.pipe(Layer.provide(layer)))
 
 const openMessageMenu = async (authorDisplayName: string) => {
   fireEvent.click(await screen.findByLabelText(`More actions for message from ${authorDisplayName}`))
@@ -142,25 +92,15 @@ const openMessageSearch = async () => {
   return screen.findByPlaceholderText("Search origination")
 }
 
-describe("App", () => {
-  it("renders the chat workspace from CollabApi", async () => {
-    renderApp(makeSnapshot())
-
-    expect(await screen.findByRole("heading", { name: "Aether Labs" })).toBeTruthy()
-    expect(await screen.findByText(/partner brief/)).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Show search" })).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Hide members" })).toBeTruthy()
-    expect(document.querySelector(".channelMessageSearch")?.className).toContain("hidden")
-    expect(screen.getByRole("tooltip", { name: "Aether Labs" })).toBeTruthy()
-    const members = screen.getByLabelText("Channel members")
-    expect(members).toBeTruthy()
-    expect(screen.getByText("Online -- 1")).toBeTruthy()
-    expect(within(members).getByText("MP").className).toContain("bg-surface-rail")
-    expect(within(members).getByText("Maya Patel").className).toContain("text-foreground")
-  })
-
+describe("WorkspaceChat", () => {
   it("presents direct messages as noninteractive placeholders in the global rail", async () => {
-    renderApp(makeSnapshot())
+    render(
+      <WorkspaceChat
+        model={makeChatModel()}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+      />
+    )
 
     const globalNavigation = await screen.findByLabelText("Global navigation")
     const workspaceNavigation = screen.getByLabelText("Workspace navigation")
@@ -176,7 +116,7 @@ describe("App", () => {
 
   it("keeps direct messages in the global rail while changing channels", async () => {
     const base = makeChatModel()
-    const secondChannel = new Channel({
+    const secondChannel = makeChannel({
       id: secondChannelId,
       workspaceId,
       name: "design",
@@ -222,7 +162,7 @@ describe("App", () => {
 
   it("renders and switches channels from the model channel list", async () => {
     const base = makeChatModel()
-    const secondChannel = new Channel({
+    const secondChannel = makeChannel({
       id: secondChannelId,
       workspaceId,
       name: "design",
@@ -278,7 +218,7 @@ describe("App", () => {
         deleteChannelMessage={() => Promise.resolve()}
         createChannel={(input) => {
           calls.push(input)
-          return Promise.resolve(new Channel({
+          return Promise.resolve(makeChannel({
             id: secondChannelId,
             workspaceId,
             name: input.name,
@@ -322,7 +262,7 @@ describe("App", () => {
         model={makeChatModel()}
         createChannelMessage={() => Promise.resolve()}
         deleteChannelMessage={() => Promise.resolve()}
-        createChannel={() => Promise.resolve(new Channel({
+        createChannel={() => Promise.resolve(makeChannel({
           id: secondChannelId,
           workspaceId,
           name: "product",
@@ -389,7 +329,7 @@ describe("App", () => {
         deleteChannelMessage={() => Promise.resolve()}
         createChannel={(input) => {
           calls.push(input)
-          return Promise.resolve(new Channel({
+          return Promise.resolve(makeChannel({
             id: secondChannelId,
             workspaceId,
             name: input.name,
@@ -469,7 +409,7 @@ describe("App", () => {
 
   it("uses a dot instead of a count for inactive channel unread state", async () => {
     const base = makeChatModel()
-    const secondChannel = new Channel({
+    const secondChannel = makeChannel({
       id: secondChannelId,
       workspaceId,
       name: "design",
@@ -500,7 +440,7 @@ describe("App", () => {
 
   it("prioritizes mention state over unread state in inactive channel indicators", async () => {
     const base = makeChatModel()
-    const secondChannel = new Channel({
+    const secondChannel = makeChannel({
       id: secondChannelId,
       workspaceId,
       name: "design",
@@ -550,8 +490,8 @@ describe("App", () => {
   })
 
   it("shows edited message time with a trailing marker in the timestamp", async () => {
-    renderApp(makeSnapshot([
-      new ChannelMessage({
+    renderWorkspaceChat(makeChatModel([
+      makeMessage({
         id: messageId,
         channelId,
         authorType: "human",
@@ -576,8 +516,8 @@ describe("App", () => {
     render(
       <WorkspaceChat
         model={makeChatModel([
-          new ChannelMessage({
-            id: "message-1" as ChannelMessageId,
+          makeMessage({
+            id: "message-1",
             channelId,
             authorType: "human",
             authorId: userId,
@@ -586,8 +526,8 @@ describe("App", () => {
             createdAt: 2,
             deletedAt: null
           }),
-          new ChannelMessage({
-            id: "message-2" as ChannelMessageId,
+          makeMessage({
+            id: "message-2",
             channelId,
             authorType: "human",
             authorId: "human-2",
@@ -596,8 +536,8 @@ describe("App", () => {
             createdAt: 4,
             deletedAt: null
           }),
-          new ChannelMessage({
-            id: "message-3" as ChannelMessageId,
+          makeMessage({
+            id: "message-3",
             channelId,
             authorType: "human",
             authorId: "human-3",
@@ -645,8 +585,8 @@ describe("App", () => {
   })
 
   it("searches beyond loaded messages and focuses an older channel result", async () => {
-    const currentMessage = new ChannelMessage({
-      id: "message-current" as ChannelMessageId,
+    const currentMessage = makeMessage({
+      id: "message-current",
       channelId,
       authorType: "human",
       authorId: userId,
@@ -655,8 +595,8 @@ describe("App", () => {
       createdAt: 10,
       deletedAt: null
     })
-    const olderMessage = new ChannelMessage({
-      id: "message-older" as ChannelMessageId,
+    const olderMessage = makeMessage({
+      id: "message-older",
       channelId,
       authorType: "human",
       authorId: "human-2",
@@ -696,8 +636,8 @@ describe("App", () => {
     render(
       <WorkspaceChat
         model={makeChatModel([
-          new ChannelMessage({
-            id: "message-1" as ChannelMessageId,
+          makeMessage({
+            id: "message-1",
             channelId,
             authorType: "human",
             authorId: userId,
@@ -706,8 +646,8 @@ describe("App", () => {
             createdAt: 2,
             deletedAt: null
           }),
-          new ChannelMessage({
-            id: "message-2" as ChannelMessageId,
+          makeMessage({
+            id: "message-2",
             channelId,
             authorType: "human",
             authorId: "human-2",
@@ -716,8 +656,8 @@ describe("App", () => {
             createdAt: 4,
             deletedAt: null
           }),
-          new ChannelMessage({
-            id: "message-4" as ChannelMessageId,
+          makeMessage({
+            id: "message-4",
             channelId,
             authorType: "human",
             authorId: "human-4",
@@ -769,8 +709,8 @@ describe("App", () => {
     render(
       <WorkspaceChat
         model={makeChatModel([
-          new ChannelMessage({
-            id: "message-1" as ChannelMessageId,
+          makeMessage({
+            id: "message-1",
             channelId,
             authorType: "human",
             authorId: userId,
@@ -779,8 +719,8 @@ describe("App", () => {
             createdAt: 2,
             deletedAt: null
           }),
-          new ChannelMessage({
-            id: "message-2" as ChannelMessageId,
+          makeMessage({
+            id: "message-2",
             channelId,
             authorType: "human",
             authorId: "human-2",
@@ -789,8 +729,8 @@ describe("App", () => {
             createdAt: 4,
             deletedAt: null
           }),
-          new ChannelMessage({
-            id: "message-4" as ChannelMessageId,
+          makeMessage({
+            id: "message-4",
             channelId,
             authorType: "human",
             authorId: "human-4",
@@ -845,7 +785,7 @@ describe("App", () => {
   })
 
   it("sends a channel message from the bottom composer with Enter", async () => {
-    const calls = renderApp(makeSnapshot())
+    const calls = renderWorkspaceChat(makeChatModel())
     const input = await screen.findByPlaceholderText("Message origination")
 
     fireEvent.change(input, { target: { value: "I will tighten the partner brief." } })
@@ -863,7 +803,7 @@ describe("App", () => {
   })
 
   it("sends a channel message from the composer send button", async () => {
-    const calls = renderApp(makeSnapshot())
+    const calls = renderWorkspaceChat(makeChatModel())
     const input = await screen.findByPlaceholderText("Message origination")
 
     fireEvent.change(input, { target: { value: "Button send keeps mouse users covered." } })
@@ -885,7 +825,7 @@ describe("App", () => {
     const pendingSend = new Promise<void>((resolve) => {
       completeSend = resolve
     })
-    const secondChannel = new Channel({
+    const secondChannel = makeChannel({
       id: secondChannelId,
       workspaceId,
       name: "design",
@@ -929,7 +869,7 @@ describe("App", () => {
   })
 
   it("sends a reply with the selected parent and can cancel reply mode without clearing the draft", async () => {
-    const calls = renderApp(makeSnapshot())
+    const calls = renderWorkspaceChat(makeChatModel())
     const menu = await openMessageMenu("Maya Patel")
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Reply" }))
 
@@ -961,9 +901,9 @@ describe("App", () => {
   })
 
   it("renders parent previews for replies and deleted parent fallbacks", async () => {
-    const replyId = "message-2" as ChannelMessageId
-    renderApp(makeSnapshot([
-      new ChannelMessage({
+    const replyId = "message-2"
+    renderWorkspaceChat(makeChatModel([
+      makeMessage({
         id: messageId,
         channelId,
         authorType: "human",
@@ -973,7 +913,7 @@ describe("App", () => {
         createdAt: 2,
         deletedAt: null
       }),
-      new ChannelMessage({
+      makeMessage({
         id: replyId,
         channelId,
         authorType: "human",
@@ -983,15 +923,15 @@ describe("App", () => {
         createdAt: 3,
         deletedAt: null,
         parentMessageId: messageId,
-        parentMessage: new ChannelMessageParent({
+        parentMessage: makeParent({
           id: messageId,
           authorDisplayName: "Maya Patel",
           bodyPreview: "The partner brief needs a concise risk summary.",
           deleted: false
         })
       }),
-      new ChannelMessage({
-        id: "message-3" as ChannelMessageId,
+      makeMessage({
+        id: "message-3",
         channelId,
         authorType: "human",
         authorId: userId,
@@ -999,7 +939,7 @@ describe("App", () => {
         body: "Thanks.",
         createdAt: 4,
         deletedAt: null,
-        parentMessageId: "message-missing" as ChannelMessageId,
+        parentMessageId: "message-missing",
         parentMessage: null
       })
     ]))
@@ -1010,8 +950,8 @@ describe("App", () => {
   })
 
   it("renders image thumbnails and file attachment links without trusting unsafe URLs", async () => {
-    renderApp(makeSnapshot([
-      new ChannelMessage({
+    renderWorkspaceChat(makeChatModel([
+      makeMessage({
         id: messageId,
         channelId,
         authorType: "human",
@@ -1021,7 +961,7 @@ describe("App", () => {
         createdAt: 2,
         deletedAt: null,
         attachments: [
-          new ChannelMessageAttachment({
+          makeAttachment({
             id: "attachment-1",
             storageId: "storage-1",
             name: "brief.png",
@@ -1030,7 +970,7 @@ describe("App", () => {
             kind: "image",
             url: "https://files.example/brief.png"
           }),
-          new ChannelMessageAttachment({
+          makeAttachment({
             id: "attachment-2",
             storageId: "storage-2",
             name: "notes.pdf",
@@ -1039,7 +979,7 @@ describe("App", () => {
             kind: "file",
             url: "javascript:alert(1)"
           }),
-          new ChannelMessageAttachment({
+          makeAttachment({
             id: "attachment-3",
             storageId: "storage-3",
             name: "insecure.txt",
@@ -1062,7 +1002,7 @@ describe("App", () => {
   })
 
   it("keeps Shift+Enter inside the composer without sending", async () => {
-    const calls = renderApp(makeSnapshot())
+    const calls = renderWorkspaceChat(makeChatModel())
     const input = await screen.findByPlaceholderText("Message origination")
 
     fireEvent.change(input, { target: { value: "First line" } })
@@ -1165,7 +1105,7 @@ describe("App", () => {
   })
 
   it("shows an empty chat state before the first channel message", async () => {
-    renderApp(makeSnapshot([]))
+    renderWorkspaceChat(makeChatModel([]))
 
     expect(await screen.findByText("No messages yet")).toBeTruthy()
     expect(screen.getByText("Start the conversation in")).toBeTruthy()
@@ -1174,8 +1114,8 @@ describe("App", () => {
 
   it("groups consecutive messages from the same author under one sticky avatar", async () => {
     const model = makeChatModel([
-      new ChannelMessage({
-        id: "message-1" as ChannelMessageId,
+      makeMessage({
+        id: "message-1",
         channelId,
         authorType: "human",
         authorId: userId,
@@ -1184,8 +1124,8 @@ describe("App", () => {
         createdAt: 2,
         deletedAt: null
       }),
-      new ChannelMessage({
-        id: "message-2" as ChannelMessageId,
+      makeMessage({
+        id: "message-2",
         channelId,
         authorType: "human",
         authorId: userId,
@@ -1195,8 +1135,8 @@ describe("App", () => {
         editedAt: 6,
         deletedAt: null
       }),
-      new ChannelMessage({
-        id: "message-3" as ChannelMessageId,
+      makeMessage({
+        id: "message-3",
         channelId,
         authorType: "human",
         authorId: "human-2",
@@ -1205,8 +1145,8 @@ describe("App", () => {
         createdAt: 4,
         deletedAt: null
       }),
-      new ChannelMessage({
-        id: "message-4" as ChannelMessageId,
+      makeMessage({
+        id: "message-4",
         channelId,
         authorType: "human",
         authorId: userId,
@@ -1324,7 +1264,7 @@ describe("App", () => {
     const calls: Array<unknown> = []
     const upload = vi.fn()
       .mockRejectedValueOnce(new Error("upload token expired"))
-      .mockResolvedValueOnce(new ChannelMessageAttachment({
+      .mockResolvedValueOnce(makeAttachment({
         id: "storage-1",
         storageId: "storage-1",
         name: "brief.png",
@@ -1373,13 +1313,13 @@ describe("App", () => {
   })
 
   it("discards an upload that completes after switching channels", async () => {
-    let completeUpload!: (attachment: ChannelMessageAttachment) => void
-    const pendingUpload = new Promise<ChannelMessageAttachment>((resolve) => {
+    let completeUpload!: (attachment: ChatMessageAttachment) => void
+    const pendingUpload = new Promise<ChatMessageAttachment>((resolve) => {
       completeUpload = resolve
     })
     const upload = vi.fn(() => pendingUpload)
     const discard = vi.fn(() => Promise.resolve())
-    const secondChannel = new Channel({
+    const secondChannel = makeChannel({
       id: secondChannelId,
       workspaceId,
       name: "design",
@@ -1415,7 +1355,7 @@ describe("App", () => {
     )
     const nextInput = await screen.findByPlaceholderText("Message design")
     fireEvent.change(nextInput, { target: { value: "Keep this design draft." } })
-    const uploaded = new ChannelMessageAttachment({
+    const uploaded = makeAttachment({
       id: "storage-1",
       storageId: "storage-1",
       name: "brief.png",
@@ -1433,7 +1373,7 @@ describe("App", () => {
   })
 
   it("rejects invalid files before upload and cleans successful uploads after a partial batch failure", async () => {
-    const uploaded = new ChannelMessageAttachment({
+    const uploaded = makeAttachment({
       id: "storage-1", storageId: "storage-1", name: "brief.png", contentType: "image/png",
       size: 5, kind: "image", url: null
     })
@@ -1464,10 +1404,10 @@ describe("App", () => {
   })
 
   it("places multi-select checkboxes before the avatar column", async () => {
-    renderApp(makeSnapshot([
-      ...makeSnapshot().channelMessages,
-      new ChannelMessage({
-        id: "message-2" as ChannelMessageId,
+    renderWorkspaceChat(makeChatModel([
+      ...makeChatModel().channelMessages,
+      makeMessage({
+        id: "message-2",
         channelId,
         authorType: "human",
         authorId: "human-2",
@@ -1493,10 +1433,10 @@ describe("App", () => {
   })
 
   it("aligns compact message checkboxes with the message body", async () => {
-    renderApp(makeSnapshot([
-      ...makeSnapshot().channelMessages,
-      new ChannelMessage({
-        id: "message-2" as ChannelMessageId,
+    renderWorkspaceChat(makeChatModel([
+      ...makeChatModel().channelMessages,
+      makeMessage({
+        id: "message-2",
         channelId,
         authorType: "human",
         authorId: userId,
@@ -1518,10 +1458,10 @@ describe("App", () => {
   })
 
   it("pins the selection action bar to the top-most selected message", async () => {
-    renderApp(makeSnapshot([
-      ...makeSnapshot().channelMessages,
-      new ChannelMessage({
-        id: "message-2" as ChannelMessageId,
+    renderWorkspaceChat(makeChatModel([
+      ...makeChatModel().channelMessages,
+      makeMessage({
+        id: "message-2",
         channelId,
         authorType: "human",
         authorId: "human-2",
@@ -1530,8 +1470,8 @@ describe("App", () => {
         createdAt: 3,
         deletedAt: null
       }),
-      new ChannelMessage({
-        id: "message-3" as ChannelMessageId,
+      makeMessage({
+        id: "message-3",
         channelId,
         authorType: "human",
         authorId: "human-3",
@@ -1553,7 +1493,7 @@ describe("App", () => {
   })
 
   it("opens a right-click message menu for selection", async () => {
-    renderApp(makeSnapshot())
+    renderWorkspaceChat(makeChatModel())
 
     fireEvent.contextMenu(await screen.findByText(/partner brief/), { clientX: 20, clientY: 30 })
 
@@ -1588,7 +1528,7 @@ describe("App", () => {
     render(
       <WorkspaceChat
         model={makeChatModel([
-          new ChannelMessage({
+          makeMessage({
             id: messageId,
             channelId,
             authorType: "human",
@@ -1597,7 +1537,7 @@ describe("App", () => {
             body: "The partner brief needs a concise risk summary.",
             createdAt: 2,
             deletedAt: null,
-            reactions: [new ChannelMessageReaction({ emoji: "👍", count: 2, reactedByCurrentUser: true })]
+            reactions: [makeReaction({ emoji: "👍", count: 2, reactedByCurrentUser: true })]
           })
         ])}
         createChannelMessage={() => Promise.resolve()}
@@ -1631,7 +1571,7 @@ describe("App", () => {
     render(
       <WorkspaceChat
         model={makeChatModel([
-          new ChannelMessage({
+          makeMessage({
             id: messageId,
             channelId,
             authorType: "human",
@@ -1640,7 +1580,7 @@ describe("App", () => {
             body: "The partner brief needs a concise risk summary.",
             createdAt: 2,
             deletedAt: null,
-            reactions: [new ChannelMessageReaction({ emoji: "👍", count: 2, reactedByCurrentUser: true })]
+            reactions: [makeReaction({ emoji: "👍", count: 2, reactedByCurrentUser: true })]
           })
         ])}
         createChannelMessage={() => Promise.resolve()}
@@ -1657,7 +1597,7 @@ describe("App", () => {
   })
 
   it("waits for delete confirmation before deleting a message", async () => {
-    const calls = renderApp(makeSnapshot())
+    const calls = renderWorkspaceChat(makeChatModel())
 
     fireEvent.click(await screen.findByLabelText("More actions for message from Maya Patel"))
     const menu = await screen.findByRole("menu", { name: /message from Maya Patel/ })
@@ -1673,7 +1613,7 @@ describe("App", () => {
   })
 
   it("cancels a pending message delete", async () => {
-    const calls = renderApp(makeSnapshot())
+    const calls = renderWorkspaceChat(makeChatModel())
 
     fireEvent.click(await screen.findByLabelText("More actions for message from Maya Patel"))
     const menu = await screen.findByRole("menu", { name: /message from Maya Patel/ })
@@ -1689,9 +1629,9 @@ describe("App", () => {
   it("shows edit and delete actions only for messages allowed by per-message guards", async () => {
     const calls: Array<{ method: string; args: unknown }> = []
     const model = makeChatModel([
-      ...makeSnapshot().channelMessages,
-      new ChannelMessage({
-        id: "message-2" as ChannelMessageId,
+      ...makeChatModel().channelMessages,
+      makeMessage({
+        id: "message-2",
         channelId,
         authorType: "human",
         authorId: "human-2",
@@ -1857,7 +1797,7 @@ describe("App", () => {
   })
 
   it("collapses and reopens the channel members panel", async () => {
-    renderApp(makeSnapshot())
+    renderWorkspaceChat(makeChatModel())
 
     const hideMembersButton = await screen.findByRole("button", { name: "Hide members" })
     expect(hideMembersButton.getAttribute("aria-pressed")).toBe("true")
@@ -1871,7 +1811,7 @@ describe("App", () => {
   })
 
   it("opens and closes message search from the header toggle and keyboard shortcut", async () => {
-    renderApp(makeSnapshot())
+    renderWorkspaceChat(makeChatModel())
 
     const showSearchButton = await screen.findByRole("button", { name: "Show search" })
     expect(showSearchButton.getAttribute("aria-pressed")).toBe("false")

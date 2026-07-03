@@ -157,7 +157,8 @@ accounts, and invisible automatic memory remain deferred unless a later ADR repl
 
 The runtime consequences are recorded in `docs/agent-runtime-contract.md`: Convex owns agent state,
 policy, orchestration, and audit; the renderer receives transport-neutral views through the active
-chat seam; and the retained Effect RPC remains a historical fixture pending COL-46.
+chat seam. COL-46 retired the historical Effect RPC implementation while preserving its deliberate
+agent/run/audit inventory in that document.
 
 ## ADR 002: Convex And AuthKit Dogfood Chat
 
@@ -212,9 +213,10 @@ states therefore matter more than indiscriminate feature breadth.
 
 #### Start Convex Fresh
 
-Local JSON messages were not migrated. Convex is authoritative, and the filesystem-backed RPC store
-is no longer started by runtime entrypoints. Snapshot-era modules remain as tested fixtures only.
-Any future import must be explicit and idempotent rather than an automatic fallback.
+Local JSON messages were not migrated. Convex is authoritative. COL-46 reopened the original
+retained-fixture consequence after COL-21 chose a Convex-native agent seam and removed the
+filesystem store, RPC transport, snapshot renderer, and their tests. Any future import must be
+explicit and idempotent rather than an automatic fallback.
 
 #### Keep Agent UI Behind A Development Flag
 
@@ -247,8 +249,8 @@ hosting, automatic updates, or production deployment ownership.
 - The renderer mounts only when all required public `VITE_` configuration exists; it does not fall
   back to local JSON chat.
 - Server secrets and allowlist administration stay out of the renderer.
-- The old RPC/local-store implementation remains reference and test coverage, not runtime
-  architecture.
+- The old RPC/local-store implementation is retired. Its deliberate agent/run/audit concepts remain
+  documented in `docs/agent-runtime-contract.md`, not as executable fallback code.
 - Packaging, updater behavior, production Convex/AuthKit ownership, workspace switching, and WorkOS
   organization mapping require later decisions.
 
@@ -260,3 +262,14 @@ hosting, automatic updates, or production deployment ownership.
 - Multiple users can exchange realtime messages across membership-backed channels.
 - Agent UI is absent unless explicitly enabled for development.
 - Checkout-based dogfood works without signed application distribution.
+
+### COL-46 Retirement Evidence
+
+- Reachability from the electron-vite roots ends at `src/main/index.ts` for Electron startup and at
+  `src/renderer/main.tsx` for AuthKit, Convex, and active chat. No retired module was in either graph.
+- Removing the dormant island deleted 1,544 source lines and reduced tests by 1,135 net lines after
+  replacing the snapshot-backed shared UI suite with plain active-chat fixtures.
+- Seven production dependencies and one test-only dependency were removed; the lockfile resolved 27
+  fewer packages.
+- The production renderer output remained exactly 1,404,805 bytes before and after the change,
+  confirming a zero-byte renderer bundle impact because the retired code was already unreachable.

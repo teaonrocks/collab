@@ -16,26 +16,25 @@
 ## External References
 | Need | File |
 |------|------|
-| Architecture, transport details, and test map | `README.md` |
-| Package scripts and pinned Effect/Electron deps | `package.json` |
+| Architecture, runtime details, and test map | `README.md` |
+| Package scripts and pinned dependencies | `package.json` |
 | Electron/Vite entrypoints | `electron.vite.config.ts` |
 | Vitest setup | `vitest.config.ts` |
 
 ## Project Layout
-- `src/shared/`: RPC contract and shared client transport types.
-- `src/main/`: Electron main process, RPC server transport, collaboration repo, and handlers.
-- `src/preload/`: isolated preload bridge for the transferred `MessagePort`.
-- `src/renderer/`: React UI, effect-atom atoms, and renderer RPC API adapter.
+- `src/shared/`: transport-neutral policy shared across Electron boundaries.
+- `src/main/`: Electron startup, authentication callback coordination, and security policy.
+- `src/preload/`: isolated bridge for approved native shell operations.
+- `src/renderer/`: React UI, AuthKit/Convex integration, and the plain active-chat adapter.
 - Tests live next to covered code as `*.test.ts` or `*.test.tsx`.
 
 ## Key Conventions
-- Treat `src/shared/collab-rpc.ts` as the wire contract source of truth for payloads, successes, streams, and typed errors.
-- Keep renderer code depending on `CollabApi`; production wiring belongs in `src/renderer/collab-api-live.ts`.
-- Keep main-side business logic behind `CollabRepo` and expose it through `CollabHandlersLive`.
-- Preserve the MessagePort handoff pattern described in `README.md` when touching IPC transport code.
-- Keep typed RPC errors serializable across MsgPack; avoid non-enumerable `Error` fields in schema error payloads.
+- Treat Convex validators and generated function types as the backend contract source of truth.
+- Keep shared UI code depending on the plain types in `src/renderer/chat-data.ts`; production mapping belongs in `src/renderer/dogfood-chat-adapter.ts`.
+- Keep local JSON and the retired Effect RPC transport out of production and tests; future agent work is Convex-native per `docs/agent-runtime-contract.md`.
+- Keep expected command errors as serializable plain data rather than `Error` instances.
 - Do not edit generated build output under `out/`; regenerate it with `pnpm build`.
-- Add or update colocated tests for changed RPC contracts, transport behavior, repo persistence, atoms, or UI behavior.
+- Add or update colocated tests for changed Convex contracts, Electron boundaries, adapters, or UI behavior.
 
 
 

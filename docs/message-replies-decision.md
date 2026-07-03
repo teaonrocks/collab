@@ -42,9 +42,8 @@ createChannelMessage({
 })
 ```
 
-The preserved snapshot-era `ChannelMessage` type mirrors the optional parent id for shared UI test
-coverage. It is not an active persistence model, and its `Thread`/`ThreadMessage` types must not be
-used for human replies.
+Shared UI tests use the plain `ChatMessage` view type from `src/renderer/chat-data.ts`. Snapshot-era
+`Thread` and `ThreadMessage` shapes were retired and must not be revived for human replies.
 
 ## Deliberate Limits
 

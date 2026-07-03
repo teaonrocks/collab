@@ -21,9 +21,9 @@ scheduling, provider orchestration, and audit records. The renderer consumes a s
 transport-neutral view and command interface through the active-chat seam. Convex documents and
 snapshot-era Effect schema classes do not cross that seam.
 
-The retained `@effect/rpc` implementation is a historical fixture. Its MessagePort transport and
-serializable-error tests remain until COL-46 decides which fixture coverage to quarantine or remove.
-It is not an alternate production adapter for the agent runtime.
+The historical `@effect/rpc` implementation, MessagePort transport, local JSON repository, and
+snapshot renderer were retired by COL-46. Their unique agent/thread/run evidence remains in this
+inventory; executable transport fixtures did not protect the accepted Convex-native seam.
 
 ## Runtime Shape
 
@@ -44,7 +44,10 @@ implementation rather than expanding the renderer interface.
 
 ## Existing Contract Inventory And Disposition
 
-`src/shared/collab-rpc.ts` currently defines the following agent, thread, run, and audit fields.
+Before COL-46 retired it, `src/shared/collab-rpc.ts` defined the following agent, thread, run, and
+audit fields. This table is the retained reference material; the Agent Prep milestone owns it, and
+its exit condition is implementation of each kept concept in a focused Convex contract or an ADR
+that explicitly supersedes the concept.
 
 | Existing object | Existing fields | Disposition |
 | --- | --- | --- |
@@ -112,7 +115,7 @@ The first implementation ticket should add the Convex tables, indexes, validator
 functions, provider action seam, and `convex-test` coverage together. A schema change must use the
 repository's migration process and run `pnpm convex:codegen`.
 
-COL-46 may then retire or quarantine the snapshot-era RPC fixture island without guessing whether
-it is a production agent transport. Any future Electron-main responsibility must be introduced by a
-new architecture decision and a concrete second adapter; the current production agent path does not
+COL-46 retired the snapshot-era RPC fixture island after confirming it was unreachable from both
+production entrypoints. Any future Electron-main responsibility must be introduced by a new
+architecture decision and a concrete second adapter; the current production agent path does not
 need one.

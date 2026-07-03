@@ -39,14 +39,13 @@ React renderer -> WorkOS AuthKit -> Convex
 - `src/renderer/dogfood-chat-adapter.ts` maps typed Convex results and mutations to the plain active-chat contract without snapshot-era schema objects.
 - `src/renderer/chat-data.ts` defines the renderer-owned active-chat view model and operations.
 - `src/renderer/workspace-chat.tsx` contains the shared `WorkspaceChat` surface, with pure presentation-model helpers in `workspace-chat-model.ts`.
-- `src/renderer/App.tsx` and `legacy-chat-data.ts` isolate the retained Effect snapshot fixture from the active production graph.
 - `convex/schema.ts` and `convex/chat.ts` own the current data model and server behavior.
 
-The repository still contains the earlier snapshot-shaped `@effect/rpc`, `effect-atom`, and local
-JSON implementation under `src/shared`, `src/main`, and `src/renderer`. Those modules are retained
-as tested fixtures and are not started by the production entrypoints. The accepted agent runtime
-contract is Convex-native; do not reconnect or extend the local JSON/RPC path as a production agent
-fallback.
+Production reachability is rooted in `src/main/index.ts` and `src/renderer/main.tsx`, matching the
+electron-vite inputs. The main entrypoint owns only Electron/auth/security behavior; the renderer
+entrypoint loads AuthKit, Convex, and the plain active-chat path. The snapshot-era Effect RPC,
+MessagePort transport, local JSON repository, atoms, and renderer were retired after COL-21 accepted
+a Convex-native agent contract. Do not restore local JSON/RPC as a production fallback.
 
 ## Project Layout
 
@@ -55,7 +54,7 @@ convex/                 # schema, authenticated chat functions, and backend test
 src/main/               # Electron startup and native AuthKit callback coordination
 src/preload/            # context-isolated bridge for approved external URLs
 src/renderer/           # React chat UI, Convex adapter, AuthKit provider, and UI primitives
-src/shared/             # shared auth policy plus preserved snapshot-era RPC types
+src/shared/             # transport-neutral policy shared across Electron boundaries
 docs/                   # current operations and focused implementation decisions
 ```
 
@@ -128,14 +127,15 @@ Tests are colocated with their source. The main coverage groups are:
 
 - `convex/chat.test.ts`: auth/allowlist behavior, channels, membership, unread state, messages,
   replies, reactions, and attachments;
-- `src/renderer/App.test.tsx`: shared chat behavior and the retained snapshot-fixture entrypoint;
+- `src/renderer/workspace-chat.test.tsx`: shared chat behavior using plain active-chat fixtures;
 - `src/renderer/dogfood-chat.test.tsx`: plain Convex-to-active-chat adaptation and authenticated app states;
 - `scripts/check-convex-bindings.test.ts`: offline stale Convex module-binding detection;
 - `src/renderer/dogfood-distribution.test.ts`: release command, frozen-install CI, revision handoff,
   runtime documentation, and two-account smoke-contract checks;
 - `src/main/auth-callback.test.ts` and the auth-policy tests: native callback handling and URL
   restrictions; and
-- snapshot-era RPC, repo, transport, and atom tests: retained legacy fixture behavior.
+- `src/renderer/message-interactions.test.ts`: selection, editing, deletion, and context-menu state
+  using plain active-chat messages.
 
 `pnpm dogfood:verify` is the complete automated friend-beta gate: root and Convex typechecks,
 generated-binding validation, ESLint (including React Hooks), unused production dependency analysis,
