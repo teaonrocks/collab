@@ -314,7 +314,12 @@ const messages: ReadonlyArray<DogfoodChannelMessageView> = [
     authorUserId: "user-1" as Id<"users">,
     authorDisplayName: "Maya Patel",
     body: "Dogfood chat is live.",
-    createdAt: 42
+    parentMessageId: null,
+    parentMessage: null,
+    createdAt: 42,
+    editedAt: null,
+    reactions: [],
+    attachments: []
   }
 ]
 
@@ -326,7 +331,12 @@ const messagesWithAnotherAuthor: ReadonlyArray<DogfoodChannelMessageView> = [
     authorUserId: "user-2" as Id<"users">,
     authorDisplayName: "Lee Chen",
     body: "Another teammate is here.",
-    createdAt: 43
+    parentMessageId: null,
+    parentMessage: null,
+    createdAt: 43,
+    editedAt: null,
+    reactions: [],
+    attachments: []
   }
 ]
 
@@ -337,7 +347,12 @@ const designMessages: ReadonlyArray<DogfoodChannelMessageView> = [
     authorUserId: "user-1" as Id<"users">,
     authorDisplayName: "Maya Patel",
     body: "Design kickoff is scoped here.",
-    createdAt: 46
+    parentMessageId: null,
+    parentMessage: null,
+    createdAt: 46,
+    editedAt: null,
+    reactions: [],
+    attachments: []
   }
 ]
 
@@ -357,15 +372,13 @@ const members: ReadonlyArray<DogfoodChannelMemberView> = [
 describe("dogfoodChatToChatData", () => {
   it("adapts the Convex dogfood chat view into the chat data interface", () => {
     const chatData = dogfoodChatToChatData({
-      workspace,
-      channels,
-      selectedChannelId: workspace.channel.id,
-      messages,
-      members,
-      sendMessage: mocks.sendMessage,
-      editMessage: mocks.editMessage,
-      deleteMessage: mocks.deleteMessage,
-      toggleMessageReaction: mocks.toggleMessageReaction
+      data: { workspace, channels, selectedChannelId: workspace.channel.id, messages, members },
+      commands: {
+        sendMessage: mocks.sendMessage,
+        editMessage: mocks.editMessage,
+        deleteMessage: mocks.deleteMessage,
+        toggleMessageReaction: mocks.toggleMessageReaction
+      }
     })
 
     expect(chatData.model.currentUser.displayName).toBe("Maya Patel")
@@ -386,29 +399,51 @@ describe("dogfoodChatToChatData", () => {
     })
   })
 
+  it("falls back to the default Convex channel when selection is stale", () => {
+    const chatData = dogfoodChatToChatData({
+      data: {
+        workspace,
+        channels,
+        selectedChannelId: "removed-channel" as Id<"channels">,
+        messages
+      },
+      commands: {
+        sendMessage: mocks.sendMessage,
+        editMessage: mocks.editMessage,
+        deleteMessage: mocks.deleteMessage
+      }
+    })
+
+    expect(chatData.model.channel).toEqual({ id: "channel-1", name: "general", visibility: "private" })
+  })
+
   it("adapts reply parent ids and previews", async () => {
     const chatData = dogfoodChatToChatData({
-      workspace,
-      channels,
-      selectedChannelId: workspace.channel.id,
-      messages: [{
-        id: "message-2" as Id<"messages">,
-        channelId: "channel-1" as Id<"channels">,
-        authorUserId: "user-2" as Id<"users">,
-        authorDisplayName: "Lee Chen",
-        body: "Reply body.",
-        parentMessageId: messages[0]!.id,
-        parentMessage: {
-          id: messages[0]!.id,
-          authorDisplayName: "Maya Patel",
-          bodyPreview: "Dogfood chat is live.",
-          deleted: false
-        },
-        createdAt: 43
-      }],
-      sendMessage: mocks.sendMessage,
-      editMessage: mocks.editMessage,
-      deleteMessage: mocks.deleteMessage
+      data: {
+        workspace,
+        channels,
+        selectedChannelId: workspace.channel.id,
+        messages: [{
+          ...messages[0]!,
+          id: "message-2" as Id<"messages">,
+          authorUserId: "user-2" as Id<"users">,
+          authorDisplayName: "Lee Chen",
+          body: "Reply body.",
+          parentMessageId: messages[0]!.id,
+          parentMessage: {
+            id: messages[0]!.id,
+            authorDisplayName: "Maya Patel",
+            bodyPreview: "Dogfood chat is live.",
+            deleted: false
+          },
+          createdAt: 43
+        }]
+      },
+      commands: {
+        sendMessage: mocks.sendMessage,
+        editMessage: mocks.editMessage,
+        deleteMessage: mocks.deleteMessage
+      }
     })
 
     expect(chatData.model.channelMessages[0]).toMatchObject({
@@ -436,23 +471,28 @@ describe("dogfoodChatToChatData", () => {
 
   it("adapts attachment metadata and forwards storage ids when sending", async () => {
     const chatData = dogfoodChatToChatData({
-      workspace,
-      channels,
-      selectedChannelId: workspace.channel.id,
-      messages: [{
-        ...messages[0]!,
-        attachments: [{
-          storageId: "storage-1" as Id<"_storage">,
-          name: "brief.png",
-          contentType: "image/png",
-          size: 4096,
-          kind: "image",
-          url: "https://files.example/brief.png"
+      data: {
+        workspace,
+        channels,
+        selectedChannelId: workspace.channel.id,
+        messages: [{
+          ...messages[0]!,
+          attachments: [{
+            storageId: "storage-1" as Id<"_storage">,
+            name: "brief.png",
+            contentType: "image/png",
+            size: 4096,
+            kind: "image",
+            url: "https://files.example/brief.png"
+          }]
         }]
-      }],
-      sendMessage: mocks.sendMessage,
-      editMessage: mocks.editMessage,
-      deleteMessage: mocks.deleteMessage
+      },
+      commands: {
+        sendMessage: mocks.sendMessage,
+        discardMessageAttachment: mocks.deleteAttachmentUpload,
+        editMessage: mocks.editMessage,
+        deleteMessage: mocks.deleteMessage
+      }
     })
 
     expect(chatData.model.channelMessages[0]?.attachments).toEqual([
@@ -479,18 +519,25 @@ describe("dogfoodChatToChatData", () => {
       parentMessageId: undefined,
       attachments: [{ storageId: "storage-1", name: "brief.png" }]
     })
+
+    await chatData.discardMessageAttachment?.(chatData.model.channelMessages[0]!.attachments[0]!)
+    expect(mocks.deleteAttachmentUpload).toHaveBeenCalledWith({ storageId: "storage-1" })
   })
 
   it("preserves Convex editedAt in the chat data model", () => {
     const chatData = dogfoodChatToChatData({
-      workspace,
-      channels,
-      selectedChannelId: workspace.channel.id,
-      messages: [{ ...messages[0]!, editedAt: 45 }],
-      sendMessage: mocks.sendMessage,
-      editMessage: mocks.editMessage,
-      deleteMessage: mocks.deleteMessage,
-      toggleMessageReaction: mocks.toggleMessageReaction
+      data: {
+        workspace,
+        channels,
+        selectedChannelId: workspace.channel.id,
+        messages: [{ ...messages[0]!, editedAt: 45 }]
+      },
+      commands: {
+        sendMessage: mocks.sendMessage,
+        editMessage: mocks.editMessage,
+        deleteMessage: mocks.deleteMessage,
+        toggleMessageReaction: mocks.toggleMessageReaction
+      }
     })
 
     expect(chatData.model.channelMessages[0]?.editedAt).toBe(45)
@@ -498,17 +545,21 @@ describe("dogfoodChatToChatData", () => {
 
   it("adapts Convex reaction counts and current-user state", async () => {
     const chatData = dogfoodChatToChatData({
-      workspace,
-      channels,
-      selectedChannelId: workspace.channel.id,
-      messages: [{
-        ...messages[0]!,
-        reactions: [{ emoji: "👍", count: 2, reactedByCurrentUser: true }]
-      }],
-      sendMessage: mocks.sendMessage,
-      editMessage: mocks.editMessage,
-      deleteMessage: mocks.deleteMessage,
-      toggleMessageReaction: mocks.toggleMessageReaction
+      data: {
+        workspace,
+        channels,
+        selectedChannelId: workspace.channel.id,
+        messages: [{
+          ...messages[0]!,
+          reactions: [{ emoji: "👍", count: 2, reactedByCurrentUser: true }]
+        }]
+      },
+      commands: {
+        sendMessage: mocks.sendMessage,
+        editMessage: mocks.editMessage,
+        deleteMessage: mocks.deleteMessage,
+        toggleMessageReaction: mocks.toggleMessageReaction
+      }
     })
 
     expect(chatData.model.channelMessages[0]?.reactions).toEqual([
@@ -530,17 +581,14 @@ describe("dogfoodChatToChatData", () => {
 
   it("marks selected channel messages as loading without requiring message rows", () => {
     const chatData = dogfoodChatToChatData({
-      workspace,
-      channels,
-      selectedChannelId: channels[1]!.id,
-      messages: [],
-      members: [],
-      messagesLoading: true,
-      membersLoading: true,
-      sendMessage: mocks.sendMessage,
-      editMessage: mocks.editMessage,
-      deleteMessage: mocks.deleteMessage,
-      toggleMessageReaction: mocks.toggleMessageReaction
+      data: { workspace, channels, selectedChannelId: channels[1]!.id, messages: [], members: [] },
+      state: { messagesLoading: true, membersLoading: true },
+      commands: {
+        sendMessage: mocks.sendMessage,
+        editMessage: mocks.editMessage,
+        deleteMessage: mocks.deleteMessage,
+        toggleMessageReaction: mocks.toggleMessageReaction
+      }
     })
 
     expect(chatData.model.channel.name).toBe("design")
@@ -552,14 +600,18 @@ describe("dogfoodChatToChatData", () => {
 
   it("adapts per-channel unread and mention indicators", () => {
     const chatData = dogfoodChatToChatData({
-      workspace,
-      channels,
-      selectedChannelId: workspace.channel.id,
-      messages,
-      channelIndicators: [{ channelId: channels[1]!.id, indicator: "mentioned" }],
-      sendMessage: mocks.sendMessage,
-      editMessage: mocks.editMessage,
-      deleteMessage: mocks.deleteMessage
+      data: {
+        workspace,
+        channels,
+        selectedChannelId: workspace.channel.id,
+        messages,
+        channelIndicators: [{ channelId: channels[1]!.id, indicator: "mentioned" }]
+      },
+      commands: {
+        sendMessage: mocks.sendMessage,
+        editMessage: mocks.editMessage,
+        deleteMessage: mocks.deleteMessage
+      }
     })
 
     expect(chatData.model.channelIndicators).toEqual([{ channelId: channels[1]!.id, indicator: "mentioned" }])
@@ -567,13 +619,12 @@ describe("dogfoodChatToChatData", () => {
 
   it("uses Convex ids for chat commands without exposing snapshot-era fields", async () => {
     const chatData = dogfoodChatToChatData({
-      workspace,
-      channels,
-      selectedChannelId: workspace.channel.id,
-      messages,
-      sendMessage: mocks.sendMessage,
-      editMessage: mocks.editMessage,
-      deleteMessage: mocks.deleteMessage
+      data: { workspace, channels, selectedChannelId: workspace.channel.id, messages },
+      commands: {
+        sendMessage: mocks.sendMessage,
+        editMessage: mocks.editMessage,
+        deleteMessage: mocks.deleteMessage
+      }
     })
 
     await chatData.createChannelMessage({ channelId: chatData.model.channel.id, body: "Ship chat first." })
@@ -602,18 +653,38 @@ describe("dogfoodChatToChatData", () => {
     expect("agentRuns" in chatData.model).toBe(false)
   })
 
+  it("authorizes edit and delete commands only for the current user", () => {
+    const chatData = dogfoodChatToChatData({
+      data: {
+        workspace,
+        channels,
+        selectedChannelId: workspace.channel.id,
+        messages: messagesWithAnotherAuthor
+      },
+      commands: {
+        sendMessage: mocks.sendMessage,
+        editMessage: mocks.editMessage,
+        deleteMessage: mocks.deleteMessage
+      }
+    })
+
+    expect(chatData.canEditMessage?.(chatData.model.channelMessages[0]!)).toBe(true)
+    expect(chatData.canDeleteMessage?.(chatData.model.channelMessages[0]!)).toBe(true)
+    expect(chatData.canEditMessage?.(chatData.model.channelMessages[1]!)).toBe(false)
+    expect(chatData.canDeleteMessage?.(chatData.model.channelMessages[1]!)).toBe(false)
+  })
+
   it("uses the selected Convex channel and exposes create/select channel commands", async () => {
     const selections: Array<Id<"channels">> = []
     const chatData = dogfoodChatToChatData({
-      workspace,
-      channels,
-      selectedChannelId: channels[1]!.id,
-      messages: designMessages,
-      createChannel: mocks.createChannel,
-      selectChannel: (channelId) => selections.push(channelId),
-      sendMessage: mocks.sendMessage,
-      editMessage: mocks.editMessage,
-      deleteMessage: mocks.deleteMessage
+      data: { workspace, channels, selectedChannelId: channels[1]!.id, messages: designMessages },
+      commands: {
+        createChannel: mocks.createChannel,
+        selectChannel: (channelId) => selections.push(channelId),
+        sendMessage: mocks.sendMessage,
+        editMessage: mocks.editMessage,
+        deleteMessage: mocks.deleteMessage
+      }
     })
 
     expect(chatData.model.channel.name).toBe("design")

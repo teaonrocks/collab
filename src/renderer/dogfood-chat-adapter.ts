@@ -1,217 +1,151 @@
-import type { Id } from "../../convex/_generated/dataModel"
+import type { FunctionArgs, FunctionReturnType } from "convex/server"
+import { api } from "../../convex/_generated/api"
+import type { Id, TableNames } from "../../convex/_generated/dataModel"
 import type {
   ChatDataView,
   ChatMessageAttachment
 } from "./chat-data"
 
-export type DogfoodChannelView = {
-  readonly id: Id<"channels">
-  readonly key: string
-  readonly name: string
-  readonly visibility: "public" | "private"
-  readonly createdAt: number
-}
+export type DogfoodWorkspaceView = NonNullable<FunctionReturnType<typeof api.chat.defaultWorkspace>>
+export type DogfoodChannelView = FunctionReturnType<typeof api.chat.channels>[number]
+export type DogfoodChannelMessageView = FunctionReturnType<typeof api.chat.channelMessages>["page"][number]
+export type DogfoodMessageAttachmentView = DogfoodChannelMessageView["attachments"][number]
+export type DogfoodChannelMemberView = FunctionReturnType<typeof api.chat.channelMembers>[number]
+export type DogfoodChannelIndicatorView = FunctionReturnType<typeof api.chat.channelIndicators>[number]
 
-export type DogfoodWorkspaceView = {
-  readonly currentUser: {
-    readonly id: Id<"users">
-    readonly displayName: string
+export type DogfoodChatAdapterInput = {
+  readonly data: {
+    readonly workspace: DogfoodWorkspaceView
+    readonly channels: ReadonlyArray<DogfoodChannelView>
+    readonly selectedChannelId: Id<"channels">
+    readonly messages: ReadonlyArray<DogfoodChannelMessageView>
+    readonly members?: ReadonlyArray<DogfoodChannelMemberView>
+    readonly channelIndicators?: ReadonlyArray<DogfoodChannelIndicatorView>
   }
-  readonly workspace: {
-    readonly id: Id<"workspaces">
-    readonly name: string
+  readonly state?: {
+    readonly messagesLoading?: boolean
+    readonly messagesHasMore?: boolean
+    readonly messagesLoadingMore?: boolean
+    readonly membersLoading?: boolean
   }
-  readonly channel: {
-    readonly id: Id<"channels">
-    readonly name: string
-    readonly visibility: "public" | "private"
+  readonly commands: {
+    readonly createChannel?: (
+      input: FunctionArgs<typeof api.chat.createChannel>
+    ) => Promise<FunctionReturnType<typeof api.chat.createChannel>>
+    readonly selectChannel?: (channelId: Id<"channels">) => void
+    readonly sendMessage: (input: FunctionArgs<typeof api.chat.sendMessage>) => Promise<unknown>
+    readonly uploadMessageAttachment?: (file: File) => Promise<ChatMessageAttachment>
+    readonly discardMessageAttachment?: (
+      input: FunctionArgs<typeof api.chat.deleteAttachmentUpload>
+    ) => Promise<unknown>
+    readonly editMessage: (input: FunctionArgs<typeof api.chat.editMessage>) => Promise<unknown>
+    readonly deleteMessage: (input: FunctionArgs<typeof api.chat.deleteMessage>) => Promise<unknown>
+    readonly toggleMessageReaction?: (
+      input: FunctionArgs<typeof api.chat.toggleMessageReaction>
+    ) => Promise<unknown>
+    readonly searchMessages?: (
+      input: FunctionArgs<typeof api.chat.searchChannelMessages>
+    ) => Promise<FunctionReturnType<typeof api.chat.searchChannelMessages>>
+    readonly loadOlderMessages?: () => void
+    readonly operationErrorMessage?: ChatDataView["operationErrorMessage"]
   }
 }
 
-export type DogfoodChannelMessageView = {
-  readonly id: Id<"messages">
-  readonly channelId: Id<"channels">
-  readonly authorUserId: Id<"users">
-  readonly authorDisplayName: string
-  readonly body: string
-  readonly parentMessageId?: Id<"messages"> | null
-  readonly parentMessage?: {
-    readonly id: Id<"messages">
-    readonly authorDisplayName: string
-    readonly bodyPreview: string
-    readonly deleted: boolean
-  } | null
-  readonly createdAt: number
-  readonly editedAt?: number | null
-  readonly reactions?: ReadonlyArray<{
-    readonly emoji: string
-    readonly count: number
-    readonly reactedByCurrentUser: boolean
-  }>
-  readonly attachments?: ReadonlyArray<DogfoodMessageAttachmentView>
-}
-
-export type DogfoodMessageAttachmentView = {
-  readonly storageId: Id<"_storage">
-  readonly name: string
-  readonly contentType: string
-  readonly size: number
-  readonly kind: "file" | "image"
-  readonly url: string | null
-}
-
-export type DogfoodChannelMemberView = {
-  readonly id: Id<"users">
-  readonly displayName: string
-  readonly joinedAt: number
-}
-
-type DogfoodChatAdapterInput = {
-  readonly workspace: DogfoodWorkspaceView
-  readonly channels: ReadonlyArray<DogfoodChannelView>
-  readonly selectedChannelId: Id<"channels">
-  readonly messages: ReadonlyArray<DogfoodChannelMessageView>
-  readonly members?: ReadonlyArray<DogfoodChannelMemberView>
-  readonly channelIndicators?: ReadonlyArray<{
-    readonly channelId: Id<"channels">
-    readonly indicator: "unread" | "mentioned"
-  }>
-  readonly messagesLoading?: boolean
-  readonly messagesHasMore?: boolean
-  readonly messagesLoadingMore?: boolean
-  readonly membersLoading?: boolean
-  readonly createChannel?: (input: { readonly name: string; readonly visibility?: "public" | "private" }) => Promise<DogfoodChannelView>
-  readonly selectChannel?: (channelId: Id<"channels">) => void
-  readonly sendMessage: (input: {
-    readonly channelId: Id<"channels">
-    readonly body: string
-    readonly parentMessageId?: Id<"messages">
-    readonly attachments?: Array<{ readonly storageId: Id<"_storage">; readonly name: string }>
-  }) => Promise<unknown>
-  readonly uploadMessageAttachment?: (file: File) => Promise<ChatMessageAttachment>
-  readonly discardMessageAttachment?: (attachment: ChatMessageAttachment) => Promise<unknown>
-  readonly resolveStorageId?: (storageId: string) => Id<"_storage">
-  readonly editMessage: (input: {
-    readonly channelId: Id<"channels">
-    readonly messageId: Id<"messages">
-    readonly body: string
-  }) => Promise<unknown>
-  readonly deleteMessage: (input: {
-    readonly channelId: Id<"channels">
-    readonly messageId: Id<"messages">
-  }) => Promise<unknown>
-  readonly toggleMessageReaction?: (input: {
-    readonly channelId: Id<"channels">
-    readonly messageId: Id<"messages">
-    readonly emoji: string
-  }) => Promise<unknown>
-  readonly searchMessages?: (input: {
-    readonly channelId: Id<"channels">
-    readonly query: string
-  }) => Promise<ReadonlyArray<DogfoodChannelMessageView>>
-  readonly loadOlderMessages?: () => void
-  readonly operationErrorMessage?: ChatDataView["operationErrorMessage"]
-}
-
-export const dogfoodChatToChatData = (input: DogfoodChatAdapterInput): ChatDataView => {
+export const dogfoodChatToChatData = ({ data, state, commands }: DogfoodChatAdapterInput): ChatDataView => {
   const selectedChannel =
-    input.channels.find((channel) => channel.id === input.selectedChannelId) ??
-    input.channels.find((channel) => channel.id === input.workspace.channel.id) ??
-    input.workspace.channel
-  const channelIds = new Map(input.channels.map((channel) => [String(channel.id), channel.id]))
-  channelIds.set(String(input.workspace.channel.id), input.workspace.channel.id)
-  const messageIds = new Map< string, Id<"messages"> >()
-  const storageIds = new Map<string, Id<"_storage">>()
-  input.messages.forEach((message) => {
-    messageIds.set(String(message.id), message.id)
-    if (message.parentMessageId != null) messageIds.set(String(message.parentMessageId), message.parentMessageId)
-    if (message.parentMessage != null) messageIds.set(String(message.parentMessage.id), message.parentMessage.id)
-    message.attachments?.forEach((attachment) => storageIds.set(String(attachment.storageId), attachment.storageId))
-  })
-  const resolveChannelId = (id: string) => requiredId(channelIds, id, "channel")
-  const resolveMessageId = (id: string) => requiredId(messageIds, id, "message")
-  const resolveStorageId = (id: string) =>
-    storageIds.get(id) ?? input.resolveStorageId?.(id) ?? requiredId(storageIds, id, "attachment storage")
+    data.channels.find((channel) => channel.id === data.selectedChannelId) ??
+    data.channels.find((channel) => channel.id === data.workspace.channel.id) ??
+    data.workspace.channel
 
   return {
     model: {
       currentUser: {
-        id: String(input.workspace.currentUser.id),
-        displayName: input.workspace.currentUser.displayName
+        id: String(data.workspace.currentUser.id),
+        displayName: data.workspace.currentUser.displayName
       },
-      workspace: { name: input.workspace.workspace.name },
+      workspace: { name: data.workspace.workspace.name },
       channel: toChatChannel(selectedChannel),
-      channels: input.channels.map(toChatChannel),
-      channelMessages: input.messages.map(toChatMessage),
-      channelMembers: input.members?.map((member) => ({
+      channels: data.channels.map(toChatChannel),
+      channelMessages: data.messages.map(toChatMessage),
+      channelMembers: data.members?.map((member) => ({
         id: String(member.id),
         displayName: member.displayName
       })),
-      channelIndicators: input.channelIndicators?.map((state) => ({
-        channelId: String(state.channelId),
-        indicator: state.indicator
+      channelIndicators: data.channelIndicators?.map((indicator) => ({
+        channelId: String(indicator.channelId),
+        indicator: indicator.indicator
       })),
-      channelMembersLoading: input.membersLoading ?? false,
-      channelMessagesLoading: input.messagesLoading ?? false,
-      channelMessagesHasMore: input.messagesHasMore ?? false,
-      channelMessagesLoadingMore: input.messagesLoadingMore ?? false
+      channelMembersLoading: state?.membersLoading ?? false,
+      channelMessagesLoading: state?.messagesLoading ?? false,
+      channelMessagesHasMore: state?.messagesHasMore ?? false,
+      channelMessagesLoadingMore: state?.messagesLoadingMore ?? false
     },
-    createChannel: input.createChannel === undefined
+    createChannel: commands.createChannel === undefined
       ? undefined
-      : async ({ name, visibility }) => toChatChannel(await input.createChannel!({ name, visibility })),
-    selectChannel: input.selectChannel === undefined
+      : async (input) => toChatChannel(await commands.createChannel!(input)),
+    selectChannel: commands.selectChannel === undefined
       ? undefined
-      : (channelId) => input.selectChannel?.(resolveChannelId(channelId)),
-    createChannelMessage: ({ channelId, body, parentMessageId, attachments }) => input.sendMessage({
-      channelId: resolveChannelId(channelId),
+      : (channelId) => commands.selectChannel?.(convexId<"channels">(channelId)),
+    createChannelMessage: ({ channelId, body, parentMessageId, attachments }) => commands.sendMessage({
+      channelId: convexId<"channels">(channelId),
       body,
-      parentMessageId: parentMessageId == null ? undefined : resolveMessageId(parentMessageId),
+      parentMessageId: parentMessageId == null ? undefined : convexId<"messages">(parentMessageId),
       attachments: attachments?.map((attachment) => ({
-        storageId: resolveStorageId(attachment.storageId),
+        storageId: convexId<"_storage">(attachment.storageId),
         name: attachment.name
       }))
     }),
-    uploadMessageAttachment: input.uploadMessageAttachment,
-    discardMessageAttachment: input.discardMessageAttachment,
-    editChannelMessage: ({ channelId, messageId, body }) => input.editMessage({
-      channelId: resolveChannelId(channelId),
-      messageId: resolveMessageId(messageId),
+    uploadMessageAttachment: commands.uploadMessageAttachment,
+    discardMessageAttachment: commands.discardMessageAttachment === undefined
+      ? undefined
+      : (attachment) => commands.discardMessageAttachment!({
+        storageId: convexId<"_storage">(attachment.storageId)
+      }),
+    editChannelMessage: ({ channelId, messageId, body }) => commands.editMessage({
+      channelId: convexId<"channels">(channelId),
+      messageId: convexId<"messages">(messageId),
       body
     }),
-    deleteChannelMessage: ({ channelId, messageId }) => input.deleteMessage({
-      channelId: resolveChannelId(channelId),
-      messageId: resolveMessageId(messageId)
+    deleteChannelMessage: ({ channelId, messageId }) => commands.deleteMessage({
+      channelId: convexId<"channels">(channelId),
+      messageId: convexId<"messages">(messageId)
     }),
-    toggleMessageReaction: input.toggleMessageReaction === undefined
+    toggleMessageReaction: commands.toggleMessageReaction === undefined
       ? undefined
-      : ({ channelId, messageId, emoji }) => input.toggleMessageReaction!({
-        channelId: resolveChannelId(channelId),
-        messageId: resolveMessageId(messageId),
-        emoji
+      : ({ channelId, messageId, emoji }) => commands.toggleMessageReaction!({
+        channelId: convexId<"channels">(channelId),
+        messageId: convexId<"messages">(messageId),
+        emoji: toReactionEmoji(emoji)
       }),
-    searchChannelMessages: input.searchMessages === undefined
+    searchChannelMessages: commands.searchMessages === undefined
       ? undefined
-      : async ({ channelId, query }) => {
-          const results = await input.searchMessages!({ channelId: resolveChannelId(channelId), query })
-          results.forEach((message) => {
-            messageIds.set(String(message.id), message.id)
-            if (message.parentMessageId != null) messageIds.set(String(message.parentMessageId), message.parentMessageId)
-            message.attachments?.forEach((attachment) => storageIds.set(String(attachment.storageId), attachment.storageId))
-          })
-          return results.map(toChatMessage)
-        },
-    loadOlderChannelMessages: input.loadOlderMessages,
-    operationErrorMessage: input.operationErrorMessage,
-    canEditMessage: (message) => message.authorId === String(input.workspace.currentUser.id),
-    canDeleteMessage: (message) => message.authorId === String(input.workspace.currentUser.id)
+      : async ({ channelId, query }) => (await commands.searchMessages!({
+          channelId: convexId<"channels">(channelId),
+          query
+        })).map(toChatMessage),
+    loadOlderChannelMessages: commands.loadOlderMessages,
+    operationErrorMessage: commands.operationErrorMessage,
+    canEditMessage: (message) => message.authorId === String(data.workspace.currentUser.id),
+    canDeleteMessage: (message) => message.authorId === String(data.workspace.currentUser.id)
   }
 }
 
-const toChatChannel = (channel: {
-  readonly id: Id<"channels">
-  readonly name: string
-  readonly visibility: "public" | "private"
-}) => ({
+const convexId = <TableName extends TableNames | "_storage">(id: string): Id<TableName> => id as Id<TableName>
+
+const toReactionEmoji = (
+  emoji: string
+): FunctionArgs<typeof api.chat.toggleMessageReaction>["emoji"] => {
+  switch (emoji) {
+    case "👍":
+    case "🎉":
+    case "👀":
+      return emoji
+    default:
+      throw new Error("Unsupported reaction emoji")
+  }
+}
+
+const toChatChannel = (channel: Pick<DogfoodChannelView, "id" | "name" | "visibility">) => ({
   id: String(channel.id),
   name: channel.name,
   visibility: channel.visibility
@@ -235,21 +169,15 @@ const toChatMessage = (message: DogfoodChannelMessageView) => ({
   authorDisplayName: message.authorDisplayName,
   body: message.body,
   createdAt: message.createdAt,
-  editedAt: message.editedAt ?? null,
+  editedAt: message.editedAt,
   deletedAt: null,
-  parentMessageId: message.parentMessageId == null ? null : String(message.parentMessageId),
-  parentMessage: message.parentMessage == null ? null : {
+  parentMessageId: message.parentMessageId === null ? null : String(message.parentMessageId),
+  parentMessage: message.parentMessage === null ? null : {
     id: String(message.parentMessage.id),
     authorDisplayName: message.parentMessage.authorDisplayName,
     bodyPreview: message.parentMessage.bodyPreview,
     deleted: message.parentMessage.deleted
   },
-  reactions: message.reactions ?? [],
-  attachments: (message.attachments ?? []).map(toChatAttachment)
+  reactions: message.reactions,
+  attachments: message.attachments.map(toChatAttachment)
 })
-
-const requiredId = <IdType extends string>(ids: ReadonlyMap<string, IdType>, id: string, domain: string): IdType => {
-  const resolved = ids.get(id)
-  if (resolved === undefined) throw new Error(`Unknown ${domain} id`)
-  return resolved
-}

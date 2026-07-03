@@ -151,7 +151,6 @@ export const uploadAttachment = async <IntentId, StorageId>(input: {
   }) => Promise<{ readonly status: "registered" } | { readonly status: "rejected"; readonly reason: string }>
   readonly deleteUpload: (upload: { readonly intentId: IntentId; readonly storageId: StorageId }) => Promise<unknown>
   readonly storageIdFromResponse: (body: unknown) => StorageId
-  readonly rememberStorageId: (storageId: StorageId) => void
   readonly storageIdToString: (storageId: StorageId) => string
 }): Promise<ChatMessageAttachment> => {
   const { uploadUrl, intentId } = await input.generateUploadUrl()
@@ -164,7 +163,6 @@ export const uploadAttachment = async <IntentId, StorageId>(input: {
   if (!response.ok) throw new Error(`Attachment upload failed (${response.status})`)
 
   const storageId = input.storageIdFromResponse(await response.json())
-  input.rememberStorageId(storageId)
   let registration: Awaited<ReturnType<typeof input.register>> | undefined
   let registrationFailure: unknown
   for (let attempt = 0; attempt < ATTACHMENT_REGISTRATION_ATTEMPTS && registration === undefined; attempt += 1) {

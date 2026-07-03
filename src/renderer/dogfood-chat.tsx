@@ -30,7 +30,6 @@ type ConvexDogfoodError = {
 }
 
 type DogfoodOperation = "send" | "edit" | "delete" | "react" | "attach"
-type DogfoodMessageReactionEmoji = "👍" | "🎉" | "👀"
 type DogfoodDiagnostic = {
   readonly code: string
   readonly at: string
@@ -79,7 +78,6 @@ function ConvexDogfoodChat() {
   const [signInOpening, setSignInOpening] = useState(false)
   const [ensureAttempt, setEnsureAttempt] = useState(0)
   const lastReadMarkerRef = useRef<string | null>(null)
-  const storageIdsRef = useRef(new Map<string, Id<"_storage">>())
   const authUserId = auth.user?.id ?? null
   const sessionReady = authUserId !== null && convexAuth.isAuthenticated
   const viewerReady = sessionReady && ensuredUserId === authUserId && error === null
@@ -196,48 +194,46 @@ function ConvexDogfoodChat() {
     () => workspace === undefined || workspace === null || channelList === undefined || activeChannelId === undefined
       ? null
       : dogfoodChatToChatData({
-          workspace,
-          channels: channelList,
-          selectedChannelId: activeChannelId,
-          messages,
-          members: members ?? [],
-          channelIndicators: channelIndicators ?? [],
-          messagesLoading: messagePagination.status === "LoadingFirstPage",
-          messagesHasMore: messagePagination.status === "CanLoadMore" || messagePagination.status === "LoadingMore",
-          messagesLoadingMore: messagePagination.status === "LoadingMore",
-          loadOlderMessages: () => messagePagination.loadMore(50),
-          membersLoading: members === undefined,
-          createChannel: async (input) => {
-            const channel = await createChannel(input)
-            setCreatedChannels((existing) => mergeDogfoodChannels(existing, [channel]))
-            setJoinedChannelIds((existing) => new Set([...existing, channel.id]))
-            setSelectedChannelId(channel.id)
-            return channel
+          data: {
+            workspace,
+            channels: channelList,
+            selectedChannelId: activeChannelId,
+            messages,
+            members: members ?? [],
+            channelIndicators: channelIndicators ?? []
           },
-          selectChannel: (channelId) => setSelectedChannelId(channelId),
-          sendMessage,
-          uploadMessageAttachment: (file) => uploadAttachment({
-            file,
-            generateUploadUrl: () => generateAttachmentUploadUrl({}),
-            register: (input) => registerAttachmentUpload(input),
-            deleteUpload: (input) => deleteAttachmentUpload(input),
-            storageIdFromResponse: storageIdFromUploadResponse,
-            rememberStorageId: (storageId) => storageIdsRef.current.set(String(storageId), storageId),
-            storageIdToString: String
-          }),
-          discardMessageAttachment: (attachment) => deleteAttachmentUpload({
-            storageId: requiredStorageId(storageIdsRef.current, attachment.storageId)
-          }),
-          resolveStorageId: (storageId) => requiredStorageId(storageIdsRef.current, storageId),
-          editMessage,
-          deleteMessage,
-          toggleMessageReaction: ({ channelId, messageId, emoji }) => toggleMessageReaction({
-            channelId,
-            messageId,
-            emoji: toDogfoodMessageReactionEmoji(emoji)
-          }),
-          searchMessages: (input) => convex.query(api.chat.searchChannelMessages, input),
-          operationErrorMessage: dogfoodOperationErrorMessage
+          state: {
+            messagesLoading: messagePagination.status === "LoadingFirstPage",
+            messagesHasMore: messagePagination.status === "CanLoadMore" || messagePagination.status === "LoadingMore",
+            messagesLoadingMore: messagePagination.status === "LoadingMore",
+            membersLoading: members === undefined
+          },
+          commands: {
+            loadOlderMessages: () => messagePagination.loadMore(50),
+            createChannel: async (input) => {
+              const channel = await createChannel(input)
+              setCreatedChannels((existing) => mergeDogfoodChannels(existing, [channel]))
+              setJoinedChannelIds((existing) => new Set([...existing, channel.id]))
+              setSelectedChannelId(channel.id)
+              return channel
+            },
+            selectChannel: (channelId) => setSelectedChannelId(channelId),
+            sendMessage,
+            uploadMessageAttachment: (file) => uploadAttachment({
+              file,
+              generateUploadUrl: () => generateAttachmentUploadUrl({}),
+              register: (input) => registerAttachmentUpload(input),
+              deleteUpload: (input) => deleteAttachmentUpload(input),
+              storageIdFromResponse: storageIdFromUploadResponse,
+              storageIdToString: String
+            }),
+            discardMessageAttachment: deleteAttachmentUpload,
+            editMessage,
+            deleteMessage,
+            toggleMessageReaction,
+            searchMessages: (input) => convex.query(api.chat.searchChannelMessages, input),
+            operationErrorMessage: dogfoodOperationErrorMessage
+          }
         }),
     [activeChannelId, channelIndicators, channelList, convex, createChannel, deleteAttachmentUpload, deleteMessage, editMessage, generateAttachmentUploadUrl, members, messagePagination, messages, registerAttachmentUpload, sendMessage, toggleMessageReaction, workspace]
   )
@@ -401,23 +397,6 @@ export class DogfoodErrorBoundary extends Component<
 
     return this.props.children
   }
-}
-
-const toDogfoodMessageReactionEmoji = (emoji: string): DogfoodMessageReactionEmoji => {
-  switch (emoji) {
-    case "👍":
-    case "🎉":
-    case "👀":
-      return emoji
-    default:
-      throw new Error("Unsupported reaction emoji")
-  }
-}
-
-const requiredStorageId = (storageIds: ReadonlyMap<string, Id<"_storage">>, id: string): Id<"_storage"> => {
-  const storageId = storageIds.get(id)
-  if (storageId === undefined) throw new Error("Unknown attachment storage id")
-  return storageId
 }
 
 const storageIdFromUploadResponse = (body: unknown): Id<"_storage"> => {

@@ -146,7 +146,6 @@ describe("attachment draft lifecycle", () => {
       register,
       deleteUpload,
       storageIdFromResponse: (body) => (body as { storageId: string }).storageId,
-      rememberStorageId: vi.fn(),
       storageIdToString: String
     })).rejects.toThrow("registration unavailable")
 
