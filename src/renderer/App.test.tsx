@@ -628,7 +628,9 @@ describe("App", () => {
     await waitFor(() => {
       const message = screen.getAllByText("Risk summary needs one more pass.")
         .find((element) => element.closest(".chatTimeline") !== null)
-      expect(message!.closest("article")?.className).toContain("searchHighlighted")
+      const article = message!.closest("article")
+      expect(article?.className).toContain("searchHighlighted")
+      expect(article).toBe(document.activeElement)
     })
 
     expect(resultOption.hasAttribute("data-message-highlighted")).toBe(true)
@@ -642,8 +644,7 @@ describe("App", () => {
     expect(resultOption.hasAttribute("data-message-highlighted")).toBe(false)
   })
 
-  it("labels search as loaded-history only and expands results after loading an older page", async () => {
-    const loadOlderChannelMessages = vi.fn()
+  it("searches beyond loaded messages and focuses an older channel result", async () => {
     const currentMessage = new ChannelMessage({
       id: "message-current" as ChannelMessageId,
       channelId,
@@ -654,49 +655,41 @@ describe("App", () => {
       createdAt: 10,
       deletedAt: null
     })
-    const props = {
-      createChannelMessage: () => Promise.resolve(),
-      deleteChannelMessage: () => Promise.resolve(),
-      loadOlderChannelMessages
-    }
-    const { rerender } = render(
+    const olderMessage = new ChannelMessage({
+      id: "message-older" as ChannelMessageId,
+      channelId,
+      authorType: "human",
+      authorId: "human-2",
+      authorDisplayName: "Lee Chen",
+      body: "Archive decision from last week.",
+      createdAt: 2,
+      deletedAt: null
+    })
+    const searchChannelMessages = vi.fn().mockResolvedValue([olderMessage])
+    render(
       <WorkspaceChat
-        {...props}
         model={{ ...makeChatModel([currentMessage]), channelMessagesHasMore: true }}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+        searchChannelMessages={searchChannelMessages}
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Load older messages" }))
-    expect(loadOlderChannelMessages).toHaveBeenCalledTimes(1)
     const search = await openMessageSearch()
-    expect(screen.getByText("Search covers loaded messages only; load older messages to search more history.")).toBeTruthy()
+    expect(search.getAttribute("aria-describedby")).toBeNull()
     fireEvent.change(search, { target: { value: "archive" } })
-    expect(await screen.findByText("No matching messages.")).toBeTruthy()
+    const result = await screen.findByRole("option", { name: /Archive decision from last week/ })
+    expect(searchChannelMessages).toHaveBeenCalledWith({ channelId, query: "archive" })
 
-    rerender(
-      <WorkspaceChat
-        {...props}
-        model={{
-          ...makeChatModel([
-            new ChannelMessage({
-              id: "message-older" as ChannelMessageId,
-              channelId,
-              authorType: "human",
-              authorId: "human-2",
-              authorDisplayName: "Lee Chen",
-              body: "Archive decision from last week.",
-              createdAt: 2,
-              deletedAt: null
-            }),
-            currentMessage
-          ]),
-          channelMessagesHasMore: false
-        }}
-      />
-    )
+    fireEvent.click(result)
 
-    expect(await screen.findAllByText("Archive decision from last week.")).toHaveLength(2)
-    expect(screen.getByText("Search covers loaded messages only.")).toBeTruthy()
+    await waitFor(() => {
+      const messages = screen.getAllByText("Archive decision from last week.")
+      expect(messages).toHaveLength(2)
+      const article = messages.find((message) => message.closest("article"))?.closest("article")
+      expect(article?.className).toContain("searchHighlighted")
+      expect(article).toBe(document.activeElement)
+    })
   })
 
   it("navigates message search results with the keyboard", async () => {
@@ -754,28 +747,25 @@ describe("App", () => {
 
     fireEvent.keyDown(search, { key: "Enter", code: "Enter" })
 
-    await waitFor(() => {
-      const message = screen.getAllByText("Another risk review is scheduled.")
-        .find((element) => element.closest(".chatTimeline") !== null)
-      expect(message!.closest("article")?.className).toContain("searchHighlighted")
-    })
+    const secondMessage = screen.getAllByText("Another risk review is scheduled.")
+      .find((element) => element.closest(".chatTimeline") !== null)
+    const secondArticle = secondMessage!.closest("article")!
+    await waitFor(() => expect(secondArticle).toBe(document.activeElement))
+    expect(secondArticle.className).toContain("searchHighlighted")
     expect(options[1]!.hasAttribute("data-message-highlighted")).toBe(true)
 
-    fireEvent.keyDown(search, { key: "ArrowUp", code: "ArrowUp" })
-    expect(options[0]!.hasAttribute("data-active")).toBe(true)
+    fireEvent.keyDown(secondArticle, { key: "Enter", code: "Enter" })
 
-    fireEvent.keyDown(search, { key: "Enter", code: "Enter" })
-
-    await waitFor(() => {
-      const message = screen.getAllByText("Risk summary needs one more pass.")
-        .find((element) => element.closest(".chatTimeline") !== null)
-      expect(message!.closest("article")?.className).toContain("searchHighlighted")
-    })
+    const firstMessage = screen.getAllByText("Risk summary needs one more pass.")
+      .find((element) => element.closest(".chatTimeline") !== null)
+    const firstArticle = firstMessage!.closest("article")!
+    await waitFor(() => expect(firstArticle).toBe(document.activeElement))
+    expect(firstArticle.className).toContain("searchHighlighted")
     expect(options[0]!.hasAttribute("data-message-highlighted")).toBe(true)
     expect(options[1]!.hasAttribute("data-message-highlighted")).toBe(false)
   })
 
-  it("keeps keyboard navigation in search after Escape clears a selected result", async () => {
+  it("moves Escape from a selected message to the input, then closes search without clearing the query", async () => {
     render(
       <WorkspaceChat
         model={makeChatModel([
@@ -823,13 +813,16 @@ describe("App", () => {
 
     fireEvent.keyDown(search, { key: "Enter", code: "Enter" })
     await waitFor(() => expect(options[0]!.hasAttribute("data-message-highlighted")).toBe(true))
+    expect(search).not.toBe(document.activeElement)
 
     fireEvent.keyDown(window, { key: "Escape", code: "Escape" })
-    await waitFor(() => expect(options[0]!.hasAttribute("data-message-highlighted")).toBe(false))
     expect(search).toBe(document.activeElement)
+    expect(options[0]!.hasAttribute("data-message-highlighted")).toBe(true)
+    expect((search as HTMLInputElement).value).toBe("risk")
 
-    fireEvent.keyDown(search, { key: "ArrowDown", code: "ArrowDown" })
-    expect(options[1]!.hasAttribute("data-active")).toBe(true)
+    fireEvent.keyDown(search, { key: "Escape", code: "Escape" })
+    expect(document.querySelector(".channelMessageSearch")?.className).toContain("hidden")
+    expect((search as HTMLInputElement).value).toBe("risk")
   })
 
   it("shows message search empty and error states", async () => {
@@ -1866,5 +1859,13 @@ describe("App", () => {
     const reopenedSearchInput = await screen.findByPlaceholderText("Search origination")
     expect(document.querySelector(".channelMessageSearch")?.className).not.toContain("hidden")
     expect(reopenedSearchInput).toBe(document.activeElement)
+
+    screen.getByRole("button", { name: "Hide search" }).focus()
+    fireEvent.keyDown(window, { key: "f", code: "KeyF", metaKey: true })
+    expect(reopenedSearchInput).toBe(document.activeElement)
+    expect(document.querySelector(".channelMessageSearch")?.className).not.toContain("hidden")
+
+    fireEvent.keyDown(window, { key: "f", code: "KeyF", metaKey: true })
+    expect(document.querySelector(".channelMessageSearch")?.className).toContain("hidden")
   })
 })

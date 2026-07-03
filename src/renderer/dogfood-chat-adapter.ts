@@ -105,6 +105,10 @@ type DogfoodChatAdapterInput = {
     readonly messageId: Id<"messages">
     readonly emoji: string
   }) => Promise<unknown>
+  readonly searchMessages?: (input: {
+    readonly channelId: Id<"channels">
+    readonly query: string
+  }) => Promise<ReadonlyArray<DogfoodChannelMessageView>>
   readonly loadOlderMessages?: () => void
   readonly operationErrorMessage?: ChatDataView["operationErrorMessage"]
 }
@@ -138,26 +142,7 @@ export const dogfoodChatToChatData = (input: DogfoodChatAdapterInput): ChatDataV
       workspace: { name: input.workspace.workspace.name },
       channel: toChatChannel(selectedChannel),
       channels: input.channels.map(toChatChannel),
-      channelMessages: input.messages.map((message) => ({
-        id: String(message.id),
-        channelId: String(message.channelId),
-        authorType: "human" as const,
-        authorId: String(message.authorUserId),
-        authorDisplayName: message.authorDisplayName,
-        body: message.body,
-        createdAt: message.createdAt,
-        editedAt: message.editedAt ?? null,
-        deletedAt: null,
-        parentMessageId: message.parentMessageId == null ? null : String(message.parentMessageId),
-        parentMessage: message.parentMessage == null ? null : {
-          id: String(message.parentMessage.id),
-          authorDisplayName: message.parentMessage.authorDisplayName,
-          bodyPreview: message.parentMessage.bodyPreview,
-          deleted: message.parentMessage.deleted
-        },
-        reactions: message.reactions ?? [],
-        attachments: (message.attachments ?? []).map(toChatAttachment)
-      })),
+      channelMessages: input.messages.map(toChatMessage),
       channelMembers: input.members?.map((member) => ({
         id: String(member.id),
         displayName: member.displayName
@@ -204,6 +189,17 @@ export const dogfoodChatToChatData = (input: DogfoodChatAdapterInput): ChatDataV
         messageId: resolveMessageId(messageId),
         emoji
       }),
+    searchChannelMessages: input.searchMessages === undefined
+      ? undefined
+      : async ({ channelId, query }) => {
+          const results = await input.searchMessages!({ channelId: resolveChannelId(channelId), query })
+          results.forEach((message) => {
+            messageIds.set(String(message.id), message.id)
+            if (message.parentMessageId != null) messageIds.set(String(message.parentMessageId), message.parentMessageId)
+            message.attachments?.forEach((attachment) => storageIds.set(String(attachment.storageId), attachment.storageId))
+          })
+          return results.map(toChatMessage)
+        },
     loadOlderChannelMessages: input.loadOlderMessages,
     operationErrorMessage: input.operationErrorMessage,
     canEditMessage: (message) => message.authorId === String(input.workspace.currentUser.id),
@@ -229,6 +225,27 @@ const toChatAttachment = (attachment: DogfoodMessageAttachmentView): ChatMessage
   size: attachment.size,
   kind: attachment.kind,
   url: attachment.url
+})
+
+const toChatMessage = (message: DogfoodChannelMessageView) => ({
+  id: String(message.id),
+  channelId: String(message.channelId),
+  authorType: "human" as const,
+  authorId: String(message.authorUserId),
+  authorDisplayName: message.authorDisplayName,
+  body: message.body,
+  createdAt: message.createdAt,
+  editedAt: message.editedAt ?? null,
+  deletedAt: null,
+  parentMessageId: message.parentMessageId == null ? null : String(message.parentMessageId),
+  parentMessage: message.parentMessage == null ? null : {
+    id: String(message.parentMessage.id),
+    authorDisplayName: message.parentMessage.authorDisplayName,
+    bodyPreview: message.parentMessage.bodyPreview,
+    deleted: message.parentMessage.deleted
+  },
+  reactions: message.reactions ?? [],
+  attachments: (message.attachments ?? []).map(toChatAttachment)
 })
 
 const requiredId = <IdType extends string>(ids: ReadonlyMap<string, IdType>, id: string, domain: string): IdType => {

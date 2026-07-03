@@ -12,6 +12,8 @@ const MAX_CHANNELS = 100
 const MAX_CHANNEL_NAME_LENGTH = 80
 const MAX_MESSAGE_BODY_LENGTH = 8_000
 const MAX_MESSAGE_PAGE_SIZE = 100
+const MAX_MESSAGE_SEARCH_QUERY_LENGTH = 120
+const MAX_MESSAGE_SEARCH_RESULTS = 20
 const MAX_BATCHED_REACTION_ROWS = 5_000
 const MAX_MESSAGE_ATTACHMENTS = 4
 const MAX_ATTACHMENT_NAME_LENGTH = 180
@@ -1037,6 +1039,33 @@ export const channelMessages = query({
       ...result,
       page: await toMessageViews(ctx, result.page, user._id)
     }
+  })
+})
+
+export const searchChannelMessages = query({
+  args: {
+    channelId: v.id("channels"),
+    query: v.string()
+  },
+  handler: (ctx, args) => withDogfoodDiagnostics("searchChannelMessages", {
+    channelId: args.channelId,
+    queryLength: args.query.trim().length
+  }, async () => {
+    const user = await requireAllowedCurrentUser(ctx)
+    await requireChannelMember(ctx, { channelId: args.channelId, userId: user._id })
+
+    const searchQuery = args.query.trim()
+    if (searchQuery.length === 0) return []
+    if (searchQuery.length > MAX_MESSAGE_SEARCH_QUERY_LENGTH) {
+      throw new Error(`Search queries can contain at most ${MAX_MESSAGE_SEARCH_QUERY_LENGTH} characters`)
+    }
+
+    const messages = await ctx.db
+      .query("messages")
+      .withSearchIndex("search_body", (q) => q.search("body", searchQuery).eq("channelId", args.channelId))
+      .take(MAX_MESSAGE_SEARCH_RESULTS)
+
+    return toMessageViews(ctx, messages, user._id)
   })
 })
 

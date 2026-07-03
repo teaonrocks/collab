@@ -27,13 +27,14 @@ export type ChannelMessageSearchResult = {
 
 export type ChannelMessageSearchState =
   | { readonly status: "idle" }
+  | { readonly status: "loading" }
   | { readonly status: "error"; readonly message: string }
   | { readonly status: "empty" }
   | { readonly status: "results"; readonly results: ReadonlyArray<ChannelMessageSearchResult> }
 
 const MENTION_SUGGESTION_LIMIT = 6
-const MESSAGE_SEARCH_RESULT_LIMIT = 8
-const MESSAGE_SEARCH_MAX_QUERY_LENGTH = 120
+const MESSAGE_SEARCH_RESULT_LIMIT = 20
+export const MESSAGE_SEARCH_MAX_QUERY_LENGTH = 120
 
 export const createChannelViewModel = (model: ChatDataModel): ChannelViewModel => {
   const channelIndicators = new Map<ChatChannelId, ChatChannelIndicator>()

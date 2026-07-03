@@ -72,7 +72,10 @@ export default defineSchema({
   }).index("by_channel_created_at", ["channelId", "createdAt"]).index("by_workspace_created_at", [
     "workspaceId",
     "createdAt"
-  ]).index("by_parent_message", ["parentMessageId"]),
+  ]).index("by_parent_message", ["parentMessageId"]).searchIndex("search_body", {
+    searchField: "body",
+    filterFields: ["channelId"]
+  }),
 
   messageMentions: defineTable({
     channelId: v.id("channels"),

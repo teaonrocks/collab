@@ -17,7 +17,7 @@ import {
   X,
   Users
 } from "lucide-react"
-import { type FormEvent, useEffect, useMemo, useRef, useState } from "react"
+import { type FormEvent, type RefObject, useEffect, useMemo, useRef, useState } from "react"
 import "./App.css"
 import type {
   ChatChannel,
@@ -31,6 +31,7 @@ import type {
   ChatMessageGuard,
   ChatMessageId,
   ChatOperationErrorMessage,
+  SearchChatMessages,
   SelectChatChannel
 } from "./chat-data"
 import {
@@ -49,6 +50,7 @@ import {
   getMentionRequest,
   groupConsecutiveMessages,
   initials,
+  MESSAGE_SEARCH_MAX_QUERY_LENGTH,
   mergeChannelMembers,
   resizeTextarea,
   searchChannelMessages,
@@ -161,6 +163,7 @@ export function WorkspaceChat(props: {
   readonly selectChannel?: SelectChatChannel
   readonly editChannelMessage?: ChatDataView["editChannelMessage"]
   readonly toggleMessageReaction?: ChatDataView["toggleMessageReaction"]
+  readonly searchChannelMessages?: SearchChatMessages
   readonly loadOlderChannelMessages?: ChatDataView["loadOlderChannelMessages"]
   readonly canDeleteMessages?: boolean
   readonly canDeleteMessage?: ChatMessageGuard
@@ -178,6 +181,7 @@ export function WorkspaceChat(props: {
     deleteChannelMessage,
     editChannelMessage,
     toggleMessageReaction,
+    searchChannelMessages: searchChannelHistory,
     loadOlderChannelMessages,
     canDeleteMessages = true,
     canDeleteMessage,
@@ -193,6 +197,7 @@ export function WorkspaceChat(props: {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [messageSearchQuery, setMessageSearchQuery] = useState("")
   const [activeSearchMessageId, setActiveSearchMessageId] = useState<ChatMessageId | null>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const [replyParent, setReplyParent] = useState<ChatMessage | null>(null)
   const [pendingAttachments, setPendingAttachments] = useState<ReadonlyArray<ChatMessageAttachment>>([])
   const [uploadingAttachment, setUploadingAttachment] = useState(false)
@@ -208,14 +213,22 @@ export function WorkspaceChat(props: {
   const discardMessageAttachmentRef = useRef(discardMessageAttachment)
   discardMessageAttachmentRef.current = discardMessageAttachment
   const view = useMemo(() => createChannelViewModel(model), [model])
-  const messageGroups = useMemo(
-    () => groupConsecutiveMessages(model.channelMessages),
-    [model.channelMessages]
-  )
-  const messageSearchState = useMemo(
+  const localMessageSearchState = useMemo(
     () => searchChannelMessages(model.channelMessages, messageSearchQuery),
     [model.channelMessages, messageSearchQuery]
   )
+  const [remoteMessageSearchState, setRemoteMessageSearchState] = useState<ChannelMessageSearchState>({ status: "idle" })
+  const messageSearchState = searchChannelHistory === undefined ? localMessageSearchState : remoteMessageSearchState
+  const activeSearchMessage = messageSearchState.status === "results"
+    ? messageSearchState.results.find((result) => result.message.id === activeSearchMessageId)?.message
+    : undefined
+  const displayedMessages = useMemo(() => {
+    if (activeSearchMessage === undefined || model.channelMessages.some((message) => message.id === activeSearchMessage.id)) {
+      return model.channelMessages
+    }
+    return [...model.channelMessages, activeSearchMessage].sort((left, right) => left.createdAt - right.createdAt)
+  }, [activeSearchMessage, model.channelMessages])
+  const messageGroups = useMemo(() => groupConsecutiveMessages(displayedMessages), [displayedMessages])
   const channelMessagesLoading = model.channelMessagesLoading === true
   const channelMembersLoading = model.channelMembers === undefined
     ? channelMessagesLoading
@@ -230,6 +243,42 @@ export function WorkspaceChat(props: {
     operationErrorMessage,
     setOperationError
   })
+
+  useEffect(() => {
+    if (searchChannelHistory === undefined) return
+    const query = messageSearchQuery.trim()
+    if (query.length === 0) {
+      setRemoteMessageSearchState({ status: "idle" })
+      return
+    }
+    if (query.length > MESSAGE_SEARCH_MAX_QUERY_LENGTH) {
+      setRemoteMessageSearchState({
+        status: "error",
+        message: `Search is limited to ${MESSAGE_SEARCH_MAX_QUERY_LENGTH} characters.`
+      })
+      return
+    }
+
+    let cancelled = false
+    setRemoteMessageSearchState({ status: "loading" })
+    const timeout = window.setTimeout(() => {
+      void searchChannelHistory({ channelId: model.channel.id, query })
+        .then((messages) => {
+          if (cancelled) return
+          setRemoteMessageSearchState(messages.length === 0
+            ? { status: "empty" }
+            : { status: "results", results: messages.map((message) => ({ message, bodyPreview: message.body })) })
+        })
+        .catch(() => {
+          if (!cancelled) setRemoteMessageSearchState({ status: "error", message: "Could not search messages." })
+        })
+    }, 250)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timeout)
+    }
+  }, [messageSearchQuery, model.channel.id, searchChannelHistory])
 
   useEffect(() => {
     const abandoned = pendingAttachmentsRef.current
@@ -276,24 +325,40 @@ export function WorkspaceChat(props: {
       if (event.key.toLowerCase() !== "f") return
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return
       event.preventDefault()
-      setSearchOpen(true)
+      if (!searchOpen) {
+        setSearchOpen(true)
+        return
+      }
+      if (document.activeElement === searchInputRef.current) {
+        setSearchOpen(false)
+        setActiveSearchMessageId(null)
+        return
+      }
+      searchInputRef.current?.focus()
     }
     window.addEventListener("keydown", openSearchOnHotkey)
     return () => window.removeEventListener("keydown", openSearchOnHotkey)
-  }, [])
+  }, [searchOpen])
 
   useEffect(() => {
     if (!searchOpen) return
     const closeSearchOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return
-      if (activeSearchMessageId !== null) {
+      event.preventDefault()
+      event.stopPropagation()
+      if (document.activeElement === searchInputRef.current) {
+        setSearchOpen(false)
         setActiveSearchMessageId(null)
+        return
+      }
+      if (activeSearchMessageId !== null) {
+        searchInputRef.current?.focus()
         return
       }
       setSearchOpen(false)
     }
-    window.addEventListener("keydown", closeSearchOnEscape)
-    return () => window.removeEventListener("keydown", closeSearchOnEscape)
+    window.addEventListener("keydown", closeSearchOnEscape, true)
+    return () => window.removeEventListener("keydown", closeSearchOnEscape, true)
   }, [searchOpen, activeSearchMessageId])
 
   const copyMessage = (message: ChatMessage) => {
@@ -431,9 +496,9 @@ export function WorkspaceChat(props: {
         loading={channelMessagesLoading}
         messageDraft={messageDraft}
         searchOpen={searchOpen}
+        searchInputRef={searchInputRef}
         searchQuery={messageSearchQuery}
         searchState={messageSearchState}
-        searchHasMoreHistory={model.channelMessagesHasMore === true}
         activeSearchMessageId={activeSearchMessageId}
         operationError={operationError}
         hasMoreMessages={model.channelMessagesHasMore === true}
@@ -447,6 +512,12 @@ export function WorkspaceChat(props: {
         onSelectSearchResult={(messageId) =>
           setActiveSearchMessageId((active) => active === messageId ? null : messageId)
         }
+        onNextSearchResult={() => {
+          if (messageSearchState.status !== "results" || messageSearchState.results.length === 0) return
+          const currentIndex = messageSearchState.results.findIndex((result) => result.message.id === activeSearchMessageId)
+          const nextResult = messageSearchState.results[(currentIndex + 1) % messageSearchState.results.length]
+          if (nextResult !== undefined) setActiveSearchMessageId(nextResult.message.id)
+        }}
         onSendMessage={sendChannelMessage}
         onToggleMessage={messageInteractions.toggleMessageSelection}
         onCopyMessage={copyMessage}
@@ -913,9 +984,9 @@ function ChatPane(props: {
   readonly loading: boolean
   readonly messageDraft: string
   readonly searchOpen: boolean
+  readonly searchInputRef: RefObject<HTMLInputElement | null>
   readonly searchQuery: string
   readonly searchState: ChannelMessageSearchState
-  readonly searchHasMoreHistory: boolean
   readonly activeSearchMessageId: ChatMessageId | null
   readonly operationError: string | null
   readonly hasMoreMessages: boolean
@@ -927,6 +998,7 @@ function ChatPane(props: {
   readonly onMessageDraftChange: (draft: string) => void
   readonly onSearchQueryChange: (query: string) => void
   readonly onSelectSearchResult: (messageId: ChatMessageId) => void
+  readonly onNextSearchResult: () => void
   readonly onSendMessage: () => void
   readonly onToggleMessage: (messageId: ChatMessageId) => void
   readonly onCopyMessage: (message: ChatMessage) => void
@@ -953,9 +1025,9 @@ function ChatPane(props: {
     loading,
     messageDraft,
     searchOpen,
+    searchInputRef,
     searchQuery,
     searchState,
-    searchHasMoreHistory,
     activeSearchMessageId,
     operationError,
     hasMoreMessages,
@@ -967,6 +1039,7 @@ function ChatPane(props: {
     onMessageDraftChange,
     onSearchQueryChange,
     onSelectSearchResult,
+    onNextSearchResult,
     onSendMessage,
     onToggleMessage,
     onCopyMessage,
@@ -993,6 +1066,7 @@ function ChatPane(props: {
     if (activeSearchMessageId === null) return
     const row = messageRowRefs.current.get(activeSearchMessageId)
     row?.scrollIntoView?.({ block: "center" })
+    row?.focus({ preventScroll: true })
   }, [activeSearchMessageId])
 
   return (
@@ -1000,9 +1074,9 @@ function ChatPane(props: {
       <ChannelMessageSearch
         channelName={channelName}
         open={searchOpen}
+        inputRef={searchInputRef}
         query={searchQuery}
         state={searchState}
-        hasMoreHistory={searchHasMoreHistory}
         activeSearchMessageId={activeSearchMessageId}
         disabled={loading}
         onQueryChange={onSearchQueryChange}
@@ -1061,6 +1135,7 @@ function ChatPane(props: {
                     }}
                     onToggleReaction={onToggleReaction === undefined ? undefined : (emoji) => onToggleReaction(message, emoji)}
                     highlighted={activeSearchMessageId === message.id}
+                    onNextSearchResult={onNextSearchResult}
                     refCallback={(element) => {
                       if (element === null) {
                         messageRowRefs.current.delete(message.id)
@@ -1100,16 +1175,15 @@ function ChatPane(props: {
 function ChannelMessageSearch(props: {
   readonly channelName: string
   readonly open: boolean
+  readonly inputRef: RefObject<HTMLInputElement | null>
   readonly query: string
   readonly state: ChannelMessageSearchState
-  readonly hasMoreHistory: boolean
   readonly activeSearchMessageId: ChatMessageId | null
   readonly disabled: boolean
   readonly onQueryChange: (query: string) => void
   readonly onSelectResult: (messageId: ChatMessageId) => void
 }) {
-  const { channelName, open, query, state, hasMoreHistory, activeSearchMessageId, disabled, onQueryChange, onSelectResult } = props
-  const inputRef = useRef<HTMLInputElement>(null)
+  const { channelName, open, inputRef, query, state, activeSearchMessageId, disabled, onQueryChange, onSelectResult } = props
   const activeResultIndexRef = useRef(0)
   const [activeResultIndex, setActiveResultIndex] = useState(0)
   const showResults = query.trim().length > 0
@@ -1123,7 +1197,7 @@ function ChannelMessageSearch(props: {
   useEffect(() => {
     if (!open) return
     inputRef.current?.focus()
-  }, [open])
+  }, [inputRef, open])
 
   useEffect(() => {
     activeResultIndexRef.current = 0
@@ -1151,11 +1225,10 @@ function ChannelMessageSearch(props: {
   useEffect(() => {
     if (!open || activeSearchMessageId !== null) return
     inputRef.current?.focus()
-  }, [activeSearchMessageId, open])
+  }, [activeSearchMessageId, inputRef, open])
 
   const selectSearchResult = (result: ChannelMessageSearchResult) => {
     onSelectResult(result.message.id)
-    window.setTimeout(() => inputRef.current?.focus(), 0)
   }
 
   return (
@@ -1172,7 +1245,7 @@ function ChannelMessageSearch(props: {
       itemToStringValue={(result) => result.message.id}
       isItemEqualToValue={(item, value) => item.message.id === value.message.id}
       onInputValueChange={(value, eventDetails) => {
-        if (eventDetails.reason === "input-change" || eventDetails.reason === "input-clear") onQueryChange(value)
+        if (eventDetails.reason === "input-change") onQueryChange(value)
       }}
     >
       <div className={classNames("channelMessageSearch relative z-30 row-start-1 border-b border-border bg-surface-canvas px-4 py-2.5", !open && "hidden")}>
@@ -1187,7 +1260,6 @@ function ChannelMessageSearch(props: {
             aria-controls="channel-message-search-results"
             aria-activedescendant={activeResultId}
             aria-invalid={state.status === "error"}
-            aria-describedby="channel-message-search-scope"
             onKeyDownCapture={(event) => {
               if (navigableResults.length === 0) return
               if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -1210,9 +1282,6 @@ function ChannelMessageSearch(props: {
               selectSearchResult(selectedResult)
             }}
           />
-          <p id="channel-message-search-scope" className="mb-0 mt-1.5 text-[11px] text-foreground-subtle">
-            Search covers loaded messages only{hasMoreHistory ? "; load older messages to search more history" : ""}.
-          </p>
           <ComboboxContent
             id="channel-message-search-results"
             className="messageSearchResults w-[min(680px,calc(100vw-120px))]"
@@ -1249,6 +1318,9 @@ function renderChannelMessageSearchState(
 ) {
   if (state.status === "idle") {
     return <p className="m-0 text-xs text-foreground-subtle">Search the current channel.</p>
+  }
+  if (state.status === "loading") {
+    return <p className="m-0 text-xs text-foreground-subtle" role="status">Searching channel history...</p>
   }
   if (state.status === "error") {
     return <p className="m-0 text-xs text-destructive-text" role="alert">{state.message}</p>
@@ -1339,6 +1411,7 @@ function ChannelMessageRow(props: {
   readonly onFocusParent: (messageId: ChatMessageId) => void
   readonly onToggleReaction?: (emoji: string) => void
   readonly highlighted: boolean
+  readonly onNextSearchResult: () => void
   readonly refCallback: (element: HTMLElement | null) => void
 }) {
   const {
@@ -1358,6 +1431,7 @@ function ChannelMessageRow(props: {
     onFocusParent,
     onToggleReaction,
     highlighted,
+    onNextSearchResult,
     refCallback
   } = props
   const deleted = message.deletedAt !== null
@@ -1379,6 +1453,11 @@ function ChannelMessageRow(props: {
       ref={refCallback}
       className={className}
       tabIndex={highlighted ? -1 : undefined}
+      onKeyDown={(event) => {
+        if (!highlighted || event.key !== "Enter" || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
+        event.preventDefault()
+        onNextSearchResult()
+      }}
       onClick={() => {
         if (selectionMode && !deleted) onToggle()
       }}

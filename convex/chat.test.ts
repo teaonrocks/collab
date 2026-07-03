@@ -955,6 +955,65 @@ describe("dogfood channel memberships", () => {
       .rejects.toThrow("Message pages must contain between 1 and 100 items")
   })
 
+  it("searches the full authorized channel history with a bounded query", async () => {
+    const t = convexTest(schema, modules)
+    await t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: mayaIdentity.tokenIdentifier,
+      email: mayaIdentity.email,
+      displayName: mayaIdentity.name
+    })
+    await t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: leeIdentity.tokenIdentifier,
+      email: leeIdentity.email,
+      displayName: leeIdentity.name
+    })
+    const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design-search" })
+    const product = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "product-search" })
+    await t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: design.id })
+
+    await t.run(async (ctx) => {
+      const workspace = await ctx.db.query("workspaces").withIndex("by_key", (q) => q.eq("key", "aether-dogfood")).unique()
+      const maya = await ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", mayaIdentity.email)).unique()
+      if (workspace === null || maya === null) throw new Error("Seed records not found")
+      for (let index = 0; index < 70; index += 1) {
+        await ctx.db.insert("messages", {
+          workspaceId: workspace._id,
+          channelId: design.id,
+          authorUserId: maya._id,
+          authorDisplayName: maya.displayName,
+          body: index === 0 ? "The buried archaeology decision is approved." : `Recent design note ${index}`,
+          createdAt: 1_000 + index
+        })
+      }
+      await ctx.db.insert("messages", {
+        workspaceId: workspace._id,
+        channelId: product.id,
+        authorUserId: maya._id,
+        authorDisplayName: maya.displayName,
+        body: "A product archaeology decision.",
+        createdAt: 2_000
+      })
+    })
+
+    await expect(t.withIdentity(leeIdentity).query(api.chat.searchChannelMessages, {
+      channelId: design.id,
+      query: "archaeology"
+    })).resolves.toEqual([
+      expect.objectContaining({
+        channelId: design.id,
+        body: "The buried archaeology decision is approved."
+      })
+    ])
+    await expect(t.withIdentity(leeIdentity).query(api.chat.searchChannelMessages, {
+      channelId: product.id,
+      query: "archaeology"
+    })).rejects.toThrow("Current user is not a member of this channel")
+    await expect(t.withIdentity(mayaIdentity).query(api.chat.searchChannelMessages, {
+      channelId: design.id,
+      query: "x".repeat(121)
+    })).rejects.toThrow("Search queries can contain at most 120 characters")
+  })
+
   it("enforces exact channel, message, edit, and attachment metadata limits", async () => {
     const t = convexTest(schema, modules)
     await t.mutation(internal.chat.ensureViewerForIdentity, {

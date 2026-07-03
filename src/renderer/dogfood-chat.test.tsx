@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
     isLoading: false,
     isAuthenticated: false
   },
+  convexQuery: vi.fn(),
   ensureViewer: vi.fn(),
   sendMessage: vi.fn(),
   editMessage: vi.fn(),
@@ -52,6 +53,7 @@ vi.mock("@workos-inc/authkit-react", () => ({
 }))
 
 vi.mock("convex/react", () => ({
+  useConvex: () => ({ query: mocks.convexQuery }),
   useConvexAuth: () => mocks.convexAuth,
   useAction: () => mocks.ensureViewer,
   useMutation: () => {
@@ -241,6 +243,7 @@ beforeEach(() => {
   mocks.convexAuth.isLoading = false
   mocks.convexAuth.isAuthenticated = false
   mocks.ensureViewer.mockResolvedValue({})
+  mocks.convexQuery.mockResolvedValue([])
   mocks.sendMessage.mockResolvedValue({})
   mocks.editMessage.mockResolvedValue({})
   mocks.deleteMessage.mockResolvedValue({})

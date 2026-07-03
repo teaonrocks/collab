@@ -1,5 +1,5 @@
 import { useAuth } from "@workos-inc/authkit-react"
-import { useAction, useConvexAuth, useMutation, usePaginatedQuery, useQuery } from "convex/react"
+import { useAction, useConvex, useConvexAuth, useMutation, usePaginatedQuery, useQuery } from "convex/react"
 import { Component, type ErrorInfo, type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import { api } from "../../convex/_generated/api"
 import type { Id } from "../../convex/_generated/dataModel"
@@ -58,6 +58,7 @@ export function ConvexDogfoodApp() {
 
 function ConvexDogfoodChat() {
   const auth = useAuth()
+  const convex = useConvex()
   const convexAuth = useConvexAuth()
   const ensureViewer = useAction(api.chat.ensureViewer)
   const sendMessage = useMutation(api.chat.sendMessage)
@@ -233,9 +234,10 @@ function ConvexDogfoodChat() {
             messageId,
             emoji: toDogfoodMessageReactionEmoji(emoji)
           }),
+          searchMessages: (input) => convex.query(api.chat.searchChannelMessages, input),
           operationErrorMessage: dogfoodOperationErrorMessage
         }),
-    [activeChannelId, channelIndicators, channelList, createChannel, deleteAttachmentUpload, deleteMessage, editMessage, generateAttachmentUploadUrl, members, messagePagination, messages, registerAttachmentUpload, sendMessage, toggleMessageReaction, workspace]
+    [activeChannelId, channelIndicators, channelList, convex, createChannel, deleteAttachmentUpload, deleteMessage, editMessage, generateAttachmentUploadUrl, members, messagePagination, messages, registerAttachmentUpload, sendMessage, toggleMessageReaction, workspace]
   )
 
   if (auth.isLoading) {
