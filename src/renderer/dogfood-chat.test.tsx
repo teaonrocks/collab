@@ -10,6 +10,7 @@ import {
   type DogfoodChannelMemberView,
   type DogfoodChannelMessageView,
   type DogfoodChannelView,
+  type DogfoodPrivateChannelInviteCandidateView,
   type DogfoodWorkspaceView
 } from "./dogfood-chat-adapter"
 
@@ -45,6 +46,7 @@ const mocks = vi.hoisted(() => ({
   messagesByChannel: undefined as Record<string, ReadonlyArray<DogfoodChannelMessageView>> | undefined,
   members: undefined as ReadonlyArray<DogfoodChannelMemberView> | undefined,
   membersByChannel: undefined as Record<string, ReadonlyArray<DogfoodChannelMemberView>> | undefined,
+  inviteCandidates: undefined as ReadonlyArray<DogfoodPrivateChannelInviteCandidateView> | undefined,
   channelIndicators: undefined as ReadonlyArray<{ readonly channelId: string; readonly indicator: "unread" | "mentioned" }> | undefined
 }))
 
@@ -84,6 +86,7 @@ vi.mock("convex/react", () => ({
   },
   useQuery: (query: unknown, args: unknown) => {
     if (args === "skip") return undefined
+    if (getFunctionName(query as never) === "chat:eligiblePrivateChannelMembers") return mocks.inviteCandidates
     if (typeof args === "object" && args !== null && "channelId" in args) {
       const channelId = String(args.channelId)
       if (getFunctionName(query as never) === "chat:channelMembers") {
@@ -105,13 +108,18 @@ vi.mock("./workspace-chat", () => ({
       readonly channels: ReadonlyArray<{ readonly id: string; readonly name: string }>
       readonly channelMessages: ReadonlyArray<ChatMessage>
       readonly channelMembers?: ReadonlyArray<{ readonly id: string; readonly displayName: string }>
+      readonly createChannelInviteCandidates?: ReadonlyArray<{ readonly id: string; readonly displayName: string }>
       readonly channelIndicators?: ReadonlyArray<{ readonly channelId: string; readonly indicator: "unread" | "mentioned" }>
       readonly channelMembersLoading?: boolean
       readonly channelMessagesLoading?: boolean
       readonly channelMessagesHasMore?: boolean
       readonly channelMessagesLoadingMore?: boolean
     }
-  readonly createChannel?: (input: { readonly name: string }) => Promise<unknown>
+  readonly createChannel?: (input: {
+    readonly name: string
+    readonly visibility?: "public" | "private"
+    readonly initialMemberIds?: ReadonlyArray<string>
+  }) => Promise<unknown>
   readonly selectChannel?: (channelId: string) => void
   readonly createChannelMessage: (input: {
     readonly channelId: string
@@ -165,6 +173,16 @@ vi.mock("./workspace-chat", () => ({
         </button>
         <button type="button" onClick={() => props.createChannel?.({ name: "design" })}>
           Create design channel
+        </button>
+        <button
+          type="button"
+          onClick={() => props.createChannel?.({
+            name: "leadership",
+            visibility: "private",
+            initialMemberIds: props.model.createChannelInviteCandidates?.slice(0, 1).map((member) => member.id)
+          })}
+        >
+          Create private channel
         </button>
         <button
           type="button"
@@ -271,6 +289,7 @@ beforeEach(() => {
   mocks.paginationStatus = undefined
   mocks.members = undefined
   mocks.membersByChannel = undefined
+  mocks.inviteCandidates = undefined
   mocks.channelIndicators = undefined
 })
 
@@ -369,10 +388,22 @@ const members: ReadonlyArray<DogfoodChannelMemberView> = [
   }
 ]
 
+const inviteCandidates: ReadonlyArray<DogfoodPrivateChannelInviteCandidateView> = [{
+  id: "user-2" as Id<"users">,
+  displayName: "Lee Chen"
+}]
+
 describe("dogfoodChatToChatData", () => {
   it("adapts the Convex dogfood chat view into the chat data interface", () => {
     const chatData = dogfoodChatToChatData({
-      data: { workspace, channels, selectedChannelId: workspace.channel.id, messages, members },
+      data: {
+        workspace,
+        channels,
+        selectedChannelId: workspace.channel.id,
+        messages,
+        members,
+        createChannelInviteCandidates: inviteCandidates
+      },
       commands: {
         sendMessage: mocks.sendMessage,
         editMessage: mocks.editMessage,
@@ -387,6 +418,7 @@ describe("dogfoodChatToChatData", () => {
     expect(chatData.model.channel).toEqual({ id: "channel-1", name: "general", visibility: "private" })
     expect(chatData.model.channels.map((channel) => channel.name)).toEqual(["general", "design"])
     expect(chatData.model.channelMembers?.map((member) => member.displayName)).toEqual(["Lee Chen", "Maya Patel"])
+    expect(chatData.model.createChannelInviteCandidates).toEqual([{ id: "user-2", displayName: "Lee Chen" }])
     expect(chatData.model.channelMessages).toHaveLength(1)
     expect(chatData.model.channelMessages[0]).toMatchObject({
       authorType: "human",
@@ -689,10 +721,18 @@ describe("dogfoodChatToChatData", () => {
 
     expect(chatData.model.channel.name).toBe("design")
     chatData.selectChannel?.(chatData.model.channels[0]!.id)
-    await chatData.createChannel?.({ name: "product" })
+    await chatData.createChannel?.({
+      name: "product",
+      visibility: "private",
+      initialMemberIds: ["user-2"]
+    })
 
     expect(selections).toEqual([channels[0]!.id])
-    expect(mocks.createChannel).toHaveBeenCalledWith({ name: "product" })
+    expect(mocks.createChannel).toHaveBeenCalledWith({
+      name: "product",
+      visibility: "private",
+      initialMemberIds: ["user-2"]
+    })
   })
 })
 
@@ -914,6 +954,26 @@ describe("ConvexDogfoodApp", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Create design channel" }))
 
     await waitFor(() => expect(mocks.createChannel).toHaveBeenCalledWith({ name: "design" }))
+  })
+
+  it("loads eligible invitees and sends private creation through the typed adapter", async () => {
+    const { ConvexDogfoodApp } = await import("./dogfood-chat")
+    mocks.auth.user = { id: "user-1" }
+    mocks.convexAuth.isAuthenticated = true
+    mocks.workspace = workspace
+    mocks.channels = channels
+    mocks.messages = messages
+    mocks.inviteCandidates = inviteCandidates
+
+    render(<ConvexDogfoodApp />)
+
+    fireEvent.click(await screen.findByRole("button", { name: "Create private channel" }))
+
+    await waitFor(() => expect(mocks.createChannel).toHaveBeenCalledWith({
+      name: "leadership",
+      visibility: "private",
+      initialMemberIds: [inviteCandidates[0]!.id]
+    }))
   })
 
   it("joins a selected shared channel before loading its messages", async () => {

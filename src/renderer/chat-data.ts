@@ -21,6 +21,8 @@ export type ChatChannelMember = {
   readonly displayName: string
 }
 
+export type ChatChannelInviteCandidate = ChatChannelMember
+
 export type ChatChannelIndicator = "unread" | "mentioned"
 
 export type ChatChannelIndicatorState = {
@@ -74,6 +76,7 @@ export type ChatDataModel = {
   readonly channels: ReadonlyArray<ChatChannel>
   readonly channelMessages: ReadonlyArray<ChatMessage>
   readonly channelMembers?: ReadonlyArray<ChatChannelMember>
+  readonly createChannelInviteCandidates?: ReadonlyArray<ChatChannelInviteCandidate>
   readonly channelIndicators?: ReadonlyArray<ChatChannelIndicatorState>
   readonly channelMembersLoading?: boolean
   readonly channelMessagesLoading?: boolean
@@ -84,6 +87,7 @@ export type ChatDataModel = {
 export type CreateChatChannel = (input: {
   readonly name: string
   readonly visibility?: ChatChannel["visibility"]
+  readonly initialMemberIds?: ReadonlyArray<ChatChannelInviteCandidate["id"]>
 }) => Promise<ChatChannel>
 
 export type SelectChatChannel = (channelId: ChatChannelId) => void

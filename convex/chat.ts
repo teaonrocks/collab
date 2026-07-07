@@ -824,22 +824,30 @@ export const createChannel = mutation({
 
 export const eligiblePrivateChannelMembers = query({
   args: {
-    channelId: v.id("channels")
+    channelId: v.optional(v.id("channels"))
   },
   handler: (ctx, args) => withDogfoodDiagnostics("eligiblePrivateChannelMembers", {
-    channelId: args.channelId
+    channelId: args.channelId ?? "new-channel"
   }, async () => {
     const actor = await requireAllowedCurrentUser(ctx)
-    const channel = await requirePrivateChannelAdmin(ctx, { channelId: args.channelId, userId: actor._id })
+    const channel = args.channelId === undefined
+      ? null
+      : await requirePrivateChannelAdmin(ctx, { channelId: args.channelId, userId: actor._id })
+    const workspace = channel === null ? await getDefaultWorkspace(ctx) : null
+    const workspaceId = channel?.workspaceId ?? workspace?._id
+    if (workspaceId === undefined) throw new Error("Workspace not found")
+    await requireWorkspaceMember(ctx, { workspaceId, userId: actor._id })
     const workspaceMemberships = await ctx.db
       .query("workspaceMemberships")
-      .withIndex("by_workspace", (q) => q.eq("workspaceId", channel.workspaceId))
+      .withIndex("by_workspace", (q) => q.eq("workspaceId", workspaceId))
       .take(MAX_ELIGIBLE_PRIVATE_CHANNEL_MEMBER_SCAN)
-    const channelMemberships = await ctx.db
-      .query("channelMemberships")
-      .withIndex("by_channel", (q) => q.eq("channelId", channel._id))
-      .take(MAX_PRIVATE_CHANNEL_MEMBERS)
-    const existingUserIds = new Set(channelMemberships.map((membership) => membership.userId))
+    const channelMemberships = channel === null
+      ? []
+      : await ctx.db
+          .query("channelMemberships")
+          .withIndex("by_channel", (q) => q.eq("channelId", channel._id))
+          .take(MAX_PRIVATE_CHANNEL_MEMBERS)
+    const existingUserIds = new Set([actor._id, ...channelMemberships.map((membership) => membership.userId)])
     const eligible: Array<{ readonly id: Id<"users">; readonly displayName: string }> = []
 
     for (const membership of workspaceMemberships) {

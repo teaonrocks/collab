@@ -105,6 +105,10 @@ function ConvexDogfoodChat() {
     api.chat.channelMembers,
     activeChannelId === undefined || !activeChannelJoined ? "skip" : { channelId: activeChannelId }
   )
+  const createChannelInviteCandidates = useQuery(
+    api.chat.eligiblePrivateChannelMembers,
+    workspace === undefined || workspace === null ? "skip" : {}
+  )
   const channelIndicators = useQuery(
     api.chat.channelIndicators,
     workspace === undefined || workspace === null ? "skip" : { workspaceId: workspace.workspace.id }
@@ -200,6 +204,7 @@ function ConvexDogfoodChat() {
             selectedChannelId: activeChannelId,
             messages,
             members: members ?? [],
+            createChannelInviteCandidates,
             channelIndicators: channelIndicators ?? []
           },
           state: {
@@ -235,7 +240,7 @@ function ConvexDogfoodChat() {
             operationErrorMessage: dogfoodOperationErrorMessage
           }
         }),
-    [activeChannelId, channelIndicators, channelList, convex, createChannel, deleteAttachmentUpload, deleteMessage, editMessage, generateAttachmentUploadUrl, members, messagePagination, messages, registerAttachmentUpload, sendMessage, toggleMessageReaction, workspace]
+    [activeChannelId, channelIndicators, channelList, convex, createChannel, createChannelInviteCandidates, deleteAttachmentUpload, deleteMessage, editMessage, generateAttachmentUploadUrl, members, messagePagination, messages, registerAttachmentUpload, sendMessage, toggleMessageReaction, workspace]
   )
 
   if (auth.isLoading) {

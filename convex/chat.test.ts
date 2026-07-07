@@ -306,7 +306,8 @@ describe("dogfood channel memberships", () => {
 
   it("creates private channels atomically with an admin creator and eligible initial members", async () => {
     const t = convexTest(schema, modules)
-    for (const identity of [mayaIdentity, leeIdentity]) {
+    vi.stubEnv("AETHER_ALLOWED_EMAILS", "maya@example.com,lee@example.com,diego@example.com")
+    for (const identity of [mayaIdentity, leeIdentity, diegoIdentity]) {
       await t.mutation(internal.chat.ensureViewerForIdentity, {
         tokenIdentifier: identity.tokenIdentifier,
         email: identity.email,
@@ -314,12 +315,18 @@ describe("dogfood channel memberships", () => {
       })
     }
 
-    const { mayaId, leeId } = await t.run(async (ctx) => {
+    const { mayaId, leeId, workspaceId } = await t.run(async (ctx) => {
       const maya = await ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", mayaIdentity.email)).unique()
       const lee = await ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", leeIdentity.email)).unique()
       if (maya === null || lee === null) throw new Error("Seeded users not found")
-      return { mayaId: maya._id, leeId: lee._id }
+      const workspace = await ctx.db.query("workspaces").withIndex("by_key", (q) => q.eq("key", "aether-dogfood")).unique()
+      if (workspace === null) throw new Error("Workspace not found")
+      return { mayaId: maya._id, leeId: lee._id, workspaceId: workspace._id }
     })
+    await expect(t.withIdentity(mayaIdentity).query(api.chat.eligiblePrivateChannelMembers, {})).resolves.toEqual([
+      expect.objectContaining({ displayName: "Diego Rivera" }),
+      expect.objectContaining({ id: leeId, displayName: "Lee Chen" })
+    ])
     const leadership = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, {
       name: "leadership-team",
       visibility: "private",
@@ -333,7 +340,13 @@ describe("dogfood channel memberships", () => {
       ])
     await expect(t.withIdentity(mayaIdentity).query(api.chat.eligiblePrivateChannelMembers, {
       channelId: leadership.id
-    })).resolves.toEqual([])
+    })).resolves.toEqual([expect.objectContaining({ displayName: "Diego Rivera" })])
+    await expect(t.withIdentity(leeIdentity).query(api.chat.channels, { workspaceId }))
+      .resolves.toEqual(expect.arrayContaining([expect.objectContaining({ id: leadership.id })]))
+    await expect(t.withIdentity(leeIdentity).query(api.chat.channelMessages, messagePageArgs(leadership.id)))
+      .resolves.toMatchObject({ page: [] })
+    await expect(t.withIdentity(diegoIdentity).query(api.chat.channels, { workspaceId }))
+      .resolves.not.toEqual(expect.arrayContaining([expect.objectContaining({ id: leadership.id })]))
     await expect(t.withIdentity(mayaIdentity).mutation(api.chat.removePrivateChannelMember, {
       channelId: leadership.id,
       userId: mayaId

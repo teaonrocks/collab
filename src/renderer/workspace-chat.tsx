@@ -25,6 +25,7 @@ import type {
   ChatChannel,
   ChatChannelId,
   ChatChannelIndicator,
+  ChatChannelInviteCandidate,
   ChatChannelMember,
   ChatDataModel,
   ChatDataView,
@@ -410,6 +411,7 @@ export function WorkspaceChat(props: {
         channelVisibility={model.channel.visibility}
         channelIndicators={view.channelIndicators}
         channelOperationError={channelOperationError}
+        createChannelInviteCandidates={model.createChannelInviteCandidates}
         createChannel={createChannel}
         onSelectChannel={selectChannel}
         onChannelOperationError={setChannelOperationError}
@@ -634,6 +636,7 @@ function ChannelSidebar(props: {
   readonly channelVisibility: ChatChannel["visibility"]
   readonly channelIndicators: ReadonlyMap<ChatChannelId, ChatChannelIndicator>
   readonly channelOperationError: string | null
+  readonly createChannelInviteCandidates?: ReadonlyArray<ChatChannelInviteCandidate>
   readonly createChannel?: ChatDataView["createChannel"]
   readonly onSelectChannel?: SelectChatChannel
   readonly onChannelOperationError: (message: string | null) => void
@@ -646,12 +649,16 @@ function ChannelSidebar(props: {
     channelVisibility,
     channelIndicators,
     channelOperationError,
+    createChannelInviteCandidates,
     createChannel,
     onSelectChannel,
     onChannelOperationError
   } = props
   const [creating, setCreating] = useState(false)
   const [draft, setDraft] = useState("")
+  const [visibility, setVisibility] = useState<ChatChannel["visibility"]>("public")
+  const [inviteSearch, setInviteSearch] = useState("")
+  const [selectedInviteeIds, setSelectedInviteeIds] = useState<ReadonlySet<string>>(new Set())
   const [saving, setSaving] = useState(false)
   const showAgentParkedPanel = import.meta.env.VITE_AETHER_SHOW_AGENT_UI === "true"
   const canCreate = createChannel !== undefined
@@ -659,6 +666,9 @@ function ChannelSidebar(props: {
     if (saving) return
     setCreating(false)
     setDraft("")
+    setVisibility("public")
+    setInviteSearch("")
+    setSelectedInviteeIds(new Set())
     onChannelOperationError(null)
   }
   const submitChannel = (event: FormEvent<HTMLFormElement>) => {
@@ -673,10 +683,14 @@ function ChannelSidebar(props: {
     onChannelOperationError(null)
     void createChannel({
       name: validation.name,
-      visibility: "public"
+      visibility,
+      ...(visibility === "private" ? { initialMemberIds: [...selectedInviteeIds] } : {})
     })
       .then(() => {
         setDraft("")
+        setVisibility("public")
+        setInviteSearch("")
+        setSelectedInviteeIds(new Set())
         setCreating(false)
       })
       .catch((cause: unknown) => onChannelOperationError(channelCreateErrorMessage(cause)))
@@ -771,11 +785,28 @@ function ChannelSidebar(props: {
         ? (
           <CreateChannelDialog
             draft={draft}
+            visibility={visibility}
+            inviteSearch={inviteSearch}
+            inviteCandidates={createChannelInviteCandidates}
+            selectedInviteeIds={selectedInviteeIds}
             saving={saving}
             error={channelOperationError}
             onDraftChange={(nextDraft) => {
               setDraft(nextDraft)
               if (channelOperationError !== null) onChannelOperationError(null)
+            }}
+            onVisibilityChange={(nextVisibility) => {
+              setVisibility(nextVisibility)
+              if (channelOperationError !== null) onChannelOperationError(null)
+            }}
+            onInviteSearchChange={setInviteSearch}
+            onToggleInvitee={(userId) => {
+              setSelectedInviteeIds((current) => {
+                const next = new Set(current)
+                if (next.has(userId)) next.delete(userId)
+                else next.add(userId)
+                return next
+              })
             }}
             onSubmit={submitChannel}
             onCancel={closeCreateDialog}
@@ -788,13 +819,39 @@ function ChannelSidebar(props: {
 
 function CreateChannelDialog(props: {
   readonly draft: string
+  readonly visibility: ChatChannel["visibility"]
+  readonly inviteSearch: string
+  readonly inviteCandidates?: ReadonlyArray<ChatChannelInviteCandidate>
+  readonly selectedInviteeIds: ReadonlySet<string>
   readonly saving: boolean
   readonly error: string | null
   readonly onDraftChange: (draft: string) => void
+  readonly onVisibilityChange: (visibility: ChatChannel["visibility"]) => void
+  readonly onInviteSearchChange: (query: string) => void
+  readonly onToggleInvitee: (userId: string) => void
   readonly onSubmit: (event: FormEvent<HTMLFormElement>) => void
   readonly onCancel: () => void
 }) {
-  const { draft, saving, error, onDraftChange, onSubmit, onCancel } = props
+  const {
+    draft,
+    visibility,
+    inviteSearch,
+    inviteCandidates,
+    selectedInviteeIds,
+    saving,
+    error,
+    onDraftChange,
+    onVisibilityChange,
+    onInviteSearchChange,
+    onToggleInvitee,
+    onSubmit,
+    onCancel
+  } = props
+  const normalizedInviteSearch = inviteSearch.trim().toLocaleLowerCase()
+  const visibleInviteCandidates = inviteCandidates?.filter((candidate) =>
+    normalizedInviteSearch.length === 0 || candidate.displayName.toLocaleLowerCase().includes(normalizedInviteSearch)
+  )
+  const privateCandidatesLoading = visibility === "private" && inviteCandidates === undefined
 
   const handleOpenChange = (open: boolean) => {
     if (!open) onCancel()
@@ -802,10 +859,10 @@ function CreateChannelDialog(props: {
 
   return (
     <Dialog open onOpenChange={handleOpenChange}>
-      <DialogContent className="channelCreateDialog max-w-[380px]">
+      <DialogContent className="channelCreateDialog max-w-[420px]">
         <DialogTitle id="create-channel-title">Create Channel</DialogTitle>
         <DialogDescription id="create-channel-description" className="sr-only">
-          Name the channel to add it to this workspace.
+          Choose who can discover this channel, then name it and create it.
         </DialogDescription>
         <form className="mt-3 flex flex-col gap-3" aria-label="Create channel" onSubmit={onSubmit}>
           <label className="sr-only" htmlFor="new-channel-name">
@@ -823,6 +880,87 @@ function CreateChannelDialog(props: {
               onDraftChange(event.target.value)
             }}
           />
+          <fieldset className="m-0 grid grid-cols-2 gap-1 rounded-control border border-border bg-surface-muted p-1" disabled={saving}>
+            <legend className="sr-only">Channel visibility</legend>
+            {(["public", "private"] as const).map((option) => (
+              <label
+                key={option}
+                className={classNames(
+                  "cursor-pointer rounded-[5px] px-2.5 py-2 text-left text-xs text-foreground-subtle",
+                  visibility === option && "bg-surface-canvas font-bold text-foreground shadow-sm"
+                )}
+              >
+                <input
+                  type="radio"
+                  className="sr-only"
+                  name="channel-visibility"
+                  value={option}
+                  checked={visibility === option}
+                  onChange={() => onVisibilityChange(option)}
+                />
+                <span className="block capitalize">{option}</span>
+                <span className="mt-0.5 block font-normal leading-[1.35]">
+                  {option === "public" ? "Anyone in the workspace can join." : "Only invited members can find and open it."}
+                </span>
+              </label>
+            ))}
+          </fieldset>
+          {visibility === "private"
+            ? (
+              <section className="flex flex-col gap-2" aria-label="Initial invitations">
+                <label className="text-xs font-bold text-foreground" htmlFor="private-channel-member-search">
+                  Invite members
+                </label>
+                <Input
+                  id="private-channel-member-search"
+                  type="search"
+                  value={inviteSearch}
+                  placeholder="Search workspace members"
+                  disabled={saving || inviteCandidates === undefined || inviteCandidates.length === 0}
+                  onChange={(event) => onInviteSearchChange(event.target.value)}
+                />
+                <div className="max-h-36 overflow-y-auto rounded-control border border-border bg-surface-canvas p-1" aria-label="Eligible members">
+                  {inviteCandidates === undefined
+                    ? <p className="m-0 px-2 py-2 text-xs text-foreground-subtle" role="status">Loading members...</p>
+                    : inviteCandidates.length === 0
+                      ? <p className="m-0 px-2 py-2 text-xs text-foreground-subtle">No other eligible members yet. You can create this channel for yourself.</p>
+                      : visibleInviteCandidates?.length === 0
+                        ? <p className="m-0 px-2 py-2 text-xs text-foreground-subtle">No matching members.</p>
+                        : visibleInviteCandidates?.map((candidate) => {
+                            const selected = selectedInviteeIds.has(candidate.id)
+                            return (
+                              <button
+                                key={candidate.id}
+                                type="button"
+                                role="checkbox"
+                                aria-checked={selected}
+                                className="flex w-full cursor-pointer items-center gap-2 rounded-[5px] border-0 bg-transparent px-2 py-1.5 text-left text-sm text-foreground hover:bg-surface-muted-hover focus-visible:bg-surface-muted-hover"
+                                disabled={saving}
+                                onClick={() => onToggleInvitee(candidate.id)}
+                                onKeyDown={(event) => {
+                                  if (event.key !== " ") return
+                                  event.preventDefault()
+                                  onToggleInvitee(candidate.id)
+                                }}
+                              >
+                                {selected
+                                  ? <SquareCheck className="size-4 shrink-0 text-foreground" aria-hidden="true" />
+                                  : <Square className="size-4 shrink-0 text-foreground-subtle" aria-hidden="true" />}
+                                <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{candidate.displayName}</span>
+                              </button>
+                            )
+                          })}
+                </div>
+                {inviteCandidates !== undefined && inviteCandidates.length > 0
+                  ? (
+                    <p className="m-0 text-xs text-foreground-subtle" aria-live="polite">
+                      {selectedInviteeIds.size} of {inviteCandidates.length} selected
+                    </p>
+                  )
+                  : null}
+              </section>
+            )
+            : null}
           <p
             id="create-channel-error"
             className={classNames(
@@ -837,7 +975,7 @@ function CreateChannelDialog(props: {
             <Button type="button" variant="secondary" size="sm" disabled={saving} onClick={onCancel}>
               Cancel
             </Button>
-            <Button type="submit" size="sm" disabled={normalizeChannelName(draft).length === 0 || saving}>
+            <Button type="submit" size="sm" disabled={normalizeChannelName(draft).length === 0 || saving || privateCandidatesLoading}>
               {saving ? "Creating..." : "Create"}
             </Button>
           </DialogFooter>

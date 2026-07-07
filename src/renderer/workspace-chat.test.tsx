@@ -240,20 +240,81 @@ describe("WorkspaceChat", () => {
     await waitFor(() => expect(calls).toEqual([{ name: "product-team", visibility: "public" }]))
   })
 
-  it("does not offer private channel creation", async () => {
+  it("searches and selects private-channel invitees with pointer and keyboard interaction", async () => {
+    const calls: Array<{
+      readonly name: string
+      readonly visibility?: "public" | "private"
+      readonly initialMemberIds?: ReadonlyArray<string>
+    }> = []
+    const inviteCandidates = [
+      { id: "human-2", displayName: "Lee Chen" },
+      { id: "human-3", displayName: "Priya Shah" },
+      { id: "human-4", displayName: "Diego Rivera" }
+    ]
+
     render(
       <WorkspaceChat
-        model={makeChatModel()}
+        model={{ ...makeChatModel(), createChannelInviteCandidates: inviteCandidates }}
         createChannelMessage={() => Promise.resolve()}
         deleteChannelMessage={() => Promise.resolve()}
-        createChannel={() => Promise.reject(new Error("not submitted"))}
+        createChannel={(input) => {
+          calls.push(input)
+          return Promise.resolve(makeChannel({ id: secondChannelId, name: input.name, visibility: "private" }))
+        }}
       />
     )
 
     fireEvent.click(await screen.findByRole("button", { name: "Add channel" }))
     const form = await screen.findByRole("form", { name: "Create channel" })
-    expect(within(form).queryByRole("switch", { name: "Private channel" })).toBeNull()
-    expect(within(form).queryByText(/invited members/i)).toBeNull()
+    fireEvent.click(within(form).getByRole("radio", { name: /private/i }))
+
+    const memberSearch = within(form).getByLabelText("Invite members")
+    fireEvent.change(memberSearch, { target: { value: "lee" } })
+    expect(within(form).getByRole("checkbox", { name: "Lee Chen" })).toBeTruthy()
+    expect(within(form).queryByRole("checkbox", { name: "Priya Shah" })).toBeNull()
+    fireEvent.click(within(form).getByRole("checkbox", { name: "Lee Chen" }))
+
+    fireEvent.change(memberSearch, { target: { value: "" } })
+    const priya = within(form).getByRole("checkbox", { name: "Priya Shah" })
+    priya.focus()
+    fireEvent.keyDown(priya, { key: " " })
+    expect(within(form).getByText("2 of 3 selected")).toBeTruthy()
+
+    fireEvent.change(within(form).getByLabelText("Channel name"), { target: { value: "Leadership" } })
+    fireEvent.submit(form)
+
+    await waitFor(() => expect(calls).toEqual([{
+      name: "leadership",
+      visibility: "private",
+      initialMemberIds: ["human-2", "human-3"]
+    }]))
+    expect(screen.queryByRole("dialog", { name: "Create Channel" })).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "Add channel" }))
+    const nextForm = await screen.findByRole("form", { name: "Create channel" })
+    expect((within(nextForm).getByRole("radio", { name: /public/i }) as HTMLInputElement).checked).toBe(true)
+    expect(within(nextForm).queryByLabelText("Initial invitations")).toBeNull()
+  })
+
+  it("keeps private invitation loading and empty states compact", async () => {
+    const props = {
+      createChannelMessage: () => Promise.resolve(),
+      deleteChannelMessage: () => Promise.resolve(),
+      createChannel: () => Promise.reject(new Error("not submitted"))
+    }
+    const { rerender } = render(<WorkspaceChat {...props} model={makeChatModel()} />)
+
+    fireEvent.click(await screen.findByRole("button", { name: "Add channel" }))
+    let form = await screen.findByRole("form", { name: "Create channel" })
+    fireEvent.click(within(form).getByRole("radio", { name: /private/i }))
+    expect(within(form).getByText("Loading members...")).toBeTruthy()
+    fireEvent.change(within(form).getByLabelText("Channel name"), { target: { value: "ops" } })
+    expect((within(form).getByRole("button", { name: "Create" }) as HTMLButtonElement).disabled).toBe(true)
+
+    rerender(<WorkspaceChat {...props} model={{ ...makeChatModel(), createChannelInviteCandidates: [] }} />)
+    form = await screen.findByRole("form", { name: "Create channel" })
+    expect(within(form).getByText(/No other eligible members yet/)).toBeTruthy()
+    expect((within(form).getByRole("button", { name: "Create" }) as HTMLButtonElement).disabled).toBe(false)
   })
 
   it("keeps the channel creation dialog state scoped to an open attempt", async () => {
@@ -298,7 +359,10 @@ describe("WorkspaceChat", () => {
   it("shows channel creation backend errors without collapsing reserved error space", async () => {
     render(
       <WorkspaceChat
-        model={makeChatModel()}
+        model={{
+          ...makeChatModel(),
+          createChannelInviteCandidates: [{ id: "human-2", displayName: "Lee Chen" }]
+        }}
         createChannelMessage={() => Promise.resolve()}
         deleteChannelMessage={() => Promise.resolve()}
         createChannel={() => Promise.reject(new Error("raw backend details"))}
@@ -311,12 +375,17 @@ describe("WorkspaceChat", () => {
     expect(status.className).toContain("min-h-[17px]")
     expect(status.className).toContain("invisible")
 
-    fireEvent.change(within(form).getByLabelText("Channel name"), { target: { value: "ops" } })
+    fireEvent.click(within(form).getByRole("radio", { name: /private/i }))
+    fireEvent.click(within(form).getByRole("checkbox", { name: "Lee Chen" }))
+    const channelName = within(form).getByLabelText("Channel name") as HTMLInputElement
+    fireEvent.change(channelName, { target: { value: "ops" } })
     fireEvent.submit(form)
 
     expect(await within(form).findByText("Could not create channel. Check your connection and try again.")).toBeTruthy()
     expect(status.className).not.toContain("invisible")
     expect(screen.queryByText(/raw backend details/)).toBeNull()
+    expect(channelName.value).toBe("ops")
+    expect(within(form).getByRole("checkbox", { name: "Lee Chen" }).getAttribute("aria-checked")).toBe("true")
   })
 
   it("rejects empty and invalid channel names before creating", async () => {

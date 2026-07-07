@@ -11,6 +11,7 @@ export type DogfoodChannelView = FunctionReturnType<typeof api.chat.channels>[nu
 export type DogfoodChannelMessageView = FunctionReturnType<typeof api.chat.channelMessages>["page"][number]
 export type DogfoodMessageAttachmentView = DogfoodChannelMessageView["attachments"][number]
 export type DogfoodChannelMemberView = FunctionReturnType<typeof api.chat.channelMembers>[number]
+export type DogfoodPrivateChannelInviteCandidateView = FunctionReturnType<typeof api.chat.eligiblePrivateChannelMembers>[number]
 export type DogfoodChannelIndicatorView = FunctionReturnType<typeof api.chat.channelIndicators>[number]
 
 export type DogfoodChatAdapterInput = {
@@ -20,6 +21,7 @@ export type DogfoodChatAdapterInput = {
     readonly selectedChannelId: Id<"channels">
     readonly messages: ReadonlyArray<DogfoodChannelMessageView>
     readonly members?: ReadonlyArray<DogfoodChannelMemberView>
+    readonly createChannelInviteCandidates?: ReadonlyArray<DogfoodPrivateChannelInviteCandidateView>
     readonly channelIndicators?: ReadonlyArray<DogfoodChannelIndicatorView>
   }
   readonly state?: {
@@ -71,6 +73,10 @@ export const dogfoodChatToChatData = ({ data, state, commands }: DogfoodChatAdap
         id: String(member.id),
         displayName: member.displayName
       })),
+      createChannelInviteCandidates: data.createChannelInviteCandidates?.map((member) => ({
+        id: String(member.id),
+        displayName: member.displayName
+      })),
       channelIndicators: data.channelIndicators?.map((indicator) => ({
         channelId: String(indicator.channelId),
         indicator: indicator.indicator
@@ -82,7 +88,12 @@ export const dogfoodChatToChatData = ({ data, state, commands }: DogfoodChatAdap
     },
     createChannel: commands.createChannel === undefined
       ? undefined
-      : async (input) => toChatChannel(await commands.createChannel!(input)),
+      : async ({ initialMemberIds, ...input }) => toChatChannel(await commands.createChannel!({
+          ...input,
+          ...(initialMemberIds === undefined
+            ? {}
+            : { initialMemberIds: initialMemberIds.map((userId) => convexId<"users">(userId)) })
+        })),
     selectChannel: commands.selectChannel === undefined
       ? undefined
       : (channelId) => commands.selectChannel?.(convexId<"channels">(channelId)),
