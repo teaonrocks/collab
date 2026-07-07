@@ -27,9 +27,11 @@ cleanup; the composer only renders its state and invokes its choose, remove, and
 
 Timeline reads hydrate each stored attachment with `ctx.storage.getUrl(storageId)`. Those signed
 URLs are treated as display-only values; the renderer never stores them back into message state.
-They are bearer URLs: private-channel membership is checked when reading the timeline, but a URL
-that has already been issued is not membership-checked on each use. It remains usable by anyone
-who has it until the underlying storage object is deleted.
+They are bearer URLs: private-channel membership is checked before the timeline can issue a fresh
+URL, including after a member is removed, but a URL that was already issued is not
+membership-checked on each use. It remains usable by anyone who has it until the underlying storage
+object is deleted. Membership revocation therefore protects subsequent Aether reads; it does not
+retroactively revoke copied or shared storage URLs.
 
 ## Rationale
 

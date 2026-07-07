@@ -79,7 +79,15 @@ describe("friend dogfood distribution", () => {
     expect(guide).toContain("tested commit, tag, branch, CI run URL")
     expect(smoke).toContain("Use two different allowlisted accounts")
     expect(smoke).toContain("Exact tested Git commit, immutable friend-beta tag, CI run URL")
+    expect(smoke).toContain("created a private channel with Tester B as an initial invitee")
+    expect(smoke).toContain("created a second private channel alone, then added Tester B later")
+    expect(smoke).toContain("Tester A removed Tester B")
+    expect(smoke).toContain("Do not mark this record complete from automated tests alone")
+    expect(smoke).not.toContain("private channels remain deferred")
     expect(smoke).not.toContain("CONVEX_DEPLOY_KEY=")
+    expect(readRepoFile("docs/architecture-decisions.md")).toContain(
+      "Treat Private Channels As Explicit Membership Boundaries"
+    )
     expect(readme).toContain("active runtime uses")
     expect(readme).toContain("does not fall back to the local JSON chat")
   })

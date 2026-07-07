@@ -268,7 +268,7 @@ describe("dogfood channel memberships", () => {
     expect(leeDesignMemberships).toHaveLength(1)
   })
 
-  it("keeps private channels hidden and requires explicit membership", async () => {
+  it("keeps non-members isolated from private-channel discovery, reads, and mutations", async () => {
     const t = convexTest(schema, modules)
     await t.mutation(internal.chat.ensureViewerForIdentity, {
       tokenIdentifier: mayaIdentity.tokenIdentifier,
@@ -281,9 +281,10 @@ describe("dogfood channel memberships", () => {
       displayName: leeIdentity.name
     })
 
-    const { workspaceId, privateChannelId } = await t.run(async (ctx) => {
+    const { workspaceId, privateChannelId, mayaId } = await t.run(async (ctx) => {
       const workspace = await ctx.db.query("workspaces").withIndex("by_key", (q) => q.eq("key", "aether-dogfood")).unique()
-      if (workspace === null) throw new Error("Workspace not found")
+      const maya = await ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", mayaIdentity.email)).unique()
+      if (workspace === null || maya === null) throw new Error("Seed records not found")
       const privateChannelId = await ctx.db.insert("channels", {
         workspaceId: workspace._id,
         key: "strategy",
@@ -291,17 +292,79 @@ describe("dogfood channel memberships", () => {
         visibility: "private",
         createdAt: 100
       })
-      return { workspaceId: workspace._id, privateChannelId }
+      await ctx.db.insert("channelMemberships", {
+        channelId: privateChannelId,
+        userId: maya._id,
+        role: "admin",
+        createdAt: 100,
+        lastReadAt: 100,
+        mentionTrackingStartedAt: 100
+      })
+      return { workspaceId: workspace._id, privateChannelId, mayaId: maya._id }
     })
+
+    const storageId = await t.run((ctx) => ctx.storage.store(new Blob(["secret"], { type: "text/plain" })))
+    await t.run((ctx) => ctx.db.insert("attachmentUploads", {
+      storageId,
+      uploaderUserId: mayaId,
+      contentType: "text/plain",
+      createdAt: 101
+    }))
+    const secret = await t.withIdentity(mayaIdentity).mutation(api.chat.sendMessage, {
+      channelId: privateChannelId,
+      body: "Private strategy",
+      attachments: [{ storageId, name: "strategy.txt" }]
+    })
+    await expect(t.withIdentity(mayaIdentity).query(api.chat.channelMessages, messagePageArgs(privateChannelId)))
+      .resolves.toMatchObject({ page: [expect.objectContaining({
+        id: secret.id,
+        attachments: [expect.objectContaining({ url: expect.any(String) })]
+      })] })
 
     const visibleChannels = await t.withIdentity(leeIdentity).query(api.chat.channels, { workspaceId })
     expect(visibleChannels.map((channel) => channel.name)).not.toContain("strategy")
+    await expect(t.withIdentity(leeIdentity).query(api.chat.channelIndicators, { workspaceId }))
+      .resolves.not.toEqual(expect.arrayContaining([expect.objectContaining({ channelId: privateChannelId })]))
     await expect(t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: privateChannelId }))
       .rejects.toThrow("Current user is not a member of this channel")
     await expect(t.withIdentity(leeIdentity).query(api.chat.channelMessages, messagePageArgs(privateChannelId)))
       .rejects.toThrow("Current user is not a member of this channel")
     await expect(t.withIdentity(leeIdentity).query(api.chat.channelMembers, { channelId: privateChannelId }))
       .rejects.toThrow("Current user is not a member of this channel")
+    await expect(t.withIdentity(leeIdentity).query(api.chat.searchChannelMessages, {
+      channelId: privateChannelId,
+      query: "strategy"
+    })).rejects.toThrow("Current user is not a member of this channel")
+    await expect(t.withIdentity(leeIdentity).mutation(api.chat.sendMessage, {
+      channelId: privateChannelId,
+      body: "Intrusion"
+    })).rejects.toThrow("Current user is not a member of this channel")
+    await expect(t.withIdentity(leeIdentity).mutation(api.chat.editMessage, {
+      channelId: privateChannelId,
+      messageId: secret.id,
+      body: "Tampered"
+    })).rejects.toThrow("Current user is not a member of this channel")
+    await expect(t.withIdentity(leeIdentity).mutation(api.chat.deleteMessage, {
+      channelId: privateChannelId,
+      messageId: secret.id
+    })).rejects.toThrow("Current user is not a member of this channel")
+    await expect(t.withIdentity(leeIdentity).mutation(api.chat.toggleMessageReaction, {
+      channelId: privateChannelId,
+      messageId: secret.id,
+      emoji: "👍"
+    })).rejects.toThrow("Current user is not a member of this channel")
+    await expect(t.withIdentity(leeIdentity).mutation(api.chat.markChannelRead, {
+      channelId: privateChannelId,
+      readThroughMessageId: secret.id
+    })).rejects.toThrow("Current user is not a member of this channel")
+
+    await expect(t.withIdentity(mayaIdentity).query(api.chat.channelMessages, messagePageArgs(privateChannelId)))
+      .resolves.toMatchObject({ page: [expect.objectContaining({
+        id: secret.id,
+        body: "Private strategy",
+        reactions: [],
+        attachments: [expect.objectContaining({ url: expect.any(String) })]
+      })] })
   })
 
   it("creates private channels atomically with an admin creator and eligible initial members", async () => {
@@ -443,6 +506,20 @@ describe("dogfood channel memberships", () => {
       userId: mayaId
     })).rejects.toThrow("Only channel admins can administer private channel membership")
 
+    const addedMembership = await t.run((ctx) => ctx.db
+      .query("channelMemberships")
+      .withIndex("by_channel_user", (q) => q.eq("channelId", strategy.id).eq("userId", leeId))
+      .unique())
+    expect(addedMembership).toMatchObject({
+      role: "member",
+      lastReadAt: addedMembership?.createdAt,
+      mentionTrackingStartedAt: addedMembership?.createdAt
+    })
+    await expect(t.withIdentity(leeIdentity).query(api.chat.channels, { workspaceId }))
+      .resolves.toEqual(expect.arrayContaining([expect.objectContaining({ id: strategy.id })]))
+    await expect(t.withIdentity(leeIdentity).query(api.chat.channelIndicators, { workspaceId }))
+      .resolves.not.toEqual(expect.arrayContaining([expect.objectContaining({ channelId: strategy.id })]))
+
     const storageId = await t.run((ctx) => ctx.storage.store(new Blob(["secret"], { type: "text/plain" })))
     await t.run((ctx) => ctx.db.insert("attachmentUploads", {
       storageId,
@@ -460,6 +537,25 @@ describe("dogfood channel memberships", () => {
         id: secret.id,
         attachments: [expect.objectContaining({ url: expect.any(String) })]
       })] })
+    await t.run(async (ctx) => {
+      if (addedMembership === null) throw new Error("Added membership not found")
+      const mentionedMessageId = await ctx.db.insert("messages", {
+        workspaceId,
+        channelId: strategy.id,
+        authorUserId: mayaId,
+        authorDisplayName: mayaIdentity.name,
+        body: "@Lee post-invite update",
+        createdAt: addedMembership.createdAt + 1
+      })
+      await ctx.db.insert("messageMentions", {
+        messageId: mentionedMessageId,
+        channelId: strategy.id,
+        userId: leeId,
+        messageCreatedAt: addedMembership.createdAt + 1
+      })
+    })
+    await expect(t.withIdentity(leeIdentity).query(api.chat.channelIndicators, { workspaceId }))
+      .resolves.toEqual(expect.arrayContaining([{ channelId: strategy.id, indicator: "mentioned" }]))
 
     await expect(t.withIdentity(mayaIdentity).mutation(api.chat.removePrivateChannelMember, {
       channelId: strategy.id,
@@ -484,6 +580,33 @@ describe("dogfood channel memberships", () => {
     })).rejects.toThrow("Current user is not a member of this channel")
     await expect(t.withIdentity(leeIdentity).query(api.chat.channelMembers, { channelId: strategy.id }))
       .rejects.toThrow("Current user is not a member of this channel")
+    await expect(t.withIdentity(leeIdentity).mutation(api.chat.sendMessage, {
+      channelId: strategy.id,
+      body: "Post-removal write"
+    })).rejects.toThrow("Current user is not a member of this channel")
+    await expect(t.withIdentity(leeIdentity).mutation(api.chat.editMessage, {
+      channelId: strategy.id,
+      messageId: secret.id,
+      body: "Post-removal edit"
+    })).rejects.toThrow("Current user is not a member of this channel")
+    await expect(t.withIdentity(leeIdentity).mutation(api.chat.deleteMessage, {
+      channelId: strategy.id,
+      messageId: secret.id
+    })).rejects.toThrow("Current user is not a member of this channel")
+    await expect(t.withIdentity(leeIdentity).mutation(api.chat.toggleMessageReaction, {
+      channelId: strategy.id,
+      messageId: secret.id,
+      emoji: "👍"
+    })).rejects.toThrow("Current user is not a member of this channel")
+
+    await expect(t.withIdentity(mayaIdentity).query(api.chat.channelMessages, messagePageArgs(strategy.id)))
+      .resolves.toMatchObject({ page: expect.arrayContaining([expect.objectContaining({
+        id: secret.id,
+        body: "Private roadmap",
+        reactions: [],
+        attachments: [expect.objectContaining({ url: expect.any(String) })]
+      })]) })
+    await expect(t.run((ctx) => ctx.db.system.get("_storage", storageId))).resolves.not.toBeNull()
   })
 
   it("tracks unread and mention state per channel and clears read channels", async () => {

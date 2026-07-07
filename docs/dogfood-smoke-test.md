@@ -21,8 +21,21 @@ For failure capture and recovery, see [`docs/dogfood-debugging.md`](dogfood-debu
 - An allowlisted account joins the shared `#general` channel.
 - Public channel creation is visible to the other account; selecting it joins the viewer before
   messages load.
-- Channel creation offers public channels only; private channels remain deferred until invitation
-  and membership management are available.
+- Private channel creation requires at least the creator and may include eligible initial members;
+  the creator becomes a channel admin and initial invitees see the channel without restarting.
+- Private channels never appear in a non-member's channel list or unread/mention indicators.
+- A private-channel admin can add an eligible workspace member later; the channel, member list,
+  history, and subsequent realtime messages appear without restarting. Existing history is readable,
+  but the new member begins with no unread or mention indicator for messages sent before the grant.
+- Messages and attachments posted after a member is added appear in realtime and are accessible to
+  that member. Record attachment access with a harmless test file, not a sensitive document.
+- A private-channel admin can remove a member later. The removed account loses the channel from its
+  list and indicators and cannot read/search messages, fetch members, send/edit/delete messages,
+  react, mark the channel read, or obtain fresh attachment URLs. The channel history and stored
+  attachments remain available to members who retain access.
+- After removal, do not treat a previously copied attachment URL as proof of membership. Convex
+  storage URLs are bearer URLs and may remain usable until the object is deleted; the security
+  boundary prevents the removed account from obtaining a new URL through Aether.
 - Direct-message avatars are noninteractive placeholders while direct-message navigation is deferred.
 - The first empty channel state invites the user to start the conversation.
 - Messages sent from one account appear in realtime for the other account.
@@ -47,11 +60,23 @@ Record this evidence without email addresses, tokens, keys, or environment-file 
 - Tester A and Tester B both reported deployment `polished-bison-174`.
 - Tester A created or selected a channel that appeared for Tester B.
 - A message from each account appeared in realtime in the other checkout without refresh.
+- Tester A created a private channel with Tester B as an initial invitee; Tester B saw it without
+  refresh while a non-member account, if available, could not discover it through lists or indicators.
+- Tester A created a second private channel alone, then added Tester B later. Tester B saw the grant
+  without restart, could read existing history with no historical unread/mention indicator, then saw
+  a new mention and harmless attachment in realtime.
+- Tester A removed Tester B. Tester B lost the channel without restart and could no longer open its
+  history, search, member list, composer actions, reactions, read state, or a fresh attachment link;
+  Tester A confirmed that the messages and attachment still existed.
 - An allowlist add or removal made by the operator against `--prod` affected the intended account in
   both checkouts.
 - Neither tester ran a Convex command or had Convex team access.
 - Unexpected server failures shown to testers contained only production-safe generic detail; the
   operator correlated the full detail in production logs.
+
+Do not mark this record complete from automated tests alone. Record which two AuthKit accounts ran
+the flow, the tested revision, UTC time, deployment, and any skipped step. Never record credentials,
+tokens, email addresses, or copied attachment URLs.
 
 ## UI Migration Checks
 

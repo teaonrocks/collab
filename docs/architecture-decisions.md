@@ -231,6 +231,24 @@ channels and membership, edit/delete, local timeline search, mentions and unread
 replies, reactions, and Convex-backed attachments. Notifications and agent workflows remain outside
 the active feature set.
 
+#### Treat Private Channels As Explicit Membership Boundaries
+
+Private channels are invitational. Creation atomically grants the creator the `admin` channel role
+and may grant eligible, allowlisted workspace members the `member` role. Private-channel admins can
+later add or remove members; public channels continue to use workspace-backed membership.
+
+Channel membership gates discovery, unread/mention indicators, history and search, member data,
+message and reaction mutations, read markers, and the attachment URLs hydrated into message views.
+Adding a member is visible through Convex subscriptions without an application restart. The new
+membership initializes `lastReadAt` and `mentionTrackingStartedAt` to its grant time, so earlier
+history is readable but does not arrive as unread or mentioned; later messages and mentions do.
+
+Removing a membership immediately removes subsequent channel-scoped access while leaving messages,
+reactions, and stored attachments intact for remaining members. Attachment URLs already issued by
+Convex storage are bearer URLs and are not retroactively revoked by membership removal. A removed
+member cannot obtain another URL through Aether, but sensitive operators should not treat a copied
+or shared storage URL as revocable authorization.
+
 #### Display Names, Not Emails
 
 Email is used for identity resolution and allowlist matching but is not shown as the normal channel
@@ -244,8 +262,8 @@ hosting, automatic updates, or production deployment ownership.
 
 ### Consequences
 
-- WorkOS AuthKit owns authentication; Convex owns users, workspace/channel membership, messages,
-  reactions, attachments, unread state, and allowlist state.
+- WorkOS AuthKit owns authentication; Convex owns users, workspace/channel membership and private
+  invitation/revocation policy, messages, reactions, attachments, unread state, and allowlist state.
 - The renderer mounts only when all required public `VITE_` configuration exists; it does not fall
   back to local JSON chat.
 - Server secrets and allowlist administration stay out of the renderer.
