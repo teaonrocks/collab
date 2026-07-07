@@ -14,6 +14,8 @@ import {
   Square,
   SquareCheck,
   Trash2,
+  UserMinus,
+  UserRoundCog,
   X,
   Users
 } from "lucide-react"
@@ -2270,8 +2272,17 @@ function MembersPanel(props: {
             <p className="m-0 text-xs font-bold leading-tight text-foreground-subtle">Online -- {loading ? "" : members.length}</p>
             {canManage
               ? (
-                <Button type="button" variant="secondary" size="sm" aria-haspopup="dialog" aria-expanded={managing} onClick={() => setManaging(true)}>
-                  Manage
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="icon"
+                  aria-label="Manage channel members"
+                  title="Manage channel members"
+                  aria-haspopup="dialog"
+                  aria-expanded={managing}
+                  onClick={() => setManaging(true)}
+                >
+                  <UserRoundCog aria-hidden="true" />
                 </Button>
               )
               : null}
@@ -2373,15 +2384,13 @@ function MemberManagementDialog(props: {
         {pendingRemoval === null
           ? (
             <>
-              <DialogTitle>Manage #{channel.name}</DialogTitle>
-              <DialogDescription>Private-channel admins can add eligible workspace members or remove existing members.</DialogDescription>
-              <div className="mt-4 grid max-h-[min(520px,70vh)] gap-4 overflow-y-auto pr-1">
+              <DialogTitle className="sr-only">Manage #{channel.name}</DialogTitle>
+              <div className="grid max-h-[min(520px,70vh)] gap-4 overflow-y-auto pr-1">
                 <section aria-labelledby="current-channel-members-title">
                   <h3 id="current-channel-members-title" className="mb-2 mt-0 text-xs font-bold uppercase text-foreground-subtle">Current members</h3>
                   <ol className="m-0 grid list-none gap-1 p-0">
                     {members.map((member) => {
                       const isLastAdmin = member.role === "admin" && adminCount === 1
-                      const removing = pending?.action === "remove" && pending.userId === member.id
                       return (
                         <li key={member.id} className="flex min-h-11 items-center gap-2 border-b border-border py-1.5 last:border-b-0">
                           <Avatar name={member.displayName} aria-hidden="true" className="size-8" />
@@ -2395,8 +2404,16 @@ function MemberManagementDialog(props: {
                           {isLastAdmin
                             ? <span className="text-xs text-foreground-subtle">Last admin</span>
                             : (
-                              <Button type="button" variant="secondary" size="sm" disabled={operationPending} onClick={() => setPendingRemoval(member)}>
-                                {removing ? "Removing..." : "Remove"}
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                size="icon"
+                                aria-label={`Remove ${member.displayName}`}
+                                title={`Remove ${member.displayName}`}
+                                disabled={operationPending}
+                                onClick={() => setPendingRemoval(member)}
+                              >
+                                <UserMinus aria-hidden="true" />
                               </Button>
                             )}
                         </li>

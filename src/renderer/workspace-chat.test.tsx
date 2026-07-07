@@ -1322,14 +1322,14 @@ describe("WorkspaceChat", () => {
       />
     )
 
-    const manage = await screen.findByRole("button", { name: "Manage" })
+    const manage = await screen.findByRole("button", { name: "Manage channel members" })
     expect(manage.getAttribute("aria-haspopup")).toBe("dialog")
     fireEvent.click(manage)
 
     const dialog = await screen.findByRole("dialog", { name: "Manage #origination" })
     expect(within(dialog).getByText("Admin · You")).toBeTruthy()
     expect(within(dialog).getByText("Last admin")).toBeTruthy()
-    expect(within(dialog).queryByRole("button", { name: "Remove" })).toBeNull()
+    expect(within(dialog).queryByRole("button", { name: "Remove Maya Patel" })).toBeNull()
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Add" }))
     expect(addChannelMember).toHaveBeenCalledWith({ channelId, userId: "human-2" })
@@ -1374,14 +1374,14 @@ describe("WorkspaceChat", () => {
       />
     )
 
-    fireEvent.click(await screen.findByRole("button", { name: "Manage" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Manage channel members" }))
     const managementDialog = await screen.findByRole("dialog", { name: "Manage #origination" })
     fireEvent.click(within(managementDialog).getByRole("button", { name: "Add" }))
     expect((await within(managementDialog).findByRole("alert")).textContent).toBe("Could not add Diego Rivera. Try again.")
     expect(within(managementDialog).queryByText("private backend detail")).toBeNull()
 
     const mayaRow = within(managementDialog).getByText("Maya Patel").closest("li")!
-    fireEvent.click(within(mayaRow).getByRole("button", { name: "Remove" }))
+    fireEvent.click(within(mayaRow).getByRole("button", { name: "Remove Maya Patel" }))
     const confirmation = await screen.findByRole("dialog", { name: "Remove Maya Patel?" })
     expect(within(confirmation).getByText(/access ends immediately/i)).toBeTruthy()
     expect(within(confirmation).getByText(/moved to an accessible channel/i)).toBeTruthy()
@@ -1410,7 +1410,7 @@ describe("WorkspaceChat", () => {
       />
     )
 
-    expect(screen.queryByRole("button", { name: "Manage" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Manage channel members" })).toBeNull()
     rerender(
       <WorkspaceChat
         {...commands}
@@ -1424,7 +1424,7 @@ describe("WorkspaceChat", () => {
         deleteChannelMessage={() => Promise.resolve()}
       />
     )
-    expect(screen.queryByRole("button", { name: "Manage" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Manage channel members" })).toBeNull()
     expect(screen.getByText("You")).toBeTruthy()
   })
 
