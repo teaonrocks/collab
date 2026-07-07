@@ -42,7 +42,7 @@ export const requireIdentity = async (
   return identity
 }
 
-const isEmailAllowlisted = async (
+export const isEmailAllowlisted = async (
   ctx: QueryCtx | MutationCtx,
   email: string
 ): Promise<boolean> => {

@@ -7,6 +7,7 @@ import { isAcceptedAttachmentContentType, MESSAGE_ATTACHMENT_POLICY } from "../s
 import {
   getUserByEmail,
   getUserByTokenIdentifier,
+  isEmailAllowlisted,
   normalizeViewerEmail,
   requireAllowedCurrentUser,
   requireAllowedEmail,
@@ -29,6 +30,9 @@ const DOGFOOD_CHANNEL_KEY = "general"
 const DOGFOOD_CHANNEL_NAME = "general"
 const MAX_CHANNELS = 100
 const MAX_CHANNEL_NAME_LENGTH = 80
+const MAX_PRIVATE_CHANNEL_MEMBERS = 100
+const MAX_ELIGIBLE_PRIVATE_CHANNEL_MEMBERS = 100
+const MAX_ELIGIBLE_PRIVATE_CHANNEL_MEMBER_SCAN = 200
 const MAX_MESSAGE_PAGE_SIZE = 100
 const MAX_MESSAGE_SEARCH_QUERY_LENGTH = 120
 const MAX_MESSAGE_SEARCH_RESULTS = 20
@@ -164,6 +168,7 @@ const listChannelMembers = async (
     readonly id: Id<"users">
     readonly displayName: string
     readonly joinedAt: number
+    readonly role: Doc<"channelMemberships">["role"]
   }> = []
   for (const membership of memberships) {
     const member = await ctx.db.get(membership.userId)
@@ -171,7 +176,8 @@ const listChannelMembers = async (
     members.push({
       id: member._id,
       displayName: member.displayName,
-      joinedAt: membership.createdAt
+      joinedAt: membership.createdAt,
+      role: membership.role
     })
   }
 
@@ -318,6 +324,40 @@ const ensureSharedChannelMemberships = async (
   for (const channelId of channelIds) {
     await ensureChannelMembership(ctx, { channelId, userId: input.userId, now: input.now })
   }
+}
+
+const requirePrivateChannelAdmin = async (
+  ctx: QueryCtx | MutationCtx,
+  input: {
+    readonly channelId: Id<"channels">
+    readonly userId: Id<"users">
+  }
+) => {
+  const channel = await requireChannelMember(ctx, input)
+  if (channel.visibility !== "private") throw new Error("Private channel membership can only be administered for private channels")
+
+  const membership = await ctx.db
+    .query("channelMemberships")
+    .withIndex("by_channel_user", (q) => q.eq("channelId", input.channelId).eq("userId", input.userId))
+    .unique()
+  if (membership?.role !== "admin") throw new Error("Only channel admins can administer private channel membership")
+  return channel
+}
+
+const requireEligiblePrivateChannelMember = async (
+  ctx: QueryCtx | MutationCtx,
+  input: {
+    readonly workspaceId: Id<"workspaces">
+    readonly userId: Id<"users">
+  }
+) => {
+  const user = await ctx.db.get(input.userId)
+  if (user === null) throw new Error("Invited user not found")
+  await requireWorkspaceMember(ctx, input)
+  if (!(await isEmailAllowlisted(ctx, user.email))) {
+    throw new Error("Invited user is not on the Aether dogfood allowlist")
+  }
+  return user
 }
 
 export const generateAttachmentUploadUrl = mutation({
@@ -700,7 +740,8 @@ export const markChannelRead = mutation({
 export const createChannel = mutation({
   args: {
     name: v.string(),
-    visibility: v.optional(v.union(v.literal("public"), v.literal("private")))
+    visibility: v.optional(v.union(v.literal("public"), v.literal("private"))),
+    initialMemberIds: v.optional(v.array(v.id("users")))
   },
   handler: (ctx, args) => withDogfoodDiagnostics("createChannel", {
     visibility: args.visibility ?? "public",
@@ -711,8 +752,19 @@ export const createChannel = mutation({
     if (workspace === null) throw new Error("Workspace not found")
 
     await requireWorkspaceMember(ctx, { workspaceId: workspace._id, userId: user._id })
-    if (args.visibility === "private") {
-      throw new Error("Private channel creation is unavailable until member invitations are supported")
+
+    const visibility = args.visibility ?? "public"
+    const initialMemberIds = [...new Set(args.initialMemberIds ?? [])]
+    if (visibility === "public" && initialMemberIds.length > 0) {
+      throw new Error("Initial members can only be specified for private channels")
+    }
+    if (new Set<Id<"users">>([user._id, ...initialMemberIds]).size > MAX_PRIVATE_CHANNEL_MEMBERS) {
+      throw new Error(`Private channels can contain at most ${MAX_PRIVATE_CHANNEL_MEMBERS} initial members`)
+    }
+    if (visibility === "private") {
+      for (const userId of initialMemberIds) {
+        await requireEligiblePrivateChannelMember(ctx, { workspaceId: workspace._id, userId })
+      }
     }
 
     const name = validateChannelName(args.name)
@@ -737,22 +789,141 @@ export const createChannel = mutation({
       workspaceId: workspace._id,
       key,
       name,
-      visibility: "public",
+      visibility,
       createdAt: now
     })
 
     await ctx.db.insert("channelMemberships", {
       channelId,
       userId: user._id,
-      role: "member",
+      role: visibility === "private" ? "admin" : "member",
       createdAt: now,
       lastReadAt: now,
       mentionTrackingStartedAt: now
     })
 
+    if (visibility === "private") {
+      for (const userId of initialMemberIds) {
+        if (userId === user._id) continue
+        await ctx.db.insert("channelMemberships", {
+          channelId,
+          userId,
+          role: "member",
+          createdAt: now,
+          lastReadAt: now,
+          mentionTrackingStartedAt: now
+        })
+      }
+    }
+
     const channel = await ctx.db.get(channelId)
     if (channel === null) throw new Error("Channel not found after insert")
     return toChannelView(channel)
+  })
+})
+
+export const eligiblePrivateChannelMembers = query({
+  args: {
+    channelId: v.id("channels")
+  },
+  handler: (ctx, args) => withDogfoodDiagnostics("eligiblePrivateChannelMembers", {
+    channelId: args.channelId
+  }, async () => {
+    const actor = await requireAllowedCurrentUser(ctx)
+    const channel = await requirePrivateChannelAdmin(ctx, { channelId: args.channelId, userId: actor._id })
+    const workspaceMemberships = await ctx.db
+      .query("workspaceMemberships")
+      .withIndex("by_workspace", (q) => q.eq("workspaceId", channel.workspaceId))
+      .take(MAX_ELIGIBLE_PRIVATE_CHANNEL_MEMBER_SCAN)
+    const channelMemberships = await ctx.db
+      .query("channelMemberships")
+      .withIndex("by_channel", (q) => q.eq("channelId", channel._id))
+      .take(MAX_PRIVATE_CHANNEL_MEMBERS)
+    const existingUserIds = new Set(channelMemberships.map((membership) => membership.userId))
+    const eligible: Array<{ readonly id: Id<"users">; readonly displayName: string }> = []
+
+    for (const membership of workspaceMemberships) {
+      if (existingUserIds.has(membership.userId)) continue
+      const user = await ctx.db.get(membership.userId)
+      if (user === null || !(await isEmailAllowlisted(ctx, user.email))) continue
+      eligible.push({ id: user._id, displayName: user.displayName })
+      if (eligible.length === MAX_ELIGIBLE_PRIVATE_CHANNEL_MEMBERS) break
+    }
+
+    return eligible.sort((left, right) => left.displayName.localeCompare(right.displayName))
+  })
+})
+
+export const addPrivateChannelMember = mutation({
+  args: {
+    channelId: v.id("channels"),
+    userId: v.id("users")
+  },
+  handler: (ctx, args) => withDogfoodDiagnostics("addPrivateChannelMember", {
+    channelId: args.channelId,
+    userId: args.userId
+  }, async () => {
+    const actor = await requireAllowedCurrentUser(ctx)
+    const channel = await requirePrivateChannelAdmin(ctx, { channelId: args.channelId, userId: actor._id })
+    await requireEligiblePrivateChannelMember(ctx, { workspaceId: channel.workspaceId, userId: args.userId })
+
+    const existing = await ctx.db
+      .query("channelMemberships")
+      .withIndex("by_channel_user", (q) => q.eq("channelId", channel._id).eq("userId", args.userId))
+      .unique()
+    if (existing !== null) return { channelId: channel._id, userId: args.userId, member: true }
+
+    const memberships = await ctx.db
+      .query("channelMemberships")
+      .withIndex("by_channel", (q) => q.eq("channelId", channel._id))
+      .take(MAX_PRIVATE_CHANNEL_MEMBERS)
+    if (memberships.length >= MAX_PRIVATE_CHANNEL_MEMBERS) {
+      throw new Error(`Private channels can contain at most ${MAX_PRIVATE_CHANNEL_MEMBERS} members`)
+    }
+
+    const now = Date.now()
+    await ctx.db.insert("channelMemberships", {
+      channelId: channel._id,
+      userId: args.userId,
+      role: "member",
+      createdAt: now,
+      lastReadAt: now,
+      mentionTrackingStartedAt: now
+    })
+    return { channelId: channel._id, userId: args.userId, member: true }
+  })
+})
+
+export const removePrivateChannelMember = mutation({
+  args: {
+    channelId: v.id("channels"),
+    userId: v.id("users")
+  },
+  handler: (ctx, args) => withDogfoodDiagnostics("removePrivateChannelMember", {
+    channelId: args.channelId,
+    userId: args.userId
+  }, async () => {
+    const actor = await requireAllowedCurrentUser(ctx)
+    const channel = await requirePrivateChannelAdmin(ctx, { channelId: args.channelId, userId: actor._id })
+    await requireWorkspaceMember(ctx, { workspaceId: channel.workspaceId, userId: args.userId })
+    const membership = await ctx.db
+      .query("channelMemberships")
+      .withIndex("by_channel_user", (q) => q.eq("channelId", channel._id).eq("userId", args.userId))
+      .unique()
+    if (membership === null) return { channelId: channel._id, userId: args.userId, member: false }
+
+    if (membership.role === "admin") {
+      const memberships = await ctx.db
+        .query("channelMemberships")
+        .withIndex("by_channel", (q) => q.eq("channelId", channel._id))
+        .take(MAX_PRIVATE_CHANNEL_MEMBERS)
+      if (!memberships.some((candidate) => candidate.role === "admin" && candidate._id !== membership._id)) {
+        throw new Error("The last channel admin cannot be removed")
+      }
+    }
+
+    await ctx.db.delete(membership._id)
+    return { channelId: channel._id, userId: args.userId, member: false }
   })
 })
 
