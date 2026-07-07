@@ -32,6 +32,8 @@ const mocks = vi.hoisted(() => ({
   deleteMessage: vi.fn(),
   toggleMessageReaction: vi.fn(),
   createChannel: vi.fn(),
+  addPrivateChannelMember: vi.fn(),
+  removePrivateChannelMember: vi.fn(),
   ensureChannelMember: vi.fn(),
   markChannelRead: vi.fn(),
   generateAttachmentUploadUrl: vi.fn(),
@@ -47,6 +49,7 @@ const mocks = vi.hoisted(() => ({
   members: undefined as ReadonlyArray<DogfoodChannelMemberView> | undefined,
   membersByChannel: undefined as Record<string, ReadonlyArray<DogfoodChannelMemberView>> | undefined,
   inviteCandidates: undefined as ReadonlyArray<DogfoodPrivateChannelInviteCandidateView> | undefined,
+  managementCandidates: undefined as ReadonlyArray<DogfoodPrivateChannelInviteCandidateView> | undefined,
   channelIndicators: undefined as ReadonlyArray<{ readonly channelId: string; readonly indicator: "unread" | "mentioned" }> | undefined
 }))
 
@@ -65,12 +68,14 @@ vi.mock("convex/react", () => ({
       mocks.deleteMessage,
       mocks.toggleMessageReaction,
       mocks.createChannel,
+      mocks.addPrivateChannelMember,
+      mocks.removePrivateChannelMember,
       mocks.ensureChannelMember,
       mocks.markChannelRead,
       mocks.generateAttachmentUploadUrl,
       mocks.registerAttachmentUpload,
       mocks.deleteAttachmentUpload
-    ][mocks.mutationCallCount % 10]
+    ][mocks.mutationCallCount % 12]
     mocks.mutationCallCount += 1
     return mutation
   },
@@ -86,7 +91,11 @@ vi.mock("convex/react", () => ({
   },
   useQuery: (query: unknown, args: unknown) => {
     if (args === "skip") return undefined
-    if (getFunctionName(query as never) === "chat:eligiblePrivateChannelMembers") return mocks.inviteCandidates
+    if (getFunctionName(query as never) === "chat:eligiblePrivateChannelMembers") {
+      return typeof args === "object" && args !== null && "channelId" in args
+        ? mocks.managementCandidates
+        : mocks.inviteCandidates
+    }
     if (typeof args === "object" && args !== null && "channelId" in args) {
       const channelId = String(args.channelId)
       if (getFunctionName(query as never) === "chat:channelMembers") {
@@ -108,6 +117,7 @@ vi.mock("./workspace-chat", () => ({
       readonly channels: ReadonlyArray<{ readonly id: string; readonly name: string }>
       readonly channelMessages: ReadonlyArray<ChatMessage>
       readonly channelMembers?: ReadonlyArray<{ readonly id: string; readonly displayName: string }>
+      readonly channelMemberInviteCandidates?: ReadonlyArray<{ readonly id: string; readonly displayName: string }>
       readonly createChannelInviteCandidates?: ReadonlyArray<{ readonly id: string; readonly displayName: string }>
       readonly channelIndicators?: ReadonlyArray<{ readonly channelId: string; readonly indicator: "unread" | "mentioned" }>
       readonly channelMembersLoading?: boolean
@@ -121,6 +131,8 @@ vi.mock("./workspace-chat", () => ({
     readonly initialMemberIds?: ReadonlyArray<string>
   }) => Promise<unknown>
   readonly selectChannel?: (channelId: string) => void
+  readonly addChannelMember?: (input: { readonly channelId: string; readonly userId: string }) => Promise<unknown>
+  readonly removeChannelMember?: (input: { readonly channelId: string; readonly userId: string }) => Promise<unknown>
   readonly createChannelMessage: (input: {
     readonly channelId: string
     readonly body: string
@@ -142,6 +154,7 @@ vi.mock("./workspace-chat", () => ({
     return (
       <section aria-label="mock workspace chat">
         <h2>{props.model.workspace.name}</h2>
+        <output aria-label="active channel">{props.model.channel.id}</output>
         {props.model.channelMessagesLoading === true ? <p>messages loading</p> : null}
         {props.model.channelMessagesHasMore === true
           ? <button type="button" onClick={props.loadOlderChannelMessages}>Load older messages</button>
@@ -183,6 +196,23 @@ vi.mock("./workspace-chat", () => ({
           })}
         >
           Create private channel
+        </button>
+        <button
+          type="button"
+          onClick={() => props.model.channelMemberInviteCandidates?.[0] === undefined
+            ? undefined
+            : props.addChannelMember?.({
+                channelId: props.model.channel.id,
+                userId: props.model.channelMemberInviteCandidates[0].id
+              })}
+        >
+          Add managed member
+        </button>
+        <button
+          type="button"
+          onClick={() => props.removeChannelMember?.({ channelId: props.model.channel.id, userId: "user-1" })}
+        >
+          Remove current member
         </button>
         <button
           type="button"
@@ -273,6 +303,8 @@ beforeEach(() => {
     visibility: "public",
     createdAt: 44
   })
+  mocks.addPrivateChannelMember.mockResolvedValue({})
+  mocks.removePrivateChannelMember.mockResolvedValue({})
   mocks.ensureChannelMember.mockResolvedValue({})
   mocks.markChannelRead.mockResolvedValue({})
   mocks.generateAttachmentUploadUrl.mockResolvedValue({
@@ -290,6 +322,7 @@ beforeEach(() => {
   mocks.members = undefined
   mocks.membersByChannel = undefined
   mocks.inviteCandidates = undefined
+  mocks.managementCandidates = undefined
   mocks.channelIndicators = undefined
 })
 
@@ -379,12 +412,14 @@ const members: ReadonlyArray<DogfoodChannelMemberView> = [
   {
     id: "user-2" as Id<"users">,
     displayName: "Lee Chen",
-    joinedAt: 40
+    joinedAt: 40,
+    role: "member"
   },
   {
     id: "user-1" as Id<"users">,
     displayName: "Maya Patel",
-    joinedAt: 39
+    joinedAt: 39,
+    role: "admin"
   }
 ]
 
@@ -402,9 +437,12 @@ describe("dogfoodChatToChatData", () => {
         selectedChannelId: workspace.channel.id,
         messages,
         members,
+        channelMemberInviteCandidates: inviteCandidates,
         createChannelInviteCandidates: inviteCandidates
       },
       commands: {
+        addChannelMember: mocks.addPrivateChannelMember,
+        removeChannelMember: mocks.removePrivateChannelMember,
         sendMessage: mocks.sendMessage,
         editMessage: mocks.editMessage,
         deleteMessage: mocks.deleteMessage,
@@ -418,7 +456,13 @@ describe("dogfoodChatToChatData", () => {
     expect(chatData.model.channel).toEqual({ id: "channel-1", name: "general", visibility: "private" })
     expect(chatData.model.channels.map((channel) => channel.name)).toEqual(["general", "design"])
     expect(chatData.model.channelMembers?.map((member) => member.displayName)).toEqual(["Lee Chen", "Maya Patel"])
+    expect(chatData.model.channelMembers?.map((member) => member.role)).toEqual(["member", "admin"])
+    expect(chatData.model.channelMemberInviteCandidates).toEqual([{ id: "user-2", displayName: "Lee Chen" }])
     expect(chatData.model.createChannelInviteCandidates).toEqual([{ id: "user-2", displayName: "Lee Chen" }])
+    void chatData.addChannelMember?.({ channelId: "channel-1", userId: "user-2" })
+    void chatData.removeChannelMember?.({ channelId: "channel-1", userId: "user-2" })
+    expect(mocks.addPrivateChannelMember).toHaveBeenCalledWith({ channelId: "channel-1", userId: "user-2" })
+    expect(mocks.removePrivateChannelMember).toHaveBeenCalledWith({ channelId: "channel-1", userId: "user-2" })
     expect(chatData.model.channelMessages).toHaveLength(1)
     expect(chatData.model.channelMessages[0]).toMatchObject({
       authorType: "human",
@@ -825,6 +869,55 @@ describe("ConvexDogfoodApp", () => {
     const memberList = await screen.findByRole("list", { name: "mock members" })
     expect(await within(memberList).findByText("Lee Chen")).toBeTruthy()
     expect(within(memberList).getByText("Maya Patel")).toBeTruthy()
+  })
+
+  it("wires private membership commands and moves a self-removed viewer to the default channel", async () => {
+    const { ConvexDogfoodApp } = await import("./dogfood-chat")
+    const safeChannel: DogfoodChannelView = {
+      id: "channel-safe" as Id<"channels">,
+      key: "general",
+      name: "general",
+      visibility: "public",
+      createdAt: 2
+    }
+    const safeWorkspace: DogfoodWorkspaceView = {
+      ...workspace,
+      channel: safeChannel
+    }
+    const privateChannel: DogfoodChannelView = {
+      id: "channel-private" as Id<"channels">,
+      key: "leadership",
+      name: "leadership",
+      visibility: "private",
+      createdAt: 3
+    }
+    mocks.auth.user = { id: "user-1" }
+    mocks.convexAuth.isAuthenticated = true
+    mocks.workspace = safeWorkspace
+    mocks.channels = [safeChannel, privateChannel]
+    mocks.messagesByChannel = { "channel-safe": [], "channel-private": [] }
+    mocks.membersByChannel = {
+      "channel-safe": members,
+      "channel-private": members
+    }
+    mocks.managementCandidates = inviteCandidates
+
+    render(<ConvexDogfoodApp />)
+
+    fireEvent.click(await screen.findByRole("button", { name: "leadership" }))
+    await waitFor(() => expect(screen.getByLabelText("active channel").textContent).toBe("channel-private"))
+    fireEvent.click(screen.getByRole("button", { name: "Add managed member" }))
+    await waitFor(() => expect(mocks.addPrivateChannelMember).toHaveBeenCalledWith({
+      channelId: privateChannel.id,
+      userId: inviteCandidates[0]!.id
+    }))
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove current member" }))
+    await waitFor(() => expect(mocks.removePrivateChannelMember).toHaveBeenCalledWith({
+      channelId: privateChannel.id,
+      userId: workspace.currentUser.id
+    }))
+    await waitFor(() => expect(screen.getByLabelText("active channel").textContent).toBe("channel-safe"))
   })
 
   it("keeps the workspace shell mounted while selected channel messages and members load", async () => {

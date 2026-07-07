@@ -197,6 +197,7 @@ const listWorkspaceMembers = async (
     readonly id: Id<"users">
     readonly displayName: string
     readonly joinedAt: number
+    readonly role: Doc<"channelMemberships">["role"]
   }> = []
   for (const membership of memberships) {
     const member = await ctx.db.get(membership.userId)
@@ -204,7 +205,8 @@ const listWorkspaceMembers = async (
     members.push({
       id: member._id,
       displayName: member.displayName,
-      joinedAt: membership.createdAt
+      joinedAt: membership.createdAt,
+      role: membership.role === "guest" ? "guest" : "member"
     })
   }
 

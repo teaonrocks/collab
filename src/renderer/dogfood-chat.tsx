@@ -65,6 +65,8 @@ function ConvexDogfoodChat() {
   const deleteMessage = useMutation(api.chat.deleteMessage)
   const toggleMessageReaction = useMutation(api.chat.toggleMessageReaction)
   const createChannel = useMutation(api.chat.createChannel)
+  const addPrivateChannelMember = useMutation(api.chat.addPrivateChannelMember)
+  const removePrivateChannelMember = useMutation(api.chat.removePrivateChannelMember)
   const ensureChannelMember = useMutation(api.chat.ensureChannelMember)
   const markChannelRead = useMutation(api.chat.markChannelRead)
   const generateAttachmentUploadUrl = useMutation(api.chat.generateAttachmentUploadUrl)
@@ -90,7 +92,10 @@ function ConvexDogfoodChat() {
     () => channels === undefined ? undefined : mergeDogfoodChannels(channels, createdChannels),
     [channels, createdChannels]
   )
-  const activeChannelId = selectedChannelId ?? workspace?.channel.id
+  const activeChannel = selectedChannelId === null
+    ? workspace?.channel
+    : channelList?.find((channel) => channel.id === selectedChannelId) ?? workspace?.channel
+  const activeChannelId = activeChannel?.id
   const activeChannelJoined = activeChannelId === undefined ? false : joinedChannelIds.has(activeChannelId)
   const messagePagination = usePaginatedQuery(
     api.chat.channelMessages,
@@ -104,6 +109,13 @@ function ConvexDogfoodChat() {
   const members = useQuery(
     api.chat.channelMembers,
     activeChannelId === undefined || !activeChannelJoined ? "skip" : { channelId: activeChannelId }
+  )
+  const currentUserIsPrivateChannelAdmin = activeChannel?.visibility === "private" && members?.some((member) =>
+    member.id === workspace?.currentUser.id && member.role === "admin"
+  ) === true
+  const channelMemberInviteCandidates = useQuery(
+    api.chat.eligiblePrivateChannelMembers,
+    activeChannelId === undefined || !currentUserIsPrivateChannelAdmin ? "skip" : { channelId: activeChannelId }
   )
   const createChannelInviteCandidates = useQuery(
     api.chat.eligiblePrivateChannelMembers,
@@ -204,6 +216,7 @@ function ConvexDogfoodChat() {
             selectedChannelId: activeChannelId,
             messages,
             members: members ?? [],
+            channelMemberInviteCandidates,
             createChannelInviteCandidates,
             channelIndicators: channelIndicators ?? []
           },
@@ -223,6 +236,20 @@ function ConvexDogfoodChat() {
               return channel
             },
             selectChannel: (channelId) => setSelectedChannelId(channelId),
+            addChannelMember: addPrivateChannelMember,
+            removeChannelMember: async (input) => {
+              const result = await removePrivateChannelMember(input)
+              if (workspace.currentUser.id === input.userId) {
+                setSelectedChannelId(workspace.channel.id)
+                setJoinedChannelIds((existing) => {
+                  const next = new Set(existing)
+                  next.delete(input.channelId)
+                  return next
+                })
+                setCreatedChannels((existing) => existing.filter((channel) => channel.id !== input.channelId))
+              }
+              return result
+            },
             sendMessage,
             uploadMessageAttachment: (file) => uploadAttachment({
               file,
@@ -240,7 +267,7 @@ function ConvexDogfoodChat() {
             operationErrorMessage: dogfoodOperationErrorMessage
           }
         }),
-    [activeChannelId, channelIndicators, channelList, convex, createChannel, createChannelInviteCandidates, deleteAttachmentUpload, deleteMessage, editMessage, generateAttachmentUploadUrl, members, messagePagination, messages, registerAttachmentUpload, sendMessage, toggleMessageReaction, workspace]
+    [activeChannelId, addPrivateChannelMember, channelIndicators, channelList, channelMemberInviteCandidates, convex, createChannel, createChannelInviteCandidates, deleteAttachmentUpload, deleteMessage, editMessage, generateAttachmentUploadUrl, members, messagePagination, messages, registerAttachmentUpload, removePrivateChannelMember, sendMessage, toggleMessageReaction, workspace]
   )
 
   if (auth.isLoading) {

@@ -1299,6 +1299,135 @@ describe("WorkspaceChat", () => {
     expect(within(directMessages).queryByRole("button", { name: "Maya Patel" })).toBeNull()
   })
 
+  it("lets private-channel admins add members with pending feedback and realtime updates", async () => {
+    let resolveAdd: (() => void) | undefined
+    const addChannelMember = vi.fn(() => new Promise<void>((resolve) => {
+      resolveAdd = resolve
+    }))
+    const base = makeChatModel([])
+    const props = {
+      createChannelMessage: () => Promise.resolve(),
+      deleteChannelMessage: () => Promise.resolve(),
+      addChannelMember,
+      removeChannelMember: vi.fn(() => Promise.resolve())
+    }
+    const { rerender } = render(
+      <WorkspaceChat
+        {...props}
+        model={{
+          ...base,
+          channelMembers: [{ id: userId, displayName: "Maya Patel", role: "admin" }],
+          channelMemberInviteCandidates: [{ id: "human-2", displayName: "Lee Chen" }]
+        }}
+      />
+    )
+
+    const manage = await screen.findByRole("button", { name: "Manage" })
+    expect(manage.getAttribute("aria-haspopup")).toBe("dialog")
+    fireEvent.click(manage)
+
+    const dialog = await screen.findByRole("dialog", { name: "Manage #origination" })
+    expect(within(dialog).getByText("Admin · You")).toBeTruthy()
+    expect(within(dialog).getByText("Last admin")).toBeTruthy()
+    expect(within(dialog).queryByRole("button", { name: "Remove" })).toBeNull()
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add" }))
+    expect(addChannelMember).toHaveBeenCalledWith({ channelId, userId: "human-2" })
+    expect(within(dialog).getByRole("button", { name: "Adding..." }).hasAttribute("disabled")).toBe(true)
+    resolveAdd?.()
+    expect(await within(dialog).findByText("Lee Chen was added.")).toBeTruthy()
+
+    rerender(
+      <WorkspaceChat
+        {...props}
+        model={{
+          ...base,
+          channelMembers: [
+            { id: userId, displayName: "Maya Patel", role: "admin" },
+            { id: "human-2", displayName: "Lee Chen", role: "member" }
+          ],
+          channelMemberInviteCandidates: []
+        }}
+      />
+    )
+    expect(within(dialog).getByText("No eligible members to add.")).toBeTruthy()
+    expect(within(dialog).getByText("Member")).toBeTruthy()
+  })
+
+  it("shows member-management failures and confirms that removal revokes access immediately", async () => {
+    const addChannelMember = vi.fn(() => Promise.reject(new Error("private backend detail")))
+    const removeChannelMember = vi.fn(() => Promise.resolve())
+    render(
+      <WorkspaceChat
+        model={{
+          ...makeChatModel([]),
+          channelMembers: [
+            { id: userId, displayName: "Maya Patel", role: "admin" },
+            { id: "human-2", displayName: "Lee Chen", role: "admin" }
+          ],
+          channelMemberInviteCandidates: [{ id: "human-3", displayName: "Diego Rivera" }]
+        }}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+        addChannelMember={addChannelMember}
+        removeChannelMember={removeChannelMember}
+      />
+    )
+
+    fireEvent.click(await screen.findByRole("button", { name: "Manage" }))
+    const managementDialog = await screen.findByRole("dialog", { name: "Manage #origination" })
+    fireEvent.click(within(managementDialog).getByRole("button", { name: "Add" }))
+    expect((await within(managementDialog).findByRole("alert")).textContent).toBe("Could not add Diego Rivera. Try again.")
+    expect(within(managementDialog).queryByText("private backend detail")).toBeNull()
+
+    const mayaRow = within(managementDialog).getByText("Maya Patel").closest("li")!
+    fireEvent.click(within(mayaRow).getByRole("button", { name: "Remove" }))
+    const confirmation = await screen.findByRole("dialog", { name: "Remove Maya Patel?" })
+    expect(within(confirmation).getByText(/access ends immediately/i)).toBeTruthy()
+    expect(within(confirmation).getByText(/moved to an accessible channel/i)).toBeTruthy()
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Leave channel" }))
+    await waitFor(() => expect(removeChannelMember).toHaveBeenCalledWith({ channelId, userId }))
+  })
+
+  it("does not offer private-channel administration to ordinary members or on public channels", async () => {
+    const commands = {
+      addChannelMember: vi.fn(() => Promise.resolve()),
+      removeChannelMember: vi.fn(() => Promise.resolve())
+    }
+    const base = makeChatModel([])
+    const { rerender } = render(
+      <WorkspaceChat
+        {...commands}
+        model={{
+          ...base,
+          channelMembers: [
+            { id: userId, displayName: "Maya Patel", role: "member" },
+            { id: "human-2", displayName: "Lee Chen", role: "admin" }
+          ]
+        }}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+      />
+    )
+
+    expect(screen.queryByRole("button", { name: "Manage" })).toBeNull()
+    rerender(
+      <WorkspaceChat
+        {...commands}
+        model={{
+          ...base,
+          channel: makeChannel({ id: channelId, name: "origination", visibility: "public" }),
+          channels: [makeChannel({ id: channelId, name: "origination", visibility: "public" })],
+          channelMembers: [{ id: userId, displayName: "Maya Patel", role: "admin" }]
+        }}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+      />
+    )
+    expect(screen.queryByRole("button", { name: "Manage" })).toBeNull()
+    expect(screen.getByText("You")).toBeTruthy()
+  })
+
   it("shows an empty channel members state", async () => {
     render(
       <WorkspaceChat

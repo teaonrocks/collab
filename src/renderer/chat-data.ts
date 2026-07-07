@@ -19,6 +19,7 @@ export type ChatChannel = {
 export type ChatChannelMember = {
   readonly id: string
   readonly displayName: string
+  readonly role?: "admin" | "member" | "guest"
 }
 
 export type ChatChannelInviteCandidate = ChatChannelMember
@@ -76,6 +77,7 @@ export type ChatDataModel = {
   readonly channels: ReadonlyArray<ChatChannel>
   readonly channelMessages: ReadonlyArray<ChatMessage>
   readonly channelMembers?: ReadonlyArray<ChatChannelMember>
+  readonly channelMemberInviteCandidates?: ReadonlyArray<ChatChannelInviteCandidate>
   readonly createChannelInviteCandidates?: ReadonlyArray<ChatChannelInviteCandidate>
   readonly channelIndicators?: ReadonlyArray<ChatChannelIndicatorState>
   readonly channelMembersLoading?: boolean
@@ -91,6 +93,13 @@ export type CreateChatChannel = (input: {
 }) => Promise<ChatChannel>
 
 export type SelectChatChannel = (channelId: ChatChannelId) => void
+
+export type AddChatChannelMember = (input: {
+  readonly channelId: ChatChannelId
+  readonly userId: ChatChannelMember["id"]
+}) => Promise<unknown>
+
+export type RemoveChatChannelMember = AddChatChannelMember
 
 export type CreateChatMessage = (input: {
   readonly channelId: ChatChannelId
@@ -131,6 +140,8 @@ export type ChatDataView = {
   readonly model: ChatDataModel
   readonly createChannel?: CreateChatChannel
   readonly selectChannel?: SelectChatChannel
+  readonly addChannelMember?: AddChatChannelMember
+  readonly removeChannelMember?: RemoveChatChannelMember
   readonly createChannelMessage: CreateChatMessage
   readonly uploadMessageAttachment?: UploadChatMessageAttachment
   readonly discardMessageAttachment?: (attachment: ChatMessageAttachment) => Promise<unknown>

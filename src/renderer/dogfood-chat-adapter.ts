@@ -21,6 +21,7 @@ export type DogfoodChatAdapterInput = {
     readonly selectedChannelId: Id<"channels">
     readonly messages: ReadonlyArray<DogfoodChannelMessageView>
     readonly members?: ReadonlyArray<DogfoodChannelMemberView>
+    readonly channelMemberInviteCandidates?: ReadonlyArray<DogfoodPrivateChannelInviteCandidateView>
     readonly createChannelInviteCandidates?: ReadonlyArray<DogfoodPrivateChannelInviteCandidateView>
     readonly channelIndicators?: ReadonlyArray<DogfoodChannelIndicatorView>
   }
@@ -35,6 +36,12 @@ export type DogfoodChatAdapterInput = {
       input: FunctionArgs<typeof api.chat.createChannel>
     ) => Promise<FunctionReturnType<typeof api.chat.createChannel>>
     readonly selectChannel?: (channelId: Id<"channels">) => void
+    readonly addChannelMember?: (
+      input: FunctionArgs<typeof api.chat.addPrivateChannelMember>
+    ) => Promise<unknown>
+    readonly removeChannelMember?: (
+      input: FunctionArgs<typeof api.chat.removePrivateChannelMember>
+    ) => Promise<unknown>
     readonly sendMessage: (input: FunctionArgs<typeof api.chat.sendMessage>) => Promise<unknown>
     readonly uploadMessageAttachment?: (file: File) => Promise<ChatMessageAttachment>
     readonly discardMessageAttachment?: (
@@ -71,6 +78,11 @@ export const dogfoodChatToChatData = ({ data, state, commands }: DogfoodChatAdap
       channelMessages: data.messages.map(toChatMessage),
       channelMembers: data.members?.map((member) => ({
         id: String(member.id),
+        displayName: member.displayName,
+        role: member.role
+      })),
+      channelMemberInviteCandidates: data.channelMemberInviteCandidates?.map((member) => ({
+        id: String(member.id),
         displayName: member.displayName
       })),
       createChannelInviteCandidates: data.createChannelInviteCandidates?.map((member) => ({
@@ -97,6 +109,18 @@ export const dogfoodChatToChatData = ({ data, state, commands }: DogfoodChatAdap
     selectChannel: commands.selectChannel === undefined
       ? undefined
       : (channelId) => commands.selectChannel?.(convexId<"channels">(channelId)),
+    addChannelMember: commands.addChannelMember === undefined
+      ? undefined
+      : ({ channelId, userId }) => commands.addChannelMember!({
+          channelId: convexId<"channels">(channelId),
+          userId: convexId<"users">(userId)
+        }),
+    removeChannelMember: commands.removeChannelMember === undefined
+      ? undefined
+      : ({ channelId, userId }) => commands.removeChannelMember!({
+          channelId: convexId<"channels">(channelId),
+          userId: convexId<"users">(userId)
+        }),
     createChannelMessage: ({ channelId, body, parentMessageId, attachments }) => commands.sendMessage({
       channelId: convexId<"channels">(channelId),
       body,

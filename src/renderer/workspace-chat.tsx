@@ -163,6 +163,8 @@ export function WorkspaceChat(props: {
   readonly deleteChannelMessage: ChatDataView["deleteChannelMessage"]
   readonly createChannel?: ChatDataView["createChannel"]
   readonly selectChannel?: SelectChatChannel
+  readonly addChannelMember?: ChatDataView["addChannelMember"]
+  readonly removeChannelMember?: ChatDataView["removeChannelMember"]
   readonly editChannelMessage?: ChatDataView["editChannelMessage"]
   readonly toggleMessageReaction?: ChatDataView["toggleMessageReaction"]
   readonly searchChannelMessages?: SearchChatMessages
@@ -185,6 +187,8 @@ export function WorkspaceChat(props: {
     toggleMessageReaction,
     searchChannelMessages: searchChannelHistory,
     loadOlderChannelMessages,
+    addChannelMember,
+    removeChannelMember,
     canDeleteMessages = true,
     canDeleteMessage,
     canEditMessage,
@@ -483,10 +487,14 @@ export function WorkspaceChat(props: {
       />
 
       <MembersPanel
+        channel={model.channel}
         members={visibleMembers}
+        inviteCandidates={model.channelMemberInviteCandidates}
         currentUserId={model.currentUser.id}
         loading={channelMembersLoading}
         open={membersOpen}
+        addChannelMember={addChannelMember}
+        removeChannelMember={removeChannelMember}
       />
 
       {menuMessage === null || messageMenu === null
@@ -2240,35 +2248,218 @@ function MentionSuggestionMenu(props: {
 }
 
 function MembersPanel(props: {
+  readonly channel: ChatChannel
   readonly members: ReadonlyArray<ChatChannelMember>
+  readonly inviteCandidates?: ReadonlyArray<ChatChannelInviteCandidate>
   readonly currentUserId: string
   readonly loading: boolean
   readonly open: boolean
+  readonly addChannelMember?: ChatDataView["addChannelMember"]
+  readonly removeChannelMember?: ChatDataView["removeChannelMember"]
 }) {
-  const { members, currentUserId, loading, open } = props
+  const { channel, members, inviteCandidates, currentUserId, loading, open, addChannelMember, removeChannelMember } = props
+  const [managing, setManaging] = useState(false)
+  const currentMembership = members.find((member) => member.id === currentUserId)
+  const canManage = channel.visibility === "private" && currentMembership?.role === "admin" &&
+    addChannelMember !== undefined && removeChannelMember !== undefined
   return (
-    <aside className={classNames("membersPanel h-full min-h-0 min-w-0 overflow-hidden border-l border-border bg-surface-canvas [grid-area:members] max-[920px]:hidden", !open && "hidden")} aria-label="Channel members">
-      <div className="membersContent flex h-full min-h-0 flex-col gap-2.5 overflow-auto p-3.5" aria-busy={loading}>
-        <p className="m-0 text-xs font-bold leading-tight text-foreground-subtle">Online -- {loading ? "" : members.length}</p>
-        {loading
-          ? <MembersSkeleton />
-          : members.length === 0
-            ? <p className="m-0 text-[13px] leading-[1.4] text-foreground-muted">No members yet</p>
-            : (
-            <ol className={memberListClassName}>
-              {members.map((member) => (
-                <li key={member.id} className={memberItemClassName}>
-                  <Avatar name={member.displayName} aria-hidden="true" />
-                  <div className="min-w-0">
-                    <strong className={memberNameClassName}>{member.displayName}</strong>
-                    <span className={memberRoleClassName}>{member.id === currentUserId ? "You" : "Member"}</span>
-                  </div>
-                </li>
-              ))}
-            </ol>
+    <>
+      <aside className={classNames("membersPanel h-full min-h-0 min-w-0 overflow-hidden border-l border-border bg-surface-canvas [grid-area:members] max-[920px]:hidden", !open && "hidden")} aria-label="Channel members">
+        <div className="membersContent flex h-full min-h-0 flex-col gap-2.5 overflow-auto p-3.5" aria-busy={loading}>
+          <div className="flex min-h-7 items-center justify-between gap-2">
+            <p className="m-0 text-xs font-bold leading-tight text-foreground-subtle">Online -- {loading ? "" : members.length}</p>
+            {canManage
+              ? (
+                <Button type="button" variant="secondary" size="sm" aria-haspopup="dialog" aria-expanded={managing} onClick={() => setManaging(true)}>
+                  Manage
+                </Button>
+              )
+              : null}
+          </div>
+          {loading
+            ? <MembersSkeleton />
+            : members.length === 0
+              ? <p className="m-0 text-[13px] leading-[1.4] text-foreground-muted">No members yet</p>
+              : (
+              <ol className={memberListClassName}>
+                {members.map((member) => (
+                  <li key={member.id} className={memberItemClassName}>
+                    <Avatar name={member.displayName} aria-hidden="true" />
+                    <div className="min-w-0">
+                      <strong className={memberNameClassName}>{member.displayName}</strong>
+                      <span className={memberRoleClassName}>
+                        {channel.visibility === "private"
+                          ? member.role === undefined
+                            ? member.id === currentUserId ? "You" : "Member"
+                            : `${member.role === "admin" ? "Admin" : member.role === "guest" ? "Guest" : "Member"}${member.id === currentUserId ? " · You" : ""}`
+                          : member.id === currentUserId ? "You" : "Member"}
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+        </div>
+      </aside>
+      {managing && canManage
+        ? (
+          <MemberManagementDialog
+            channel={channel}
+            members={members}
+            inviteCandidates={inviteCandidates}
+            currentUserId={currentUserId}
+            addChannelMember={addChannelMember}
+            removeChannelMember={removeChannelMember}
+            onClose={() => setManaging(false)}
+          />
+        )
+        : null}
+    </>
+  )
+}
+
+type MemberManagementFeedback = {
+  readonly kind: "success" | "error"
+  readonly message: string
+}
+
+function MemberManagementDialog(props: {
+  readonly channel: ChatChannel
+  readonly members: ReadonlyArray<ChatChannelMember>
+  readonly inviteCandidates?: ReadonlyArray<ChatChannelInviteCandidate>
+  readonly currentUserId: string
+  readonly addChannelMember: NonNullable<ChatDataView["addChannelMember"]>
+  readonly removeChannelMember: NonNullable<ChatDataView["removeChannelMember"]>
+  readonly onClose: () => void
+}) {
+  const { channel, members, inviteCandidates, currentUserId, addChannelMember, removeChannelMember, onClose } = props
+  const [pending, setPending] = useState<{ readonly action: "add" | "remove"; readonly userId: string } | null>(null)
+  const [pendingRemoval, setPendingRemoval] = useState<ChatChannelMember | null>(null)
+  const [feedback, setFeedback] = useState<MemberManagementFeedback | null>(null)
+  const adminCount = members.filter((member) => member.role === "admin").length
+  const operationPending = pending !== null
+
+  const runAdd = (candidate: ChatChannelInviteCandidate) => {
+    if (operationPending) return
+    setPending({ action: "add", userId: candidate.id })
+    setFeedback(null)
+    void addChannelMember({ channelId: channel.id, userId: candidate.id })
+      .then(() => setFeedback({ kind: "success", message: `${candidate.displayName} was added.` }))
+      .catch(() => setFeedback({ kind: "error", message: `Could not add ${candidate.displayName}. Try again.` }))
+      .finally(() => setPending(null))
+  }
+
+  const confirmRemoval = () => {
+    const member = pendingRemoval
+    if (member === null || operationPending) return
+    setPending({ action: "remove", userId: member.id })
+    setFeedback(null)
+    void removeChannelMember({ channelId: channel.id, userId: member.id })
+      .then(() => {
+        setPendingRemoval(null)
+        setFeedback({ kind: "success", message: `${member.displayName} was removed.` })
+      })
+      .catch(() => setFeedback({ kind: "error", message: `Could not remove ${member.displayName}. Try again.` }))
+      .finally(() => setPending(null))
+  }
+
+  const handleOpenChange = (open: boolean) => {
+    if (!open && !operationPending) onClose()
+  }
+
+  return (
+    <Dialog open onOpenChange={handleOpenChange}>
+      <DialogContent className="memberManagementDialog max-w-[460px]">
+        {pendingRemoval === null
+          ? (
+            <>
+              <DialogTitle>Manage #{channel.name}</DialogTitle>
+              <DialogDescription>Private-channel admins can add eligible workspace members or remove existing members.</DialogDescription>
+              <div className="mt-4 grid max-h-[min(520px,70vh)] gap-4 overflow-y-auto pr-1">
+                <section aria-labelledby="current-channel-members-title">
+                  <h3 id="current-channel-members-title" className="mb-2 mt-0 text-xs font-bold uppercase text-foreground-subtle">Current members</h3>
+                  <ol className="m-0 grid list-none gap-1 p-0">
+                    {members.map((member) => {
+                      const isLastAdmin = member.role === "admin" && adminCount === 1
+                      const removing = pending?.action === "remove" && pending.userId === member.id
+                      return (
+                        <li key={member.id} className="flex min-h-11 items-center gap-2 border-b border-border py-1.5 last:border-b-0">
+                          <Avatar name={member.displayName} aria-hidden="true" className="size-8" />
+                          <span className="min-w-0 flex-1">
+                            <strong className="block overflow-hidden text-ellipsis whitespace-nowrap text-sm">{member.displayName}</strong>
+                            <span className="block text-xs text-foreground-subtle">
+                              {member.role === "admin" ? "Admin" : member.role === "guest" ? "Guest" : "Member"}
+                              {member.id === currentUserId ? " · You" : ""}
+                            </span>
+                          </span>
+                          {isLastAdmin
+                            ? <span className="text-xs text-foreground-subtle">Last admin</span>
+                            : (
+                              <Button type="button" variant="secondary" size="sm" disabled={operationPending} onClick={() => setPendingRemoval(member)}>
+                                {removing ? "Removing..." : "Remove"}
+                              </Button>
+                            )}
+                        </li>
+                      )
+                    })}
+                  </ol>
+                </section>
+                <section aria-labelledby="eligible-channel-members-title">
+                  <h3 id="eligible-channel-members-title" className="mb-2 mt-0 text-xs font-bold uppercase text-foreground-subtle">Eligible invitees</h3>
+                  {inviteCandidates === undefined
+                    ? <p className="m-0 py-2 text-sm text-foreground-subtle" role="status">Loading eligible members...</p>
+                    : inviteCandidates.length === 0
+                      ? <p className="m-0 py-2 text-sm text-foreground-subtle">No eligible members to add.</p>
+                      : (
+                        <ol className="m-0 grid list-none gap-1 p-0">
+                          {inviteCandidates.map((candidate) => {
+                            const adding = pending?.action === "add" && pending.userId === candidate.id
+                            return (
+                              <li key={candidate.id} className="flex min-h-11 items-center gap-2 border-b border-border py-1.5 last:border-b-0">
+                                <Avatar name={candidate.displayName} aria-hidden="true" className="size-8" />
+                                <strong className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-sm">{candidate.displayName}</strong>
+                                <Button type="button" variant="secondary" size="sm" disabled={operationPending} onClick={() => runAdd(candidate)}>
+                                  {adding ? "Adding..." : "Add"}
+                                </Button>
+                              </li>
+                            )
+                          })}
+                        </ol>
+                      )}
+                </section>
+              </div>
+              <p className={classNames("mb-0 mt-3 min-h-[18px] text-xs", feedback?.kind === "error" ? "text-destructive-text" : "text-foreground-subtle")} role={feedback?.kind === "error" ? "alert" : "status"} aria-live="polite">
+                {feedback?.message ?? ""}
+              </p>
+              <DialogFooter>
+                <Button type="button" variant="secondary" size="sm" disabled={operationPending} onClick={onClose}>Done</Button>
+              </DialogFooter>
+            </>
+          )
+          : (
+            <>
+              <DialogTitle>Remove {pendingRemoval.displayName}?</DialogTitle>
+              <DialogDescription>
+                {pendingRemoval.id === currentUserId
+                  ? "Your access ends immediately. You will be moved to an accessible channel."
+                  : "Their access ends immediately, including this channel's messages and member list."}
+              </DialogDescription>
+              {feedback?.kind === "error"
+                ? <p className="mb-0 mt-3 text-xs text-destructive-text" role="alert">{feedback.message}</p>
+                : null}
+              <DialogFooter>
+                <Button type="button" variant="secondary" size="sm" disabled={operationPending} onClick={() => {
+                  setPendingRemoval(null)
+                  setFeedback(null)
+                }}>Cancel</Button>
+                <Button type="button" variant="danger" size="sm" disabled={operationPending} onClick={confirmRemoval}>
+                  {operationPending ? "Removing..." : pendingRemoval.id === currentUserId ? "Leave channel" : "Remove member"}
+                </Button>
+              </DialogFooter>
+            </>
           )}
-      </div>
-    </aside>
+      </DialogContent>
+    </Dialog>
   )
 }
 
