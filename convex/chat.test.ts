@@ -218,6 +218,62 @@ describe("dogfood channel memberships", () => {
     })).resolves.toMatchObject({ name: "leadership", visibility: "private" })
   })
 
+  it("lets a channel creator rename and soft-delete their channel", async () => {
+    const t = convexTest(schema, modules)
+    await t.mutation(internal.chat.ensureViewerForIdentity, {
+      tokenIdentifier: mayaIdentity.tokenIdentifier,
+      email: mayaIdentity.email,
+      displayName: mayaIdentity.name
+    })
+    const channel = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design" })
+
+    await expect(t.withIdentity(mayaIdentity).mutation(api.chat.editChannel, {
+      channelId: channel.id,
+      name: "product team"
+    })).resolves.toMatchObject({ id: channel.id, name: "product-team" })
+    await expect(t.withIdentity(mayaIdentity).mutation(api.chat.deleteChannel, { channelId: channel.id }))
+      .resolves.toBeNull()
+    await expect(t.withIdentity(mayaIdentity).query(api.chat.channelMessages, messagePageArgs(channel.id)))
+      .rejects.toThrow("Channel not found")
+    await expect(t.withIdentity(mayaIdentity).mutation(api.chat.sendMessage, {
+      channelId: channel.id,
+      body: "This channel is deleted"
+    })).rejects.toThrow("Channel not found")
+
+    const workspaceId = await t.run(async (ctx) => {
+      const workspace = await ctx.db.query("workspaces").withIndex("by_key", (q) => q.eq("key", "aether-dogfood")).unique()
+      if (workspace === null) throw new Error("Workspace not found")
+      return workspace._id
+    })
+    const visible = await t.withIdentity(mayaIdentity).query(api.chat.channels, { workspaceId })
+    expect(visible.some((candidate) => candidate.id === channel.id)).toBe(false)
+    await expect(t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "product-team" }))
+      .resolves.toMatchObject({ name: "product-team" })
+
+    const defaultChannelId = await t.run(async (ctx) => {
+      const defaultChannel = await ctx.db.query("channels")
+        .withIndex("by_workspace_key", (q) => q.eq("workspaceId", workspaceId).eq("key", "general"))
+        .unique()
+      if (defaultChannel === null) throw new Error("Default channel not found")
+      const maya = await ctx.db.query("users")
+        .withIndex("by_token_identifier", (q) => q.eq("tokenIdentifier", mayaIdentity.tokenIdentifier))
+        .unique()
+      if (maya === null) throw new Error("Maya not found")
+      const membership = await ctx.db.query("channelMemberships")
+        .withIndex("by_channel_user", (q) => q.eq("channelId", defaultChannel._id).eq("userId", maya._id))
+        .unique()
+      if (membership === null) throw new Error("Default channel membership not found")
+      await ctx.db.patch(membership._id, { role: "admin" })
+      return defaultChannel._id
+    })
+    await expect(t.withIdentity(mayaIdentity).mutation(api.chat.editChannel, {
+      channelId: defaultChannelId,
+      name: "renamed-general"
+    })).rejects.toThrow("The default channel cannot be renamed")
+    await expect(t.withIdentity(mayaIdentity).mutation(api.chat.deleteChannel, { channelId: defaultChannelId }))
+      .rejects.toThrow("The default channel cannot be deleted")
+  })
+
   it("lets allowlisted users idempotently join created shared channels before reading messages", async () => {
     const t = convexTest(schema, modules)
     await t.mutation(internal.chat.ensureViewerForIdentity, {
@@ -1408,6 +1464,18 @@ describe("dogfood channel memberships", () => {
 
     await expect(t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "one-too-many" }))
       .rejects.toThrow("Workspaces can contain at most 100 channels")
+
+    await t.run(async (ctx) => {
+      const workspace = await ctx.db.query("workspaces").withIndex("by_key", (q) => q.eq("key", "aether-dogfood")).unique()
+      if (workspace === null) throw new Error("Workspace not found")
+      const deleted = await ctx.db.query("channels")
+        .withIndex("by_workspace_key", (q) => q.eq("workspaceId", workspace._id).eq("key", "channel-1"))
+        .unique()
+      if (deleted === null) throw new Error("Channel to delete not found")
+      await ctx.db.patch(deleted._id, { deletedAt: Date.now(), key: `deleted-${deleted._id}` })
+    })
+    await expect(t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "replacement" }))
+      .resolves.toMatchObject({ name: "replacement" })
   })
 
   it("validates read markers against a real message in the selected channel", async () => {

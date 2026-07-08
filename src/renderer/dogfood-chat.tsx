@@ -65,6 +65,8 @@ function ConvexDogfoodChat() {
   const deleteMessage = useMutation(api.chat.deleteMessage)
   const toggleMessageReaction = useMutation(api.chat.toggleMessageReaction)
   const createChannel = useMutation(api.chat.createChannel)
+  const editChannel = useMutation(api.chat.editChannel)
+  const deleteChannel = useMutation(api.chat.deleteChannel)
   const addPrivateChannelMember = useMutation(api.chat.addPrivateChannelMember)
   const removePrivateChannelMember = useMutation(api.chat.removePrivateChannelMember)
   const ensureChannelMember = useMutation(api.chat.ensureChannelMember)
@@ -236,6 +238,12 @@ function ConvexDogfoodChat() {
               return channel
             },
             selectChannel: (channelId) => setSelectedChannelId(channelId),
+            editChannel,
+            deleteChannel: async (input) => {
+              await deleteChannel(input)
+              if (selectedChannelId === input.channelId) setSelectedChannelId(workspace.channel.id)
+              setCreatedChannels((existing) => existing.filter((channel) => channel.id !== input.channelId))
+            },
             addChannelMember: addPrivateChannelMember,
             removeChannelMember: async (input) => {
               const result = await removePrivateChannelMember(input)
@@ -267,7 +275,7 @@ function ConvexDogfoodChat() {
             operationErrorMessage: dogfoodOperationErrorMessage
           }
         }),
-    [activeChannelId, addPrivateChannelMember, channelIndicators, channelList, channelMemberInviteCandidates, convex, createChannel, createChannelInviteCandidates, deleteAttachmentUpload, deleteMessage, editMessage, generateAttachmentUploadUrl, members, messagePagination, messages, registerAttachmentUpload, removePrivateChannelMember, sendMessage, toggleMessageReaction, workspace]
+    [activeChannelId, addPrivateChannelMember, channelIndicators, channelList, channelMemberInviteCandidates, convex, createChannel, createChannelInviteCandidates, deleteAttachmentUpload, deleteChannel, deleteMessage, editChannel, editMessage, generateAttachmentUploadUrl, members, messagePagination, messages, registerAttachmentUpload, removePrivateChannelMember, selectedChannelId, sendMessage, toggleMessageReaction, workspace]
   )
 
   if (auth.isLoading) {

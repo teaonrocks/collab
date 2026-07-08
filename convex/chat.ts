@@ -124,7 +124,8 @@ const getDefaultChannel = (ctx: QueryCtx | MutationCtx, workspaceId: Id<"workspa
 const listWorkspaceChannels = async (ctx: QueryCtx | MutationCtx, workspaceId: Id<"workspaces">) => {
   const channels = await ctx.db
     .query("channels")
-    .withIndex("by_workspace", (q) => q.eq("workspaceId", workspaceId))
+    .withIndex("by_workspace_and_deleted_at", (q) =>
+      q.eq("workspaceId", workspaceId).eq("deletedAt", undefined))
     .take(MAX_CHANNELS)
 
   return channels
@@ -216,7 +217,8 @@ const listWorkspaceMembers = async (
 const listPublicWorkspaceChannelIds = async (ctx: QueryCtx | MutationCtx, workspaceId: Id<"workspaces">) => {
   const channels = await ctx.db
     .query("channels")
-    .withIndex("by_workspace", (q) => q.eq("workspaceId", workspaceId))
+    .withIndex("by_workspace_and_deleted_at", (q) =>
+      q.eq("workspaceId", workspaceId).eq("deletedAt", undefined))
     .take(MAX_CHANNELS)
 
   return channels
@@ -343,6 +345,22 @@ const requirePrivateChannelAdmin = async (
     .withIndex("by_channel_user", (q) => q.eq("channelId", input.channelId).eq("userId", input.userId))
     .unique()
   if (membership?.role !== "admin") throw new Error("Only channel admins can administer private channel membership")
+  return channel
+}
+
+const requireChannelManager = async (
+  ctx: QueryCtx | MutationCtx,
+  input: { readonly channelId: Id<"channels">; readonly userId: Id<"users"> }
+) => {
+  const channel = await requireChannelMember(ctx, input)
+  if (channel.deletedAt !== undefined) throw new Error("Channel not found")
+  if (channel.createdByUserId === input.userId) return channel
+
+  const membership = await ctx.db
+    .query("channelMemberships")
+    .withIndex("by_channel_user", (q) => q.eq("channelId", input.channelId).eq("userId", input.userId))
+    .unique()
+  if (membership?.role !== "admin") throw new Error("Only channel admins can manage this channel")
   return channel
 }
 
@@ -780,7 +798,8 @@ export const createChannel = mutation({
 
     const existingChannels = await ctx.db
       .query("channels")
-      .withIndex("by_workspace", (q) => q.eq("workspaceId", workspace._id))
+      .withIndex("by_workspace_and_deleted_at", (q) =>
+        q.eq("workspaceId", workspace._id).eq("deletedAt", undefined))
       .take(MAX_CHANNELS)
     if (existingChannels.length >= MAX_CHANNELS) {
       throw new Error(`Workspaces can contain at most ${MAX_CHANNELS} channels`)
@@ -792,6 +811,7 @@ export const createChannel = mutation({
       key,
       name,
       visibility,
+      createdByUserId: user._id,
       createdAt: now
     })
 
@@ -821,6 +841,42 @@ export const createChannel = mutation({
     const channel = await ctx.db.get(channelId)
     if (channel === null) throw new Error("Channel not found after insert")
     return toChannelView(channel)
+  })
+})
+
+export const editChannel = mutation({
+  args: { channelId: v.id("channels"), name: v.string() },
+  handler: (ctx, args) => withDogfoodDiagnostics("editChannel", { channelId: args.channelId }, async () => {
+    const user = await requireAllowedCurrentUser(ctx)
+    const channel = await requireChannelManager(ctx, { channelId: args.channelId, userId: user._id })
+    if (channel.key === DOGFOOD_CHANNEL_KEY) throw new Error("The default channel cannot be renamed")
+    const name = validateChannelName(args.name)
+    const key = channelKeyFromName(name)
+    const existing = await ctx.db
+      .query("channels")
+      .withIndex("by_workspace_key", (q) => q.eq("workspaceId", channel.workspaceId).eq("key", key))
+      .unique()
+    if (existing !== null && existing._id !== channel._id) {
+      throw new Error("Channel already exists")
+    }
+    await ctx.db.patch(channel._id, { key, name })
+    const updated = await ctx.db.get(channel._id)
+    if (updated === null) throw new Error("Channel not found after update")
+    return toChannelView(updated)
+  })
+})
+
+export const deleteChannel = mutation({
+  args: { channelId: v.id("channels") },
+  handler: (ctx, args) => withDogfoodDiagnostics("deleteChannel", { channelId: args.channelId }, async () => {
+    const user = await requireAllowedCurrentUser(ctx)
+    const channel = await requireChannelManager(ctx, { channelId: args.channelId, userId: user._id })
+    if (channel.key === DOGFOOD_CHANNEL_KEY) throw new Error("The default channel cannot be deleted")
+    await ctx.db.patch(channel._id, {
+      deletedAt: Date.now(),
+      key: `${channel.key}-deleted-${channel._id}`
+    })
+    return null
   })
 })
 

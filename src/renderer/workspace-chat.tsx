@@ -164,6 +164,8 @@ export function WorkspaceChat(props: {
   readonly discardMessageAttachment?: ChatDataView["discardMessageAttachment"]
   readonly deleteChannelMessage: ChatDataView["deleteChannelMessage"]
   readonly createChannel?: ChatDataView["createChannel"]
+  readonly editChannel?: ChatDataView["editChannel"]
+  readonly deleteChannel?: ChatDataView["deleteChannel"]
   readonly selectChannel?: SelectChatChannel
   readonly addChannelMember?: ChatDataView["addChannelMember"]
   readonly removeChannelMember?: ChatDataView["removeChannelMember"]
@@ -180,6 +182,8 @@ export function WorkspaceChat(props: {
   const {
     model,
     createChannel,
+    editChannel,
+    deleteChannel,
     selectChannel,
     createChannelMessage,
     uploadMessageAttachment,
@@ -419,7 +423,13 @@ export function WorkspaceChat(props: {
         channelOperationError={channelOperationError}
         createChannelInviteCandidates={model.createChannelInviteCandidates}
         createChannel={createChannel}
+        editChannel={editChannel}
+        deleteChannel={deleteChannel}
         onSelectChannel={selectChannel}
+        onManageChannel={(channelId) => {
+          selectChannel?.(channelId)
+          setMembersOpen(true)
+        }}
         onChannelOperationError={setChannelOperationError}
       />
 
@@ -648,7 +658,10 @@ function ChannelSidebar(props: {
   readonly channelOperationError: string | null
   readonly createChannelInviteCandidates?: ReadonlyArray<ChatChannelInviteCandidate>
   readonly createChannel?: ChatDataView["createChannel"]
+  readonly editChannel?: ChatDataView["editChannel"]
+  readonly deleteChannel?: ChatDataView["deleteChannel"]
   readonly onSelectChannel?: SelectChatChannel
+  readonly onManageChannel: (channelId: ChatChannelId) => void
   readonly onChannelOperationError: (message: string | null) => void
 }) {
   const {
@@ -661,7 +674,10 @@ function ChannelSidebar(props: {
     channelOperationError,
     createChannelInviteCandidates,
     createChannel,
+    editChannel,
+    deleteChannel,
     onSelectChannel,
+    onManageChannel,
     onChannelOperationError
   } = props
   const [creating, setCreating] = useState(false)
@@ -670,8 +686,24 @@ function ChannelSidebar(props: {
   const [inviteSearch, setInviteSearch] = useState("")
   const [selectedInviteeIds, setSelectedInviteeIds] = useState<ReadonlySet<string>>(new Set())
   const [saving, setSaving] = useState(false)
+  const [channelMenu, setChannelMenu] = useState<{ readonly channel: ChatChannel; readonly x: number; readonly y: number } | null>(null)
+  const [editingChannel, setEditingChannel] = useState<ChatChannel | null>(null)
+  const [deletingChannel, setDeletingChannel] = useState<ChatChannel | null>(null)
   const showAgentParkedPanel = import.meta.env.VITE_AETHER_SHOW_AGENT_UI === "true"
   const canCreate = createChannel !== undefined
+  useEffect(() => {
+    if (channelMenu === null) return
+    const close = () => setChannelMenu(null)
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close()
+    }
+    window.addEventListener("click", close)
+    window.addEventListener("keydown", closeOnEscape)
+    return () => {
+      window.removeEventListener("click", close)
+      window.removeEventListener("keydown", closeOnEscape)
+    }
+  }, [channelMenu])
   const closeCreateDialog = () => {
     if (saving) return
     setCreating(false)
@@ -744,6 +776,10 @@ function ChannelSidebar(props: {
                 aria-current={active ? "page" : undefined}
                 onClick={() => {
                   if (!active) onSelectChannel?.(channel.id)
+                }}
+                onContextMenu={(event) => {
+                  event.preventDefault()
+                  setChannelMenu({ channel, x: event.clientX, y: event.clientY })
                 }}
               >
                 <span className="channelNavMain min-w-0 flex flex-col gap-[3px]">
@@ -823,7 +859,147 @@ function ChannelSidebar(props: {
           />
         )
         : null}
+      {channelMenu === null
+        ? null
+        : (
+          <ChannelContextMenu
+            channel={channelMenu.channel}
+            x={channelMenu.x}
+            y={channelMenu.y}
+            canEdit={editChannel !== undefined}
+            canDelete={deleteChannel !== undefined}
+            onEdit={() => setEditingChannel(channelMenu.channel)}
+            onDelete={() => setDeletingChannel(channelMenu.channel)}
+            onManage={() => onManageChannel(channelMenu.channel.id)}
+            onClose={() => setChannelMenu(null)}
+          />
+        )}
+      {editingChannel === null || editChannel === undefined
+        ? null
+        : (
+          <EditChannelDialog
+            channel={editingChannel}
+            editChannel={editChannel}
+            onClose={() => setEditingChannel(null)}
+            onError={onChannelOperationError}
+          />
+        )}
+      {deletingChannel === null || deleteChannel === undefined
+        ? null
+        : (
+          <DeleteChannelDialog
+            channel={deletingChannel}
+            deleteChannel={deleteChannel}
+            onClose={() => setDeletingChannel(null)}
+            onError={onChannelOperationError}
+          />
+        )}
     </>
+  )
+}
+
+function ChannelContextMenu(props: {
+  readonly channel: ChatChannel
+  readonly x: number
+  readonly y: number
+  readonly canEdit: boolean
+  readonly canDelete: boolean
+  readonly onEdit: () => void
+  readonly onDelete: () => void
+  readonly onManage: () => void
+  readonly onClose: () => void
+}) {
+  const { channel, x, y, canEdit, canDelete, onEdit, onDelete, onManage, onClose } = props
+  const itemClassName = "min-h-[34px] w-full justify-start rounded-none border-0 border-b border-surface-rail bg-surface-raised px-2.5 text-left text-foreground last:border-b-0 hover:bg-surface-muted"
+  const select = (action: () => void) => {
+    action()
+    onClose()
+  }
+  return (
+    <div
+      className="channelContextMenu fixed z-40 flex min-w-[170px] flex-col overflow-hidden rounded-panel border border-border-strong bg-surface-raised shadow-popover"
+      role="menu"
+      aria-label={`Context menu for #${channel.name}`}
+      style={{ left: Math.min(x, window.innerWidth - 180), top: Math.min(y, window.innerHeight - 112) }}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <Button type="button" variant="ghost" className={itemClassName} role="menuitem" disabled={!canEdit} onClick={() => select(onEdit)}>
+        <Pencil className={iconClassName} aria-hidden="true" /><span>Edit</span>
+      </Button>
+      <Button type="button" variant="ghost" className={itemClassName} role="menuitem" disabled={!canDelete} onClick={() => select(onDelete)}>
+        <Trash2 className={iconClassName} aria-hidden="true" /><span>Delete</span>
+      </Button>
+      <Button type="button" variant="ghost" className={itemClassName} role="menuitem" onClick={() => select(onManage)}>
+        <UserRoundCog className={iconClassName} aria-hidden="true" /><span>Manage</span>
+      </Button>
+    </div>
+  )
+}
+
+function EditChannelDialog(props: {
+  readonly channel: ChatChannel
+  readonly editChannel: NonNullable<ChatDataView["editChannel"]>
+  readonly onClose: () => void
+  readonly onError: (message: string | null) => void
+}) {
+  const { channel, editChannel, onClose, onError } = props
+  const [draft, setDraft] = useState(channel.name)
+  const [saving, setSaving] = useState(false)
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const validation = validateChannelName(draft)
+    if (!validation.valid) return onError(validation.message)
+    setSaving(true)
+    onError(null)
+    void editChannel({ channelId: channel.id, name: validation.name })
+      .then(onClose)
+      .catch((cause: unknown) => onError(channelCreateErrorMessage(cause)))
+      .finally(() => setSaving(false))
+  }
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open && !saving) onClose() }}>
+      <DialogContent className="max-w-[400px]">
+        <DialogTitle>Edit channel</DialogTitle>
+        <DialogDescription className="sr-only">Rename #{channel.name}.</DialogDescription>
+        <form className="mt-3 flex flex-col gap-3" aria-label="Edit channel" onSubmit={submit}>
+          <Input value={draft} autoFocus disabled={saving} aria-label="Channel name" onChange={(event) => setDraft(event.target.value)} />
+          <DialogFooter>
+            <Button type="button" variant="ghost" disabled={saving} onClick={onClose}>Cancel</Button>
+            <Button type="submit" disabled={saving}>{saving ? "Saving..." : "Save"}</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function DeleteChannelDialog(props: {
+  readonly channel: ChatChannel
+  readonly deleteChannel: NonNullable<ChatDataView["deleteChannel"]>
+  readonly onClose: () => void
+  readonly onError: (message: string | null) => void
+}) {
+  const { channel, deleteChannel, onClose, onError } = props
+  const [deleting, setDeleting] = useState(false)
+  const confirm = () => {
+    setDeleting(true)
+    onError(null)
+    void deleteChannel({ channelId: channel.id })
+      .then(onClose)
+      .catch(() => onError("Could not delete channel. Check your permissions and try again."))
+      .finally(() => setDeleting(false))
+  }
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open && !deleting) onClose() }}>
+      <DialogContent className="max-w-[400px]">
+        <DialogTitle>Delete #{channel.name}?</DialogTitle>
+        <DialogDescription>This removes the channel from the workspace. This action cannot be undone.</DialogDescription>
+        <DialogFooter>
+          <Button type="button" variant="ghost" disabled={deleting} onClick={onClose}>Cancel</Button>
+          <Button type="button" variant="danger" disabled={deleting} onClick={confirm}>{deleting ? "Deleting..." : "Delete channel"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -2329,11 +2505,6 @@ function MembersPanel(props: {
   )
 }
 
-type MemberManagementFeedback = {
-  readonly kind: "success" | "error"
-  readonly message: string
-}
-
 function MemberManagementDialog(props: {
   readonly channel: ChatChannel
   readonly members: ReadonlyArray<ChatChannelMember>
@@ -2346,17 +2517,16 @@ function MemberManagementDialog(props: {
   const { channel, members, inviteCandidates, currentUserId, addChannelMember, removeChannelMember, onClose } = props
   const [pending, setPending] = useState<{ readonly action: "add" | "remove"; readonly userId: string } | null>(null)
   const [pendingRemoval, setPendingRemoval] = useState<ChatChannelMember | null>(null)
-  const [feedback, setFeedback] = useState<MemberManagementFeedback | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const adminCount = members.filter((member) => member.role === "admin").length
   const operationPending = pending !== null
 
   const runAdd = (candidate: ChatChannelInviteCandidate) => {
     if (operationPending) return
     setPending({ action: "add", userId: candidate.id })
-    setFeedback(null)
+    setError(null)
     void addChannelMember({ channelId: channel.id, userId: candidate.id })
-      .then(() => setFeedback({ kind: "success", message: `${candidate.displayName} was added.` }))
-      .catch(() => setFeedback({ kind: "error", message: `Could not add ${candidate.displayName}. Try again.` }))
+      .catch(() => setError(`Could not add ${candidate.displayName}. Try again.`))
       .finally(() => setPending(null))
   }
 
@@ -2364,13 +2534,12 @@ function MemberManagementDialog(props: {
     const member = pendingRemoval
     if (member === null || operationPending) return
     setPending({ action: "remove", userId: member.id })
-    setFeedback(null)
+    setError(null)
     void removeChannelMember({ channelId: channel.id, userId: member.id })
       .then(() => {
         setPendingRemoval(null)
-        setFeedback({ kind: "success", message: `${member.displayName} was removed.` })
       })
-      .catch(() => setFeedback({ kind: "error", message: `Could not remove ${member.displayName}. Try again.` }))
+      .catch(() => setError(`Could not remove ${member.displayName}. Try again.`))
       .finally(() => setPending(null))
   }
 
@@ -2445,9 +2614,9 @@ function MemberManagementDialog(props: {
                       )}
                 </section>
               </div>
-              <p className={classNames("mb-0 mt-3 min-h-[18px] text-xs", feedback?.kind === "error" ? "text-destructive-text" : "text-foreground-subtle")} role={feedback?.kind === "error" ? "alert" : "status"} aria-live="polite">
-                {feedback?.message ?? ""}
-              </p>
+              {error === null
+                ? null
+                : <p className="mb-0 mt-3 text-xs text-destructive-text" role="alert">{error}</p>}
               <DialogFooter>
                 <Button type="button" variant="secondary" size="sm" disabled={operationPending} onClick={onClose}>Done</Button>
               </DialogFooter>
@@ -2461,13 +2630,13 @@ function MemberManagementDialog(props: {
                   ? "Your access ends immediately. You will be moved to an accessible channel."
                   : "Their access ends immediately, including this channel's messages and member list."}
               </DialogDescription>
-              {feedback?.kind === "error"
-                ? <p className="mb-0 mt-3 text-xs text-destructive-text" role="alert">{feedback.message}</p>
-                : null}
+              {error === null
+                ? null
+                : <p className="mb-0 mt-3 text-xs text-destructive-text" role="alert">{error}</p>}
               <DialogFooter>
                 <Button type="button" variant="secondary" size="sm" disabled={operationPending} onClick={() => {
                   setPendingRemoval(null)
-                  setFeedback(null)
+                  setError(null)
                 }}>Cancel</Button>
                 <Button type="button" variant="danger" size="sm" disabled={operationPending} onClick={confirmRemoval}>
                   {operationPending ? "Removing..." : pendingRemoval.id === currentUserId ? "Leave channel" : "Remove member"}

@@ -1335,7 +1335,8 @@ describe("WorkspaceChat", () => {
     expect(addChannelMember).toHaveBeenCalledWith({ channelId, userId: "human-2" })
     expect(within(dialog).getByRole("button", { name: "Adding..." }).hasAttribute("disabled")).toBe(true)
     resolveAdd?.()
-    expect(await within(dialog).findByText("Lee Chen was added.")).toBeTruthy()
+    await waitFor(() => expect(within(dialog).queryByRole("button", { name: "Adding..." })).toBeNull())
+    expect(within(dialog).queryByText("Lee Chen was added.")).toBeNull()
 
     rerender(
       <WorkspaceChat
@@ -2006,6 +2007,52 @@ describe("WorkspaceChat", () => {
     fireEvent.click(showMembersButton)
 
     expect(screen.getByRole("button", { name: "Hide members" }).getAttribute("aria-pressed")).toBe("true")
+  })
+
+  it("offers edit, delete, and manage from a channel right-click menu", async () => {
+    const edits: unknown[] = []
+    const deletions: unknown[] = []
+    const selections: string[] = []
+    render(
+      <WorkspaceChat
+        model={makeChatModel()}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+        selectChannel={(id) => selections.push(id)}
+        editChannel={(input) => {
+          edits.push(input)
+          return Promise.resolve(makeChannel({ id: input.channelId, name: input.name, visibility: "private" }))
+        }}
+        deleteChannel={(input) => {
+          deletions.push(input)
+          return Promise.resolve()
+        }}
+      />
+    )
+
+    const channelButton = within(screen.getByLabelText("Channels")).getByRole("button", { name: /origination/ })
+    fireEvent.contextMenu(channelButton, { clientX: 24, clientY: 40 })
+    let menu = await screen.findByRole("menu", { name: "Context menu for #origination" })
+    expect(within(menu).getByRole("menuitem", { name: "Manage" })).toBeTruthy()
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Edit" }))
+
+    const editDialog = await screen.findByRole("dialog", { name: "Edit channel" })
+    fireEvent.change(within(editDialog).getByLabelText("Channel name"), { target: { value: "Product Team" } })
+    fireEvent.click(within(editDialog).getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(edits).toEqual([{ channelId, name: "product-team" }]))
+
+    fireEvent.contextMenu(channelButton, { clientX: 24, clientY: 40 })
+    menu = await screen.findByRole("menu", { name: "Context menu for #origination" })
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Delete" }))
+    const deleteDialog = await screen.findByRole("dialog", { name: "Delete #origination?" })
+    fireEvent.click(within(deleteDialog).getByRole("button", { name: "Delete channel" }))
+    await waitFor(() => expect(deletions).toEqual([{ channelId }]))
+
+    fireEvent.contextMenu(channelButton, { clientX: 24, clientY: 40 })
+    menu = await screen.findByRole("menu", { name: "Context menu for #origination" })
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Manage" }))
+    expect(selections).toContain(channelId)
+    expect(screen.getByRole("button", { name: "Hide members" })).toBeTruthy()
   })
 
   it("opens and closes message search from the header toggle and keyboard shortcut", async () => {

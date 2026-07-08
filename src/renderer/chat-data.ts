@@ -94,6 +94,13 @@ export type CreateChatChannel = (input: {
 
 export type SelectChatChannel = (channelId: ChatChannelId) => void
 
+export type EditChatChannel = (input: {
+  readonly channelId: ChatChannelId
+  readonly name: string
+}) => Promise<ChatChannel>
+
+export type DeleteChatChannel = (input: { readonly channelId: ChatChannelId }) => Promise<unknown>
+
 export type AddChatChannelMember = (input: {
   readonly channelId: ChatChannelId
   readonly userId: ChatChannelMember["id"]
@@ -139,6 +146,8 @@ export type ChatOperationErrorMessage = (operation: ChatOperation, cause: unknow
 export type ChatDataView = {
   readonly model: ChatDataModel
   readonly createChannel?: CreateChatChannel
+  readonly editChannel?: EditChatChannel
+  readonly deleteChannel?: DeleteChatChannel
   readonly selectChannel?: SelectChatChannel
   readonly addChannelMember?: AddChatChannelMember
   readonly removeChannelMember?: RemoveChatChannelMember

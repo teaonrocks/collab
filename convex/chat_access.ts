@@ -157,7 +157,7 @@ export const requireChannelMember = async (
   }
 ) => {
   const channel = await ctx.db.get(input.channelId)
-  if (channel === null) throw new Error("Channel not found")
+  if (channel === null || channel.deletedAt !== undefined) throw new Error("Channel not found")
   await requireWorkspaceMember(ctx, { workspaceId: channel.workspaceId, userId: input.userId })
   const channelMembership = await ctx.db
     .query("channelMemberships")

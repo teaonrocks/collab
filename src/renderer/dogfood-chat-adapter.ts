@@ -35,6 +35,8 @@ export type DogfoodChatAdapterInput = {
     readonly createChannel?: (
       input: FunctionArgs<typeof api.chat.createChannel>
     ) => Promise<FunctionReturnType<typeof api.chat.createChannel>>
+    readonly editChannel?: (input: FunctionArgs<typeof api.chat.editChannel>) => Promise<FunctionReturnType<typeof api.chat.editChannel>>
+    readonly deleteChannel?: (input: FunctionArgs<typeof api.chat.deleteChannel>) => Promise<unknown>
     readonly selectChannel?: (channelId: Id<"channels">) => void
     readonly addChannelMember?: (
       input: FunctionArgs<typeof api.chat.addPrivateChannelMember>
@@ -106,6 +108,15 @@ export const dogfoodChatToChatData = ({ data, state, commands }: DogfoodChatAdap
             ? {}
             : { initialMemberIds: initialMemberIds.map((userId) => convexId<"users">(userId)) })
         })),
+    editChannel: commands.editChannel === undefined
+      ? undefined
+      : async ({ channelId, name }) => toChatChannel(await commands.editChannel!({
+          channelId: convexId<"channels">(channelId),
+          name
+        })),
+    deleteChannel: commands.deleteChannel === undefined
+      ? undefined
+      : ({ channelId }) => commands.deleteChannel!({ channelId: convexId<"channels">(channelId) }),
     selectChannel: commands.selectChannel === undefined
       ? undefined
       : (channelId) => commands.selectChannel?.(convexId<"channels">(channelId)),

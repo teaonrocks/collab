@@ -32,6 +32,8 @@ const mocks = vi.hoisted(() => ({
   deleteMessage: vi.fn(),
   toggleMessageReaction: vi.fn(),
   createChannel: vi.fn(),
+  editChannel: vi.fn(),
+  deleteChannel: vi.fn(),
   addPrivateChannelMember: vi.fn(),
   removePrivateChannelMember: vi.fn(),
   ensureChannelMember: vi.fn(),
@@ -68,6 +70,8 @@ vi.mock("convex/react", () => ({
       mocks.deleteMessage,
       mocks.toggleMessageReaction,
       mocks.createChannel,
+      mocks.editChannel,
+      mocks.deleteChannel,
       mocks.addPrivateChannelMember,
       mocks.removePrivateChannelMember,
       mocks.ensureChannelMember,
@@ -75,7 +79,7 @@ vi.mock("convex/react", () => ({
       mocks.generateAttachmentUploadUrl,
       mocks.registerAttachmentUpload,
       mocks.deleteAttachmentUpload
-    ][mocks.mutationCallCount % 12]
+    ][mocks.mutationCallCount % 14]
     mocks.mutationCallCount += 1
     return mutation
   },

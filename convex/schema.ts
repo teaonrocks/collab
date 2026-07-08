@@ -43,8 +43,12 @@ export default defineSchema({
     key: v.string(),
     name: v.string(),
     visibility: v.union(v.literal("public"), v.literal("private")),
+    createdByUserId: v.optional(v.id("users")),
+    deletedAt: v.optional(v.number()),
     createdAt: v.number()
-  }).index("by_workspace", ["workspaceId"]).index("by_workspace_key", ["workspaceId", "key"]),
+  }).index("by_workspace", ["workspaceId"])
+    .index("by_workspace_and_deleted_at", ["workspaceId", "deletedAt"])
+    .index("by_workspace_key", ["workspaceId", "key"]),
 
   channelMemberships: defineTable({
     channelId: v.id("channels"),
