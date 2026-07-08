@@ -19,7 +19,8 @@ export default defineSchema({
     email: v.string(),
     displayName: v.string(),
     createdAt: v.number(),
-    updatedAt: v.number()
+    updatedAt: v.number(),
+    deletedAt: v.optional(v.number())
   }).index("by_token_identifier", ["tokenIdentifier"]).index("by_email", ["email"]),
 
   workspaces: defineTable({
@@ -43,21 +44,28 @@ export default defineSchema({
     key: v.string(),
     name: v.string(),
     visibility: v.union(v.literal("public"), v.literal("private")),
+    kind: v.optional(v.literal("direct")),
+    directPairKey: v.optional(v.string()),
     createdByUserId: v.optional(v.id("users")),
     deletedAt: v.optional(v.number()),
     createdAt: v.number()
   }).index("by_workspace", ["workspaceId"])
     .index("by_workspace_and_deleted_at", ["workspaceId", "deletedAt"])
-    .index("by_workspace_key", ["workspaceId", "key"]),
+    .index("by_workspace_kind_and_deleted_at", ["workspaceId", "kind", "deletedAt"])
+    .index("by_workspace_key", ["workspaceId", "key"])
+    .index("by_workspace_and_direct_pair_key", ["workspaceId", "directPairKey"]),
 
   channelMemberships: defineTable({
     channelId: v.id("channels"),
+    workspaceId: v.optional(v.id("workspaces")),
     userId: v.id("users"),
     role: channelRole,
     createdAt: v.number(),
     lastReadAt: v.optional(v.number()),
     mentionTrackingStartedAt: v.optional(v.number())
-  }).index("by_channel", ["channelId"]).index("by_user", ["userId"]).index("by_channel_user", [
+  }).index("by_channel", ["channelId"]).index("by_user", ["userId"])
+    .index("by_user_and_workspace", ["userId", "workspaceId"])
+    .index("by_channel_user", [
     "channelId",
     "userId"
   ]),

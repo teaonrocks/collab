@@ -93,6 +93,7 @@ export const requireAllowedCurrentUser = async (
   const identity = await requireIdentity(ctx)
   const user = await getUserByTokenIdentifier(ctx, identity.tokenIdentifier)
   if (user === null) throw new Error("Current user has not been initialized")
+  if (user.deletedAt !== undefined) throw new Error("Current user has been deleted")
   await requireAllowedEmail(ctx, user.email)
   return user
 }

@@ -124,8 +124,8 @@ const getDefaultChannel = (ctx: QueryCtx | MutationCtx, workspaceId: Id<"workspa
 const listWorkspaceChannels = async (ctx: QueryCtx | MutationCtx, workspaceId: Id<"workspaces">) => {
   const channels = await ctx.db
     .query("channels")
-    .withIndex("by_workspace_and_deleted_at", (q) =>
-      q.eq("workspaceId", workspaceId).eq("deletedAt", undefined))
+    .withIndex("by_workspace_kind_and_deleted_at", (q) =>
+      q.eq("workspaceId", workspaceId).eq("kind", undefined).eq("deletedAt", undefined))
     .take(MAX_CHANNELS)
 
   return channels
@@ -217,8 +217,8 @@ const listWorkspaceMembers = async (
 const listPublicWorkspaceChannelIds = async (ctx: QueryCtx | MutationCtx, workspaceId: Id<"workspaces">) => {
   const channels = await ctx.db
     .query("channels")
-    .withIndex("by_workspace_and_deleted_at", (q) =>
-      q.eq("workspaceId", workspaceId).eq("deletedAt", undefined))
+    .withIndex("by_workspace_kind_and_deleted_at", (q) =>
+      q.eq("workspaceId", workspaceId).eq("kind", undefined).eq("deletedAt", undefined))
     .take(MAX_CHANNELS)
 
   return channels
@@ -338,7 +338,9 @@ const requirePrivateChannelAdmin = async (
   }
 ) => {
   const channel = await requireChannelMember(ctx, input)
-  if (channel.visibility !== "private") throw new Error("Private channel membership can only be administered for private channels")
+  if (channel.kind === "direct" || channel.visibility !== "private") {
+    throw new Error("Private channel membership can only be administered for private channels")
+  }
 
   const membership = await ctx.db
     .query("channelMemberships")
@@ -354,6 +356,7 @@ const requireChannelManager = async (
 ) => {
   const channel = await requireChannelMember(ctx, input)
   if (channel.deletedAt !== undefined) throw new Error("Channel not found")
+  if (channel.kind === "direct") throw new Error("Direct conversations cannot be managed as channels")
   if (channel.createdByUserId === input.userId) return channel
 
   const membership = await ctx.db
@@ -704,6 +707,10 @@ export const ensureChannelMember = mutation({
     const user = await requireAllowedCurrentUser(ctx)
     const channel = await ctx.db.get(args.channelId)
     if (channel === null) throw new Error("Channel not found")
+    if (channel.kind === "direct") {
+      await requireChannelMember(ctx, { channelId: channel._id, userId: user._id })
+      return toChannelView(channel)
+    }
 
     await requireWorkspaceMember(ctx, { workspaceId: channel.workspaceId, userId: user._id })
     if (channel.visibility !== "public") {
@@ -798,8 +805,8 @@ export const createChannel = mutation({
 
     const existingChannels = await ctx.db
       .query("channels")
-      .withIndex("by_workspace_and_deleted_at", (q) =>
-        q.eq("workspaceId", workspace._id).eq("deletedAt", undefined))
+      .withIndex("by_workspace_kind_and_deleted_at", (q) =>
+        q.eq("workspaceId", workspace._id).eq("kind", undefined).eq("deletedAt", undefined))
       .take(MAX_CHANNELS)
     if (existingChannels.length >= MAX_CHANNELS) {
       throw new Error(`Workspaces can contain at most ${MAX_CHANNELS} channels`)
