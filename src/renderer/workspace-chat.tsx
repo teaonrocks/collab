@@ -29,6 +29,7 @@ import type {
   ChatChannelIndicator,
   ChatChannelInviteCandidate,
   ChatChannelMember,
+  ChatDirectConversation,
   ChatDataModel,
   ChatDataView,
   ChatMessage,
@@ -39,6 +40,7 @@ import type {
   SearchChatMessages,
   SelectChatChannel
 } from "./chat-data"
+import { activeConversationId, activeConversationName } from "./chat-data"
 import {
   type MessageRowState,
   useMessageInteractions
@@ -167,6 +169,7 @@ export function WorkspaceChat(props: {
   readonly editChannel?: ChatDataView["editChannel"]
   readonly deleteChannel?: ChatDataView["deleteChannel"]
   readonly selectChannel?: SelectChatChannel
+  readonly selectDirectConversation?: ChatDataView["selectDirectConversation"]
   readonly addChannelMember?: ChatDataView["addChannelMember"]
   readonly removeChannelMember?: ChatDataView["removeChannelMember"]
   readonly editChannelMessage?: ChatDataView["editChannelMessage"]
@@ -185,6 +188,7 @@ export function WorkspaceChat(props: {
     editChannel,
     deleteChannel,
     selectChannel,
+    selectDirectConversation,
     createChannelMessage,
     uploadMessageAttachment,
     discardMessageAttachment,
@@ -201,6 +205,12 @@ export function WorkspaceChat(props: {
     operationErrorMessage,
     profileMenuActions = []
   } = props
+  const activeConversation = model.activeConversation.kind === "channel"
+    ? { kind: "channel" as const, channel: model.channel }
+    : model.activeConversation
+  const activeId = activeConversationId(activeConversation)
+  const activeName = activeConversationName(activeConversation)
+  const activeChannel = activeConversation.kind === "channel" ? activeConversation.channel : null
   const [messageDraft, setMessageDraft] = useState("")
   const [operationError, setOperationError] = useState<string | null>(null)
   const [channelOperationError, setChannelOperationError] = useState<string | null>(null)
@@ -212,7 +222,7 @@ export function WorkspaceChat(props: {
   const searchInputRef = useRef<HTMLInputElement>(null)
   const [replyParent, setReplyParent] = useState<ChatMessage | null>(null)
   const attachmentDraft = useAttachmentDraft({
-    channelId: model.channel.id,
+    channelId: activeId,
     upload: uploadMessageAttachment,
     discard: discardMessageAttachment,
     operationErrorMessage,
@@ -242,7 +252,7 @@ export function WorkspaceChat(props: {
   const [directMessageMembers, setDirectMessageMembers] = useState<ReadonlyArray<ChatChannelMember>>([])
   const visibleMembers = model.channelMembers ?? directMessageMembers
   const messageInteractions = useMessageInteractions({
-    channelId: model.channel.id,
+    channelId: activeId,
     messages: model.channelMessages,
     deleteChannelMessage,
     editChannelMessage,
@@ -268,7 +278,7 @@ export function WorkspaceChat(props: {
     let cancelled = false
     setRemoteMessageSearchState({ status: "loading" })
     const timeout = window.setTimeout(() => {
-      void searchChannelHistory({ channelId: model.channel.id, query })
+      void searchChannelHistory({ channelId: activeId, query })
         .then((messages) => {
           if (cancelled) return
           setRemoteMessageSearchState(messages.length === 0
@@ -284,7 +294,7 @@ export function WorkspaceChat(props: {
       cancelled = true
       window.clearTimeout(timeout)
     }
-  }, [messageSearchQuery, model.channel.id, searchChannelHistory])
+  }, [activeId, messageSearchQuery, searchChannelHistory])
 
   useEffect(() => {
     setMessageDraft("")
@@ -294,7 +304,7 @@ export function WorkspaceChat(props: {
     setMessageSearchQuery("")
     setActiveSearchMessageId(null)
     setReplyParent(null)
-  }, [model.channel.id])
+  }, [activeId])
 
   useEffect(() => {
     if (replyParent === null) return
@@ -365,7 +375,7 @@ export function WorkspaceChat(props: {
 
   const toggleReaction = (message: ChatMessage, emoji: string): Promise<void> => {
     if (toggleMessageReaction === undefined) return Promise.resolve()
-    return toggleMessageReaction({ channelId: model.channel.id, messageId: message.id, emoji })
+    return toggleMessageReaction({ channelId: activeId, messageId: message.id, emoji })
       .then(() => setOperationError(null))
       .catch((cause: unknown) => {
         setOperationError(operationErrorMessage?.("react", cause) ?? "Could not update reaction.")
@@ -379,7 +389,7 @@ export function WorkspaceChat(props: {
     if (body.length === 0 && attachmentDraft.attachments.length === 0) return
     setOperationError(null)
     void attachmentDraft.send((attachments) => createChannelMessage({
-      channelId: model.channel.id,
+      channelId: activeId,
       body,
       parentMessageId: replyParent?.id ?? null,
       ...(attachments.length === 0 ? {} : { attachments })
@@ -406,7 +416,9 @@ export function WorkspaceChat(props: {
       <WorkspaceRail
         workspaceName={model.workspace.name}
         currentUserName={model.currentUser.displayName}
-        members={directMessageMembers}
+        conversations={model.directConversations}
+        activeConversationId={activeConversation.kind === "direct" ? activeId : null}
+        onSelectConversation={selectDirectConversation}
         profileMenuOpen={profileMenuOpen}
         profileMenuActions={profileMenuActions}
         onOpenProfileMenu={() => setProfileMenuOpen(true)}
@@ -416,9 +428,9 @@ export function WorkspaceChat(props: {
       <ChannelSidebar
         workspaceName={model.workspace.name}
         channels={model.channels}
-        activeChannelId={model.channel.id}
-        channelName={model.channel.name}
-        channelVisibility={model.channel.visibility}
+        activeChannelId={activeChannel?.id ?? null}
+        channelName={activeChannel?.name ?? ""}
+        channelVisibility={activeChannel?.visibility ?? "private"}
         channelIndicators={view.channelIndicators}
         channelOperationError={channelOperationError}
         createChannelInviteCandidates={model.createChannelInviteCandidates}
@@ -434,7 +446,8 @@ export function WorkspaceChat(props: {
       />
 
       <ChannelHeader
-        channelName={model.channel.name}
+        channelName={activeName}
+        direct={activeConversation.kind === "direct"}
         searchOpen={searchOpen}
         membersOpen={membersOpen}
         onToggleSearch={() => {
@@ -443,11 +456,11 @@ export function WorkspaceChat(props: {
             return !open
           })
         }}
-        onToggleMembers={() => setMembersOpen((open) => !open)}
+        onToggleMembers={() => { if (activeChannel !== null) setMembersOpen((open) => !open) }}
       />
 
       <ChatPane
-        channelName={model.channel.name}
+        channelName={activeName}
         messageGroups={messageGroups}
         loading={channelMessagesLoading}
         messageDraft={messageDraft}
@@ -498,8 +511,8 @@ export function WorkspaceChat(props: {
         onOpenMessageMenu={messageInteractions.openMessageMenu}
       />
 
-      <MembersPanel
-        channel={model.channel}
+      {activeChannel === null ? null : <MembersPanel
+        channel={activeChannel}
         members={visibleMembers}
         inviteCandidates={model.channelMemberInviteCandidates}
         currentUserId={model.currentUser.id}
@@ -507,7 +520,7 @@ export function WorkspaceChat(props: {
         open={membersOpen}
         addChannelMember={addChannelMember}
         removeChannelMember={removeChannelMember}
-      />
+      />}
 
       {menuMessage === null || messageMenu === null
         ? null
@@ -545,7 +558,9 @@ export function WorkspaceChat(props: {
 function WorkspaceRail(props: {
   readonly workspaceName: string
   readonly currentUserName: string
-  readonly members: ReadonlyArray<ChatChannelMember>
+  readonly conversations: ReadonlyArray<ChatDirectConversation>
+  readonly activeConversationId: ChatChannelId | null
+  readonly onSelectConversation?: ChatDataView["selectDirectConversation"]
   readonly profileMenuOpen: boolean
   readonly profileMenuActions: ReadonlyArray<ProfileMenuAction>
   readonly onOpenProfileMenu: () => void
@@ -554,7 +569,9 @@ function WorkspaceRail(props: {
   const {
     workspaceName,
     currentUserName,
-    members,
+    conversations,
+    activeConversationId,
+    onSelectConversation,
     profileMenuOpen,
     profileMenuActions,
     onOpenProfileMenu,
@@ -578,16 +595,18 @@ function WorkspaceRail(props: {
       </nav>
       <div className="railDivider h-px w-8 shrink-0 bg-border-strong" role="separator" aria-label="Direct messages" />
       <nav className="railGroup flex w-full flex-col items-center gap-2" aria-label="Direct messages">
-        {members.map((member) => (
-          <div
-            key={member.id}
-            className={classNames(railItemClassName, "dmRailItem cursor-default rounded-full")}
-            aria-label={member.displayName}
-            title={`${member.displayName} — direct messages are not available yet`}
+        {conversations.map((conversation) => (
+          <button
+            key={conversation.id}
+            type="button"
+            className={classNames(railItemClassName, "dmRailItem rounded-full", conversation.id === activeConversationId && "active bg-surface-canvas outline-2 outline-border")}
+            aria-label={conversation.otherUser.displayName}
+            aria-current={conversation.id === activeConversationId ? "page" : undefined}
+            onClick={() => onSelectConversation?.(conversation.id)}
           >
-            {initials(member.displayName)}
-            <span className={railTooltipClassName} role="tooltip">{member.displayName}</span>
-          </div>
+            {initials(conversation.otherUser.displayName)}
+            <span className={railTooltipClassName} role="tooltip">{conversation.otherUser.displayName}</span>
+          </button>
         ))}
       </nav>
       <div className="railSpacer flex-1" />
@@ -651,7 +670,7 @@ function WorkspaceRail(props: {
 function ChannelSidebar(props: {
   readonly workspaceName: string
   readonly channels: ReadonlyArray<ChatChannel>
-  readonly activeChannelId: ChatChannelId
+  readonly activeChannelId: ChatChannelId | null
   readonly channelName: string
   readonly channelVisibility: ChatChannel["visibility"]
   readonly channelIndicators: ReadonlyMap<ChatChannelId, ChatChannelIndicator>
@@ -1190,22 +1209,23 @@ function ChannelGlyph(props: { readonly visibility?: ChatChannel["visibility"] }
 
 function ChannelHeader(props: {
   readonly channelName: string
+  readonly direct?: boolean
   readonly searchOpen: boolean
   readonly membersOpen: boolean
   readonly onToggleSearch: () => void
   readonly onToggleMembers: () => void
 }) {
-  const { channelName, searchOpen, membersOpen, onToggleSearch, onToggleMembers } = props
+  const { channelName, direct = false, searchOpen, membersOpen, onToggleSearch, onToggleMembers } = props
   const searchToggleLabel = searchOpen ? "Hide search" : "Show search"
   const membersToggleLabel = membersOpen ? "Hide members" : "Show members"
   return (
     <header className="chatHeader flex min-h-0 min-w-0 items-center justify-between gap-3 border-b border-border bg-surface-canvas px-4 py-2 [grid-area:header]">
       <div className="channelTitle flex min-w-0 items-center gap-2">
-        <Hash className={classNames("channelHashIcon shrink-0 text-foreground-subtle", iconClassName)} aria-hidden="true" />
+        {direct ? null : <Hash className={classNames("channelHashIcon shrink-0 text-foreground-subtle", iconClassName)} aria-hidden="true" />}
         <h2 className="m-0 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-lg leading-tight tracking-normal text-foreground">{channelName}</h2>
       </div>
       <div className="chatHeaderActions flex items-center justify-end gap-2 text-xs text-foreground-subtle" aria-label="Channel actions">
-        <button
+        {direct ? null : <button
           type="button"
           className={classNames(
             "searchToggle grid min-h-[30px] w-8 cursor-pointer place-items-center rounded-control border border-border-strong bg-surface-canvas p-0 font-[inherit] text-ring hover:border-ring hover:bg-surface-muted hover:text-foreground-subtle focus-visible:border-ring focus-visible:bg-surface-muted focus-visible:text-foreground-subtle",
@@ -1217,7 +1237,7 @@ function ChannelHeader(props: {
           onClick={onToggleSearch}
         >
           <Search className={iconClassName} aria-hidden="true" />
-        </button>
+        </button>}
         <button
           type="button"
           className={classNames(

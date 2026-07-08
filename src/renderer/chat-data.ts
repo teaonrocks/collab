@@ -16,6 +16,21 @@ export type ChatChannel = {
   readonly visibility: "public" | "private"
 }
 
+export type ChatDirectConversation = {
+  readonly id: ChatChannelId
+  readonly otherUser: ChatChannelMember
+}
+
+export type ChatActiveConversation =
+  | { readonly kind: "channel"; readonly channel: ChatChannel }
+  | { readonly kind: "direct"; readonly directConversation: ChatDirectConversation }
+
+export const activeConversationId = (conversation: ChatActiveConversation): ChatChannelId =>
+  conversation.kind === "channel" ? conversation.channel.id : conversation.directConversation.id
+
+export const activeConversationName = (conversation: ChatActiveConversation): string =>
+  conversation.kind === "channel" ? conversation.channel.name : conversation.directConversation.otherUser.displayName
+
 export type ChatChannelMember = {
   readonly id: string
   readonly displayName: string
@@ -74,7 +89,9 @@ export type ChatDataModel = {
   readonly currentUser: ChatCurrentUser
   readonly workspace: ChatWorkspace
   readonly channel: ChatChannel
+  readonly activeConversation: ChatActiveConversation
   readonly channels: ReadonlyArray<ChatChannel>
+  readonly directConversations: ReadonlyArray<ChatDirectConversation>
   readonly channelMessages: ReadonlyArray<ChatMessage>
   readonly channelMembers?: ReadonlyArray<ChatChannelMember>
   readonly channelMemberInviteCandidates?: ReadonlyArray<ChatChannelInviteCandidate>
@@ -93,6 +110,7 @@ export type CreateChatChannel = (input: {
 }) => Promise<ChatChannel>
 
 export type SelectChatChannel = (channelId: ChatChannelId) => void
+export type SelectChatDirectConversation = (conversationId: ChatChannelId) => void
 
 export type EditChatChannel = (input: {
   readonly channelId: ChatChannelId
@@ -149,6 +167,7 @@ export type ChatDataView = {
   readonly editChannel?: EditChatChannel
   readonly deleteChannel?: DeleteChatChannel
   readonly selectChannel?: SelectChatChannel
+  readonly selectDirectConversation?: SelectChatDirectConversation
   readonly addChannelMember?: AddChatChannelMember
   readonly removeChannelMember?: RemoveChatChannelMember
   readonly createChannelMessage: CreateChatMessage

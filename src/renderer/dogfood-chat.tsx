@@ -10,6 +10,8 @@ import {
   type DogfoodChannelMemberView,
   type DogfoodChannelMessageView,
   type DogfoodChannelView,
+  type DogfoodActiveConversation,
+  type DogfoodDirectConversationView,
   type DogfoodWorkspaceView
 } from "./dogfood-chat-adapter"
 import { openExternalUrl } from "./electron-shell"
@@ -75,7 +77,8 @@ function ConvexDogfoodChat() {
   const registerAttachmentUpload = useMutation(api.chat.registerAttachmentUpload)
   const deleteAttachmentUpload = useMutation(api.chat.deleteAttachmentUpload)
   const [ensuredUserId, setEnsuredUserId] = useState<string | null>(null)
-  const [selectedChannelId, setSelectedChannelId] = useState<Id<"channels"> | null>(null)
+  const [selectedConversation, setSelectedConversation] = useState<DogfoodActiveConversation | null>(null)
+  const [stableDirectConversations, setStableDirectConversations] = useState<ReadonlyArray<DogfoodDirectConversationView>>([])
   const [joinedChannelIds, setJoinedChannelIds] = useState<ReadonlySet<Id<"channels">>>(() => new Set())
   const [createdChannels, setCreatedChannels] = useState<ReadonlyArray<DogfoodChannelView>>([])
   const [error, setError] = useState<ConvexDogfoodError | null>(null)
@@ -94,14 +97,28 @@ function ConvexDogfoodChat() {
     () => channels === undefined ? undefined : mergeDogfoodChannels(channels, createdChannels),
     [channels, createdChannels]
   )
-  const activeChannel = selectedChannelId === null
+  const directConversations = useQuery(
+    api.direct_conversations.list,
+    workspace === undefined || workspace === null ? "skip" : { workspaceId: workspace.workspace.id }
+  )
+  useEffect(() => {
+    if (directConversations !== undefined) setStableDirectConversations(directConversations)
+  }, [directConversations])
+  const activeKind = selectedConversation?.kind ?? "channel"
+  const selectedChannelId = selectedConversation?.kind === "channel" ? selectedConversation.id : null
+  const activeChannel = activeKind === "direct"
+    ? undefined
+    : selectedChannelId === null
     ? workspace?.channel
     : channelList?.find((channel) => channel.id === selectedChannelId) ?? workspace?.channel
-  const activeChannelId = activeChannel?.id
+  const activeDirectConversation = selectedConversation?.kind === "direct"
+    ? stableDirectConversations.find((conversation) => conversation.id === selectedConversation.id)
+    : undefined
+  const activeChannelId = activeDirectConversation?.id ?? activeChannel?.id
   const activeChannelJoined = activeChannelId === undefined ? false : joinedChannelIds.has(activeChannelId)
   const messagePagination = usePaginatedQuery(
     api.chat.channelMessages,
-    activeChannelId === undefined || !activeChannelJoined ? "skip" : { channelId: activeChannelId },
+    activeChannelId === undefined || (activeKind === "channel" && !activeChannelJoined) ? "skip" : { channelId: activeChannelId },
     { initialNumItems: 50 }
   )
   const messages = useMemo(
@@ -110,7 +127,7 @@ function ConvexDogfoodChat() {
   )
   const members = useQuery(
     api.chat.channelMembers,
-    activeChannelId === undefined || !activeChannelJoined ? "skip" : { channelId: activeChannelId }
+    activeKind === "direct" || activeChannelId === undefined || !activeChannelJoined ? "skip" : { channelId: activeChannelId }
   )
   const currentUserIsPrivateChannelAdmin = activeChannel?.visibility === "private" && members?.some((member) =>
     member.id === workspace?.currentUser.id && member.role === "admin"
@@ -137,7 +154,7 @@ function ConvexDogfoodChat() {
   }, [workspace])
 
   useEffect(() => {
-    if (!viewerReady || activeChannelId === undefined || activeChannelJoined) return
+    if (!viewerReady || activeKind === "direct" || activeChannelId === undefined || activeChannelJoined) return
 
     let cancelled = false
     void ensureChannelMember({ channelId: activeChannelId })
@@ -159,10 +176,10 @@ function ConvexDogfoodChat() {
     return () => {
       cancelled = true
     }
-  }, [activeChannelId, activeChannelJoined, ensureChannelMember, viewerReady])
+  }, [activeChannelId, activeChannelJoined, activeKind, ensureChannelMember, viewerReady])
 
   useEffect(() => {
-    if (!viewerReady || activeChannelId === undefined || !activeChannelJoined || messagePagination.status === "LoadingFirstPage") return
+    if (!viewerReady || activeChannelId === undefined || (activeKind === "channel" && !activeChannelJoined) || messagePagination.status === "LoadingFirstPage") return
     const readThroughMessageId = latestMessageId(messages)
     if (readThroughMessageId === null) return
     const readMarker = `${activeChannelId}:${readThroughMessageId}`
@@ -172,14 +189,22 @@ function ConvexDogfoodChat() {
     void markChannelRead({ channelId: activeChannelId, readThroughMessageId }).catch((cause: unknown) => {
       logDogfoodDiagnostic("read-marker", cause, dogfoodDiagnostic("mutation", "try-again", cause))
     })
-  }, [activeChannelId, activeChannelJoined, markChannelRead, messagePagination.status, messages, viewerReady])
+  }, [activeChannelId, activeChannelJoined, activeKind, markChannelRead, messagePagination.status, messages, viewerReady])
 
   useEffect(() => {
     if (workspace === undefined || workspace === null || channelList === undefined) return
-    if (selectedChannelId === null) return
+    if (selectedConversation?.kind !== "channel") return
     if (channelList.some((channel) => channel.id === selectedChannelId)) return
-    setSelectedChannelId(workspace.channel.id)
-  }, [channelList, selectedChannelId, workspace])
+    setSelectedConversation({ kind: "channel", id: workspace.channel.id })
+  }, [channelList, selectedChannelId, selectedConversation, workspace])
+
+  useEffect(() => {
+    if (selectedConversation?.kind !== "direct" || directConversations === undefined) return
+    if (directConversations.some((conversation) => conversation.id === selectedConversation.id)) return
+    if (workspace !== undefined && workspace !== null) {
+      setSelectedConversation({ kind: "channel", id: workspace.channel.id })
+    }
+  }, [directConversations, selectedConversation, workspace])
 
   useEffect(() => {
     const user = auth.user
@@ -215,7 +240,10 @@ function ConvexDogfoodChat() {
           data: {
             workspace,
             channels: channelList,
-            selectedChannelId: activeChannelId,
+            directConversations: stableDirectConversations,
+            selectedConversation: activeKind === "direct"
+              ? { kind: "direct", id: activeChannelId }
+              : { kind: "channel", id: activeChannelId },
             messages,
             members: members ?? [],
             channelMemberInviteCandidates,
@@ -234,21 +262,24 @@ function ConvexDogfoodChat() {
               const channel = await createChannel(input)
               setCreatedChannels((existing) => mergeDogfoodChannels(existing, [channel]))
               setJoinedChannelIds((existing) => new Set([...existing, channel.id]))
-              setSelectedChannelId(channel.id)
+              setSelectedConversation({ kind: "channel", id: channel.id })
               return channel
             },
-            selectChannel: (channelId) => setSelectedChannelId(channelId),
+            selectChannel: (channelId) => setSelectedConversation({ kind: "channel", id: channelId }),
+            selectDirectConversation: (conversationId) => setSelectedConversation({ kind: "direct", id: conversationId }),
             editChannel,
             deleteChannel: async (input) => {
               await deleteChannel(input)
-              if (selectedChannelId === input.channelId) setSelectedChannelId(workspace.channel.id)
+              if (selectedConversation?.kind === "channel" && selectedConversation.id === input.channelId) {
+                setSelectedConversation({ kind: "channel", id: workspace.channel.id })
+              }
               setCreatedChannels((existing) => existing.filter((channel) => channel.id !== input.channelId))
             },
             addChannelMember: addPrivateChannelMember,
             removeChannelMember: async (input) => {
               const result = await removePrivateChannelMember(input)
               if (workspace.currentUser.id === input.userId) {
-                setSelectedChannelId(workspace.channel.id)
+                setSelectedConversation({ kind: "channel", id: workspace.channel.id })
                 setJoinedChannelIds((existing) => {
                   const next = new Set(existing)
                   next.delete(input.channelId)
@@ -275,7 +306,7 @@ function ConvexDogfoodChat() {
             operationErrorMessage: dogfoodOperationErrorMessage
           }
         }),
-    [activeChannelId, addPrivateChannelMember, channelIndicators, channelList, channelMemberInviteCandidates, convex, createChannel, createChannelInviteCandidates, deleteAttachmentUpload, deleteChannel, deleteMessage, editChannel, editMessage, generateAttachmentUploadUrl, members, messagePagination, messages, registerAttachmentUpload, removePrivateChannelMember, selectedChannelId, sendMessage, toggleMessageReaction, workspace]
+    [activeChannelId, activeKind, addPrivateChannelMember, channelIndicators, channelList, channelMemberInviteCandidates, convex, createChannel, createChannelInviteCandidates, deleteAttachmentUpload, deleteChannel, deleteMessage, editChannel, editMessage, generateAttachmentUploadUrl, members, messagePagination, messages, registerAttachmentUpload, removePrivateChannelMember, selectedConversation, sendMessage, stableDirectConversations, toggleMessageReaction, workspace]
   )
 
   if (auth.isLoading) {

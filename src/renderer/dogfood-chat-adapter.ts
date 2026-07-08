@@ -13,12 +13,20 @@ export type DogfoodMessageAttachmentView = DogfoodChannelMessageView["attachment
 export type DogfoodChannelMemberView = FunctionReturnType<typeof api.chat.channelMembers>[number]
 export type DogfoodPrivateChannelInviteCandidateView = FunctionReturnType<typeof api.chat.eligiblePrivateChannelMembers>[number]
 export type DogfoodChannelIndicatorView = FunctionReturnType<typeof api.chat.channelIndicators>[number]
+export type DogfoodDirectConversationView = FunctionReturnType<typeof api.direct_conversations.list>[number]
+
+export type DogfoodActiveConversation =
+  | { readonly kind: "channel"; readonly id: Id<"channels"> }
+  | { readonly kind: "direct"; readonly id: Id<"channels"> }
 
 export type DogfoodChatAdapterInput = {
   readonly data: {
     readonly workspace: DogfoodWorkspaceView
     readonly channels: ReadonlyArray<DogfoodChannelView>
-    readonly selectedChannelId: Id<"channels">
+    readonly directConversations?: ReadonlyArray<DogfoodDirectConversationView>
+    readonly selectedConversation?: DogfoodActiveConversation
+    /** Compatibility for plain adapter callers that have not selected a DM. */
+    readonly selectedChannelId?: Id<"channels">
     readonly messages: ReadonlyArray<DogfoodChannelMessageView>
     readonly members?: ReadonlyArray<DogfoodChannelMemberView>
     readonly channelMemberInviteCandidates?: ReadonlyArray<DogfoodPrivateChannelInviteCandidateView>
@@ -38,6 +46,7 @@ export type DogfoodChatAdapterInput = {
     readonly editChannel?: (input: FunctionArgs<typeof api.chat.editChannel>) => Promise<FunctionReturnType<typeof api.chat.editChannel>>
     readonly deleteChannel?: (input: FunctionArgs<typeof api.chat.deleteChannel>) => Promise<unknown>
     readonly selectChannel?: (channelId: Id<"channels">) => void
+    readonly selectDirectConversation?: (conversationId: Id<"channels">) => void
     readonly addChannelMember?: (
       input: FunctionArgs<typeof api.chat.addPrivateChannelMember>
     ) => Promise<unknown>
@@ -63,10 +72,23 @@ export type DogfoodChatAdapterInput = {
 }
 
 export const dogfoodChatToChatData = ({ data, state, commands }: DogfoodChatAdapterInput): ChatDataView => {
+  const requestedConversation = data.selectedConversation ?? {
+    kind: "channel" as const,
+    id: data.selectedChannelId ?? data.workspace.channel.id
+  }
+  const selectedDirectConversation = requestedConversation.kind === "direct"
+    ? data.directConversations?.find((conversation) => conversation.id === requestedConversation.id)
+    : undefined
   const selectedChannel =
-    data.channels.find((channel) => channel.id === data.selectedChannelId) ??
+    (requestedConversation.kind === "channel"
+      ? data.channels.find((channel) => channel.id === requestedConversation.id)
+      : undefined) ??
     data.channels.find((channel) => channel.id === data.workspace.channel.id) ??
     data.workspace.channel
+  const activeConversation = selectedDirectConversation === undefined
+    ? { kind: "channel" as const, channel: toChatChannel(selectedChannel) }
+    : { kind: "direct" as const, directConversation: toChatDirectConversation(selectedDirectConversation) }
+  const directActive = activeConversation.kind === "direct"
 
   return {
     model: {
@@ -76,14 +98,16 @@ export const dogfoodChatToChatData = ({ data, state, commands }: DogfoodChatAdap
       },
       workspace: { name: data.workspace.workspace.name },
       channel: toChatChannel(selectedChannel),
+      activeConversation,
       channels: data.channels.map(toChatChannel),
+      directConversations: data.directConversations?.map(toChatDirectConversation) ?? [],
       channelMessages: data.messages.map(toChatMessage),
-      channelMembers: data.members?.map((member) => ({
+      channelMembers: directActive ? undefined : data.members?.map((member) => ({
         id: String(member.id),
         displayName: member.displayName,
         role: member.role
       })),
-      channelMemberInviteCandidates: data.channelMemberInviteCandidates?.map((member) => ({
+      channelMemberInviteCandidates: directActive ? undefined : data.channelMemberInviteCandidates?.map((member) => ({
         id: String(member.id),
         displayName: member.displayName
       })),
@@ -108,25 +132,28 @@ export const dogfoodChatToChatData = ({ data, state, commands }: DogfoodChatAdap
             ? {}
             : { initialMemberIds: initialMemberIds.map((userId) => convexId<"users">(userId)) })
         })),
-    editChannel: commands.editChannel === undefined
+    editChannel: directActive || commands.editChannel === undefined
       ? undefined
       : async ({ channelId, name }) => toChatChannel(await commands.editChannel!({
           channelId: convexId<"channels">(channelId),
           name
         })),
-    deleteChannel: commands.deleteChannel === undefined
+    deleteChannel: directActive || commands.deleteChannel === undefined
       ? undefined
       : ({ channelId }) => commands.deleteChannel!({ channelId: convexId<"channels">(channelId) }),
     selectChannel: commands.selectChannel === undefined
       ? undefined
       : (channelId) => commands.selectChannel?.(convexId<"channels">(channelId)),
-    addChannelMember: commands.addChannelMember === undefined
+    selectDirectConversation: commands.selectDirectConversation === undefined
+      ? undefined
+      : (conversationId) => commands.selectDirectConversation?.(convexId<"channels">(conversationId)),
+    addChannelMember: directActive || commands.addChannelMember === undefined
       ? undefined
       : ({ channelId, userId }) => commands.addChannelMember!({
           channelId: convexId<"channels">(channelId),
           userId: convexId<"users">(userId)
         }),
-    removeChannelMember: commands.removeChannelMember === undefined
+    removeChannelMember: directActive || commands.removeChannelMember === undefined
       ? undefined
       : ({ channelId, userId }) => commands.removeChannelMember!({
           channelId: convexId<"channels">(channelId),
@@ -195,6 +222,14 @@ const toChatChannel = (channel: Pick<DogfoodChannelView, "id" | "name" | "visibi
   id: String(channel.id),
   name: channel.name,
   visibility: channel.visibility
+})
+
+const toChatDirectConversation = (conversation: DogfoodDirectConversationView) => ({
+  id: String(conversation.id),
+  otherUser: {
+    id: String(conversation.otherUser.id),
+    displayName: conversation.otherUser.displayName
+  }
 })
 
 const toChatAttachment = (attachment: DogfoodMessageAttachmentView): ChatMessageAttachment => ({

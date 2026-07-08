@@ -59,7 +59,12 @@ const makeChatModel = (messages: ReadonlyArray<ChatMessage> = [
   currentUser: { id: userId, displayName: "Maya Patel" },
   workspace: { name: "Aether Labs" },
   channel: makeChannel({ id: channelId, name: "origination", visibility: "private" }),
+  activeConversation: {
+    kind: "channel",
+    channel: makeChannel({ id: channelId, name: "origination", visibility: "private" })
+  },
   channels: [makeChannel({ id: channelId, name: "origination", visibility: "private" })],
+  directConversations: [],
   channelMessages: messages,
   channelMessagesLoading: false
 })
@@ -93,10 +98,11 @@ const openMessageSearch = async () => {
 }
 
 describe("WorkspaceChat", () => {
-  it("presents direct messages as noninteractive placeholders in the global rail", async () => {
+  it("presents explicit direct conversations in the global rail", async () => {
+    const model = makeChatModel()
     render(
       <WorkspaceChat
-        model={makeChatModel()}
+        model={{ ...model, directConversations: [{ id: "direct-1", otherUser: { id: "user-2", displayName: "Lee Chen" } }] }}
         createChannelMessage={() => Promise.resolve()}
         deleteChannelMessage={() => Promise.resolve()}
       />
@@ -107,15 +113,15 @@ describe("WorkspaceChat", () => {
     const directMessages = within(globalNavigation).getByRole("navigation", { name: "Direct messages" })
 
     expect(directMessages).toBeTruthy()
-    expect(within(directMessages).queryByRole("button", { name: "Maya Patel" })).toBeNull()
-    expect(within(directMessages).getByLabelText("Maya Patel").getAttribute("title")).toContain("not available yet")
-    expect(within(directMessages).getByRole("tooltip", { name: "Maya Patel" })).toBeTruthy()
+    expect(within(directMessages).getByRole("button", { name: "Lee Chen" })).toBeTruthy()
+    expect(within(directMessages).getByRole("tooltip", { name: "Lee Chen" })).toBeTruthy()
     expect(within(workspaceNavigation).queryByRole("navigation", { name: "Direct messages" })).toBeNull()
     expect(within(workspaceNavigation).queryByText("Maya Patel")).toBeNull()
   })
 
   it("keeps direct messages in the global rail while changing channels", async () => {
     const base = makeChatModel()
+    const directConversations = [{ id: "direct-1", otherUser: { id: "user-2", displayName: "Lee Chen" } }]
     const secondChannel = makeChannel({
       id: secondChannelId,
       workspaceId,
@@ -131,13 +137,13 @@ describe("WorkspaceChat", () => {
     const { rerender } = render(
       <WorkspaceChat
         {...props}
-        model={{ ...base, channels: [base.channel, secondChannel] }}
+        model={{ ...base, channels: [base.channel, secondChannel], directConversations }}
       />
     )
 
     const globalNavigation = await screen.findByLabelText("Global navigation")
     const directMessages = within(globalNavigation).getByRole("navigation", { name: "Direct messages" })
-    expect(await within(directMessages).findByLabelText("Maya Patel")).toBeTruthy()
+    expect(await within(directMessages).findByLabelText("Lee Chen")).toBeTruthy()
 
     rerender(
       <WorkspaceChat
@@ -146,15 +152,15 @@ describe("WorkspaceChat", () => {
           ...base,
           channel: secondChannel,
           channels: [base.channel, secondChannel],
+          directConversations,
           channelMessages: [],
           channelMessagesLoading: true
         }}
       />
     )
 
-    expect(within(directMessages).queryByRole("button", { name: "Maya Patel" })).toBeNull()
-    expect(within(directMessages).getByLabelText("Maya Patel")).toBeTruthy()
-    expect(within(directMessages).getByRole("tooltip", { name: "Maya Patel" })).toBeTruthy()
+    expect(within(directMessages).getByRole("button", { name: "Lee Chen" })).toBeTruthy()
+    expect(within(directMessages).getByRole("tooltip", { name: "Lee Chen" })).toBeTruthy()
     expect(screen.getByLabelText("Channel members").querySelector("[aria-busy='true']")).toBeTruthy()
     expect(document.querySelector(".chatTimeline [class*='skeletonPulse']")).toBeTruthy()
     expect(document.querySelector("[class*='skeletonPulse']")).toBeTruthy()
@@ -699,6 +705,49 @@ describe("WorkspaceChat", () => {
       expect(article?.className).toContain("searchHighlighted")
       expect(article).toBe(document.activeElement)
     })
+  })
+
+  it("ignores stale remote search results after the active conversation changes", async () => {
+    let resolveSearch!: (messages: ReadonlyArray<ChatMessage>) => void
+    const searchChannelMessages = vi.fn(() => new Promise<ReadonlyArray<ChatMessage>>((resolve) => {
+      resolveSearch = resolve
+    }))
+    const base = makeChatModel([])
+    const directConversation = { id: "direct-1", otherUser: { id: "user-2", displayName: "Lee Chen" } }
+    const props = {
+      createChannelMessage: () => Promise.resolve(),
+      deleteChannelMessage: () => Promise.resolve(),
+      searchChannelMessages
+    }
+    const { rerender } = render(<WorkspaceChat {...props} model={{ ...base, directConversations: [directConversation] }} />)
+
+    fireEvent.click(await screen.findByRole("button", { name: "Show search" }))
+    fireEvent.change(await screen.findByPlaceholderText("Search origination"), { target: { value: "archive" } })
+    await waitFor(() => expect(searchChannelMessages).toHaveBeenCalledWith({ channelId, query: "archive" }))
+
+    rerender(
+      <WorkspaceChat
+        {...props}
+        model={{
+          ...base,
+          directConversations: [directConversation],
+          activeConversation: { kind: "direct", directConversation },
+          channelMessages: []
+        }}
+      />
+    )
+    resolveSearch([makeMessage({
+      id: "stale-message",
+      channelId,
+      authorType: "human",
+      authorId: userId,
+      authorDisplayName: "Maya Patel",
+      body: "Stale channel result",
+      createdAt: 1
+    })])
+
+    await waitFor(() => expect(screen.queryByText("Stale channel result")).toBeNull())
+    expect(screen.getByPlaceholderText("Message Lee Chen")).toBeTruthy()
   })
 
   it("navigates message search results with the keyboard", async () => {
