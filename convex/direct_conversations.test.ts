@@ -142,4 +142,127 @@ describe("direct conversation contract", () => {
       channelId: dm.id, userId: leeUser.userId
     })).rejects.toThrow("Private channel membership can only be administered for private channels")
   })
+
+  it("matches channel message semantics while keeping DM indicators user-scoped and non-channel mentions plain", async () => {
+    const t = convexTest(schema, modules)
+    vi.stubEnv("AETHER_ALLOWED_EMAILS", "maya@example.com,lee@example.com,diego@example.com")
+    const mayaUser = await initialize(t, maya)
+    const leeUser = await initialize(t, lee)
+    await initialize(t, diego)
+    const workspaceId = mayaUser.workspaceId
+    const dm = await t.withIdentity(maya).mutation(api.direct_conversations.startOrReopen, {
+      workspaceId,
+      recipientUserId: leeUser.userId
+    })
+
+    await t.run(async (ctx) => {
+      const leeMembership = await ctx.db
+        .query("channelMemberships")
+        .withIndex("by_channel_user", (q) => q.eq("channelId", dm.id).eq("userId", leeUser.userId))
+        .unique()
+      if (leeMembership === null) throw new Error("Lee DM membership not found")
+      await ctx.db.patch(leeMembership._id, { lastReadAt: 1, mentionTrackingStartedAt: 1 })
+    })
+
+    const parent = await t.withIdentity(maya).mutation(api.chat.sendMessage, {
+      channelId: dm.id,
+      body: "@Lee this should remain an unread DM, not a channel mention."
+    })
+    await t.withIdentity(maya).mutation(api.chat.sendMessage, {
+      channelId: dm.id,
+      body: "Older direct-message context."
+    })
+    const reply = await t.withIdentity(lee).mutation(api.chat.sendMessage, {
+      channelId: dm.id,
+      body: "Replying inside the same DM.",
+      parentMessageId: parent.id
+    })
+    await expect(t.withIdentity(maya).mutation(api.chat.editMessage, {
+      channelId: dm.id,
+      messageId: parent.id,
+      body: "Edited private context"
+    })).resolves.toMatchObject({ body: "Edited private context" })
+    await t.withIdentity(lee).mutation(api.chat.toggleMessageReaction, {
+      channelId: dm.id,
+      messageId: parent.id,
+      emoji: "👍"
+    })
+
+    const storageId = await t.run((ctx) => ctx.storage.store(new Blob(["dm file"], { type: "text/plain" })))
+    await t.run((ctx) => ctx.db.insert("attachmentUploads", {
+      storageId,
+      uploaderUserId: mayaUser.userId,
+      contentType: "text/plain",
+      createdAt: Date.now()
+    }))
+    const attachmentMessage = await t.withIdentity(maya).mutation(api.chat.sendMessage, {
+      channelId: dm.id,
+      body: "",
+      attachments: [{ storageId, name: "direct-note.txt" }]
+    })
+
+    const firstPage = await t.withIdentity(lee).query(api.chat.channelMessages, {
+      channelId: dm.id,
+      paginationOpts: { numItems: 2, cursor: null }
+    })
+    expect(firstPage.page).toEqual([
+      expect.objectContaining({
+        id: attachmentMessage.id,
+        attachments: [expect.objectContaining({ storageId, url: expect.any(String) })]
+      }),
+      expect.objectContaining({
+        id: reply.id,
+        parentMessage: expect.objectContaining({ id: parent.id })
+      })
+    ])
+    expect(firstPage.isDone).toBe(false)
+
+    await expect(t.withIdentity(lee).query(api.chat.searchChannelMessages, {
+      channelId: dm.id,
+      query: "private context"
+    })).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: parent.id, body: "Edited private context" })
+    ]))
+    await expect(t.withIdentity(lee).query(api.chat.channelMessages, {
+      channelId: dm.id,
+      paginationOpts: { numItems: 20, cursor: null }
+    }).then((result) => result.page.find((message) => message.id === parent.id)?.reactions))
+      .resolves.toEqual([{ emoji: "👍", count: 1, reactedByCurrentUser: true }])
+
+    await expect(t.withIdentity(lee).query(api.chat.channelIndicators, { workspaceId }))
+      .resolves.toEqual([{ channelId: dm.id, indicator: "unread" }])
+    await expect(t.run((ctx) => ctx.db
+      .query("messageMentions")
+      .withIndex("by_message", (q) => q.eq("messageId", parent.id))
+      .collect()))
+      .resolves.toEqual([])
+
+    await t.withIdentity(lee).mutation(api.chat.markChannelRead, {
+      channelId: dm.id,
+      readThroughMessageId: attachmentMessage.id
+    })
+    await expect(t.withIdentity(lee).query(api.chat.channelIndicators, { workspaceId }))
+      .resolves.toEqual([])
+
+    await t.withIdentity(maya).mutation(api.chat.deleteMessage, {
+      channelId: dm.id,
+      messageId: attachmentMessage.id
+    })
+    await expect(t.withIdentity(lee).query(api.chat.channelMessages, {
+      channelId: dm.id,
+      paginationOpts: { numItems: 20, cursor: null }
+    }).then((result) => result.page.map((message) => message.id)))
+      .resolves.not.toContain(attachmentMessage.id)
+
+    await expect(t.withIdentity(diego).query(api.chat.channelIndicators, { workspaceId }))
+      .resolves.not.toEqual(expect.arrayContaining([expect.objectContaining({ channelId: dm.id })]))
+    await expect(t.withIdentity(diego).query(api.chat.channels, { workspaceId }))
+      .resolves.not.toEqual(expect.arrayContaining([expect.objectContaining({ id: dm.id })]))
+    await expect(t.withIdentity(diego).query(api.direct_conversations.list, { workspaceId }))
+      .resolves.toEqual([])
+    await expect(t.withIdentity(diego).query(api.chat.channelMessages, {
+      channelId: dm.id,
+      paginationOpts: { numItems: 20, cursor: null }
+    })).rejects.toThrow("Current user is not a member of this channel")
+  })
 })

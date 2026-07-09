@@ -662,12 +662,26 @@ export const channelIndicators = query({
     if (workspace === null) return []
 
     await requireWorkspaceMember(ctx, { workspaceId: workspace._id, userId: user._id })
-    const channels = await listVisibleWorkspaceChannels(ctx, { workspaceId: workspace._id, userId: user._id })
     const memberships = await ctx.db
       .query("channelMemberships")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
       .collect()
     const membershipsByChannelId = new Map(memberships.map((membership) => [membership.channelId, membership]))
+    const visibleChannels = await listVisibleWorkspaceChannels(ctx, { workspaceId: workspace._id, userId: user._id })
+    const visibleChannelIds = new Set(visibleChannels.map((channel) => channel.id))
+    const channels = [...visibleChannels]
+    for (const membership of memberships) {
+      if (visibleChannelIds.has(membership.channelId)) continue
+      const channel = await ctx.db.get(membership.channelId)
+      if (
+        channel === null ||
+        channel.workspaceId !== workspace._id ||
+        channel.kind !== "direct" ||
+        channel.deletedAt !== undefined
+      ) continue
+      channels.push(toChannelView(channel))
+      visibleChannelIds.add(channel._id)
+    }
     const indicators: Array<{
       readonly channelId: Id<"channels">
       readonly indicator: "unread" | "mentioned"

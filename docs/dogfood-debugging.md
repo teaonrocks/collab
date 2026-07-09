@@ -1,12 +1,14 @@
 # Dogfood Debugging Guide
 
-Use this guide when the Convex/AuthKit dogfood chat fails during sign-in, channel join, or message actions.
+Use this guide when the Convex/AuthKit dogfood chat fails during sign-in, channel join, direct-message
+startup, or message actions.
 
 ## What to collect
 
 - The visible error text and diagnostic code, such as `VIEWER-ABC123` or `MUTATION-ABC123`.
 - The local time of the failure.
-- The action that failed: sign-in, join, send, edit, delete, reaction, or attachment upload.
+- The action that failed: sign-in, join, direct-message start, send, edit, delete, reaction, read
+  marker, search, or attachment upload.
 - Whether retrying recovered the app.
 
 Do not share `.env.local`, WorkOS secrets, Convex deploy keys, auth tokens, cookies, raw callback URLs, or screenshots that expose private email addresses.
@@ -20,6 +22,8 @@ Do not share `.env.local`, WorkOS secrets, Convex deploy keys, auth tokens, cook
 - For `Could Not Join`, use Try again after confirming the account is allowlisted and `.env.local`
   points to the shared Aether Friend Beta deployment.
 - For send, edit, delete, reaction, or attachment failures, keep the draft, editor, or dialog open, reconnect, then retry the same action.
+- For direct-message startup failures, retry from the global rail. Starting the same pair is
+  idempotent; a retry should return the existing conversation rather than creating split history.
 - If the app shows `Waiting for your AuthKit session to reach Convex...` for more than a few seconds, retry sign-in.
 
 ## Developer diagnostics

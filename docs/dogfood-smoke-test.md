@@ -36,7 +36,18 @@ For failure capture and recovery, see [`docs/dogfood-debugging.md`](dogfood-debu
 - After removal, do not treat a previously copied attachment URL as proof of membership. Convex
   storage URLs are bearer URLs and may remain usable until the object is deleted; the security
   boundary prevents the removed account from obtaining a new URL through Aether.
-- Direct-message avatars are noninteractive placeholders while direct-message navigation is deferred.
+- Direct messages are user-scoped conversations between exactly two allowlisted workspace members.
+  Starting the same pair from either account opens the same conversation and never auto-joins a
+  public channel.
+- Direct messages support the same message actions as channels: send, pagination, edit, delete,
+  shallow replies, reactions, search, attachments, realtime updates, and read markers.
+- Direct-message unread indicators live in the global rail, survive channel switching and loading
+  states, and clear only after that direct message is read.
+- `@name` text inside a direct message stays plain message text for now. It does not create a
+  channel-style mention indicator or notification.
+- A non-participant cannot discover a direct message through channel lists, direct-message lists,
+  unread indicators, search, member queries, diagnostics, guessed IDs, or fresh attachment URL
+  hydration.
 - The first empty channel state invites the user to start the conversation.
 - Messages sent from one account appear in realtime for the other account.
 - Inactive channels show unread state, and a matching `@name` mention takes priority over unread.
@@ -70,6 +81,17 @@ Record this evidence without email addresses, tokens, keys, or environment-file 
   Tester A confirmed that the messages and attachment still existed.
 - An allowlist add or removal made by the operator against `--prod` affected the intended account in
   both checkouts.
+- Tester A and Tester B each started the same direct-message pair; both sides landed in one shared
+  conversation with no split history.
+- A direct-message send from each account appeared in realtime for the other account. Channel to DM
+  to channel switching preserved the global direct-message rail, cleared target-scoped drafts,
+  replies, search, and pending attachments, and never invoked public-channel auto-join.
+- Direct-message unread state appeared only for the recipient, survived unrelated channel switches,
+  cleared when that DM was read, and did not become a mention indicator for `@name` text.
+- A harmless direct-message attachment was readable by both participants through Aether, while a
+  non-participant could not obtain a fresh attachment URL or discover the conversation.
+- Reload or reconnect preserved the same direct-message identity and history for the two
+  participants.
 - Neither tester ran a Convex command or had Convex team access.
 - Unexpected server failures shown to testers contained only production-safe generic detail; the
   operator correlated the full detail in production logs.

@@ -249,6 +249,20 @@ Convex storage are bearer URLs and are not retroactively revoked by membership r
 member cannot obtain another URL through Aether, but sensitive operators should not treat a copied
 or shared storage URL as revocable authorization.
 
+#### Treat Direct Messages As User-Scoped Conversations
+
+Direct messages reuse the channel-backed message machinery with `channels.kind = "direct"` and a
+canonical `directPairKey`. The pair key is sorted from the two participant user IDs, so either
+participant starting the conversation resolves to the same channel row and history. Direct messages
+are not returned by channel discovery, are not eligible for public-channel auto-join, and cannot be
+renamed, deleted, or administered through private-channel membership controls.
+
+The only members of a direct message are the two participants. That membership gates discovery,
+history pagination, search, reactions, edit/delete, read markers, member queries, and the fresh
+attachment URLs hydrated into message views. Unread state is user-scoped like channels but is shown
+in the global direct-message rail and survives channel switches. `@name` text in a direct message is
+plain text for this release; it does not produce channel-style mention indicators.
+
 #### Display Names, Not Emails
 
 Email is used for identity resolution and allowlist matching but is not shown as the normal channel

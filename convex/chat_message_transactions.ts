@@ -77,6 +77,9 @@ const syncMessageMentions = async (
   for (const mention of existing) await ctx.db.delete(mention._id)
 
   if (input.body.length === 0) return
+  const channel = await ctx.db.get(input.channelId)
+  if (channel === null || channel.kind === "direct") return
+
   const memberships = await ctx.db
     .query("channelMemberships")
     .withIndex("by_channel", (q) => q.eq("channelId", input.channelId))
