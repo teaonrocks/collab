@@ -58,6 +58,7 @@ export default defineSchema({
   channelMemberships: defineTable({
     channelId: v.id("channels"),
     workspaceId: v.optional(v.id("workspaces")),
+    channelKind: v.optional(v.literal("direct")),
     userId: v.id("users"),
     role: channelRole,
     createdAt: v.number(),
@@ -65,6 +66,7 @@ export default defineSchema({
     mentionTrackingStartedAt: v.optional(v.number())
   }).index("by_channel", ["channelId"]).index("by_user", ["userId"])
     .index("by_user_and_workspace", ["userId", "workspaceId"])
+    .index("by_user_workspace_and_channel_kind", ["userId", "workspaceId", "channelKind"])
     .index("by_channel_user", [
     "channelId",
     "userId"

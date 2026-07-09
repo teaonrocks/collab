@@ -9,6 +9,7 @@ const modules = import.meta.glob("./**/*.ts")
 const maya = { tokenIdentifier: "issuer|maya-dm", email: "maya@example.com", name: "Maya Patel" }
 const lee = { tokenIdentifier: "issuer|lee-dm", email: "lee@example.com", name: "Lee Chen" }
 const diego = { tokenIdentifier: "issuer|diego-dm", email: "diego@example.com", name: "Diego Rivera" }
+const guest = { tokenIdentifier: "issuer|guest-dm", email: "guest@example.com", name: "Guest User" }
 
 beforeEach(() => vi.stubEnv("AETHER_ALLOWED_EMAILS", "maya@example.com,lee@example.com"))
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs() })
@@ -94,6 +95,115 @@ describe("direct conversation contract", () => {
     await expect(t.withIdentity(maya).mutation(api.direct_conversations.startOrReopen, {
       workspaceId: outsiders.otherWorkspaceId, recipientUserId: leeUser.userId
     })).rejects.toThrow("Current user is not a member of this workspace")
+  })
+
+  it("hides and rejects guest recipients even when they are allowlisted workspace members", async () => {
+    const t = convexTest(schema, modules)
+    vi.stubEnv("AETHER_ALLOWED_EMAILS", "maya@example.com,lee@example.com,guest@example.com")
+    const mayaUser = await initialize(t, maya)
+    const workspaceId = mayaUser.workspaceId
+    const guestUserId = await t.run(async (ctx) => {
+      const now = Date.now()
+      const userId = await ctx.db.insert("users", {
+        email: guest.email,
+        displayName: guest.name,
+        createdAt: now,
+        updatedAt: now
+      })
+      await ctx.db.insert("workspaceMemberships", { workspaceId, userId, role: "guest", createdAt: now })
+      return userId
+    })
+
+    await expect(t.withIdentity(maya).query(api.direct_conversations.candidates, { workspaceId }))
+      .resolves.not.toEqual(expect.arrayContaining([expect.objectContaining({ id: guestUserId })]))
+    await expect(t.withIdentity(maya).mutation(api.direct_conversations.startOrReopen, {
+      workspaceId,
+      recipientUserId: guestUserId
+    })).rejects.toThrow("Direct conversation recipient is not eligible")
+  })
+
+  it("stops listing and reopening a DM after the other participant loses eligibility", async () => {
+    const t = convexTest(schema, modules)
+    const mayaUser = await initialize(t, maya)
+    const leeUser = await initialize(t, lee)
+    const workspaceId = mayaUser.workspaceId
+    const dm = await t.withIdentity(maya).mutation(api.direct_conversations.startOrReopen, {
+      workspaceId,
+      recipientUserId: leeUser.userId
+    })
+
+    await t.mutation(internal.chat.administerDogfoodAllowlist, {
+      operator: "test",
+      email: lee.email,
+      action: "remove"
+    })
+    await expect(t.withIdentity(maya).query(api.direct_conversations.list, { workspaceId }))
+      .resolves.toEqual([])
+    await expect(t.withIdentity(maya).query(api.direct_conversations.candidates, { workspaceId }))
+      .resolves.not.toEqual(expect.arrayContaining([expect.objectContaining({ id: leeUser.userId })]))
+    await expect(t.withIdentity(maya).mutation(api.direct_conversations.startOrReopen, {
+      workspaceId,
+      recipientUserId: leeUser.userId
+    })).rejects.toThrow("Direct conversation recipient is not eligible")
+
+    await t.mutation(internal.chat.administerDogfoodAllowlist, {
+      operator: "test",
+      email: lee.email,
+      action: "add"
+    })
+    await t.run(async (ctx) => {
+      const membership = await ctx.db
+        .query("workspaceMemberships")
+        .withIndex("by_workspace_user", (q) => q.eq("workspaceId", workspaceId).eq("userId", leeUser.userId))
+        .unique()
+      if (membership === null) throw new Error("Lee workspace membership not found")
+      await ctx.db.delete(membership._id)
+    })
+    await expect(t.withIdentity(maya).query(api.direct_conversations.list, { workspaceId }))
+      .resolves.toEqual([])
+    await expect(t.withIdentity(maya).mutation(api.direct_conversations.startOrReopen, {
+      workspaceId,
+      recipientUserId: leeUser.userId
+    })).rejects.toThrow("Direct conversation recipient is not eligible")
+    await expect(t.withIdentity(lee).query(api.chat.channelMessages, {
+      channelId: dm.id,
+      paginationOpts: { numItems: 20, cursor: null }
+    })).rejects.toThrow("Current user is not a member of this workspace")
+  })
+
+  it("lists DMs after many ordinary channel memberships for the same user and workspace", async () => {
+    const t = convexTest(schema, modules)
+    const mayaUser = await initialize(t, maya)
+    const leeUser = await initialize(t, lee)
+    const workspaceId = mayaUser.workspaceId
+    await t.run(async (ctx) => {
+      const now = Date.now()
+      for (let index = 0; index < 101; index += 1) {
+        const channelId = await ctx.db.insert("channels", {
+          workspaceId,
+          key: `ordinary-${index}`,
+          name: `ordinary-${index}`,
+          visibility: "private",
+          createdAt: now + index
+        })
+        await ctx.db.insert("channelMemberships", {
+          channelId,
+          workspaceId,
+          userId: mayaUser.userId,
+          role: "member",
+          createdAt: now + index,
+          lastReadAt: now + index,
+          mentionTrackingStartedAt: now + index
+        })
+      }
+    })
+    const dm = await t.withIdentity(maya).mutation(api.direct_conversations.startOrReopen, {
+      workspaceId,
+      recipientUserId: leeUser.userId
+    })
+
+    await expect(t.withIdentity(maya).query(api.direct_conversations.list, { workspaceId }))
+      .resolves.toEqual([expect.objectContaining({ id: dm.id })])
   })
 
   it("uses message machinery while denying discovery, reads, joins, and management to non-participants", async () => {

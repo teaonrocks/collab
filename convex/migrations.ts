@@ -2,6 +2,7 @@ import { v } from "convex/values"
 import { internalMutation } from "./_generated/server"
 
 const MAX_CHANNELS_PER_WORKSPACE = 100
+const MAX_DIRECT_CHANNEL_BACKFILL = 100
 
 export const promoteUserToAllChannelAdmins = internalMutation({
   args: {
@@ -48,5 +49,41 @@ export const promoteUserToAllChannelAdmins = internalMutation({
     }
 
     return { email: normalizedEmail, dryRun, changes }
+  }
+})
+
+export const backfillDirectChannelMembershipKind = internalMutation({
+  args: {
+    workspaceId: v.id("workspaces"),
+    dryRun: v.boolean()
+  },
+  handler: async (ctx, { workspaceId, dryRun }) => {
+    const directChannels = await ctx.db
+      .query("channels")
+      .withIndex("by_workspace_kind_and_deleted_at", (q) =>
+        q.eq("workspaceId", workspaceId).eq("kind", "direct"))
+      .take(MAX_DIRECT_CHANNEL_BACKFILL)
+    const changes: Array<{
+      readonly channelId: typeof directChannels[number]["_id"]
+      readonly membershipId: string
+      readonly action: "updated" | "unchanged"
+    }> = []
+
+    for (const channel of directChannels) {
+      const memberships = await ctx.db
+        .query("channelMemberships")
+        .withIndex("by_channel", (q) => q.eq("channelId", channel._id))
+        .collect()
+      for (const membership of memberships) {
+        if (membership.channelKind === "direct") {
+          changes.push({ channelId: channel._id, membershipId: membership._id, action: "unchanged" })
+          continue
+        }
+        if (!dryRun) await ctx.db.patch(membership._id, { channelKind: "direct" })
+        changes.push({ channelId: channel._id, membershipId: membership._id, action: "updated" })
+      }
+    }
+
+    return { workspaceId, dryRun, changes }
   }
 })
