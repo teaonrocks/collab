@@ -160,6 +160,19 @@ const channelIndicatorDescription = (indicator: ChatChannelIndicator, channelNam
     ? `Mention in #${channelName} since you last opened it. No native push is sent.`
     : `Unread messages in #${channelName} since you last opened it. No native push is sent.`
 
+const directConversationIndicatorDescription = (indicator: ChatChannelIndicator, recipientName: string): string =>
+  indicator === "mentioned"
+    ? `Mention in direct message with ${recipientName} since you last opened it.`
+    : `Unread direct messages with ${recipientName} since you last opened it.`
+
+const directConversationButtonLabel = (
+  recipientName: string,
+  indicator: ChatChannelIndicator | undefined
+): string =>
+  indicator === undefined
+    ? recipientName
+    : `${recipientName}, ${directConversationIndicatorDescription(indicator, recipientName)}`
+
 export function WorkspaceChat(props: {
   readonly model: ChatDataModel
   readonly createChannelMessage: ChatDataView["createChannelMessage"]
@@ -633,17 +646,20 @@ function WorkspaceRail(props: {
             : null}
         {conversations.map((conversation) => {
           const indicator = conversation.id === activeConversationId ? undefined : indicators.get(conversation.id)
+          const indicatorDescription = indicator === undefined
+            ? undefined
+            : directConversationIndicatorDescription(indicator, conversation.otherUser.displayName)
           return (
           <button
             key={conversation.id}
             type="button"
             className={classNames(railItemClassName, "dmRailItem rounded-full", conversation.id === activeConversationId && "active bg-surface-canvas outline-2 outline-border")}
-            aria-label={conversation.otherUser.displayName}
+            aria-label={directConversationButtonLabel(conversation.otherUser.displayName, indicator)}
             aria-current={conversation.id === activeConversationId ? "page" : undefined}
             onClick={() => onSelectConversation?.(conversation.id)}
           >
             {initials(conversation.otherUser.displayName)}
-            {indicator === undefined ? null : <span className="absolute right-0 top-0 size-2 rounded-full bg-accent" title={indicator === "mentioned" ? "Mentioned" : "Unread"} />}
+            {indicator === undefined ? null : <span className="absolute right-0 top-0 size-2 rounded-full bg-accent" title={indicatorDescription} />}
             <span className={railTooltipClassName} role="tooltip">{conversation.otherUser.displayName}</span>
           </button>
           )

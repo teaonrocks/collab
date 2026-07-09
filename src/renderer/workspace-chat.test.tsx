@@ -119,6 +119,79 @@ describe("WorkspaceChat", () => {
     expect(within(workspaceNavigation).queryByText("Maya Patel")).toBeNull()
   })
 
+  it("announces inactive direct-message unread state in the rail button label", async () => {
+    const directConversation = { id: "direct-1", otherUser: { id: "user-2", displayName: "Lee Chen" } }
+    render(
+      <WorkspaceChat
+        model={{
+          ...makeChatModel(),
+          directConversations: [directConversation],
+          channelIndicators: [{ channelId: directConversation.id, indicator: "unread" }]
+        }}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+      />
+    )
+
+    const directMessages = within(await screen.findByLabelText("Global navigation")).getByRole("navigation", { name: "Direct messages" })
+    const unreadDirectMessage = within(directMessages).getByRole("button", {
+      name: "Lee Chen, Unread direct messages with Lee Chen since you last opened it."
+    })
+
+    expect(unreadDirectMessage).toBeTruthy()
+    expect(unreadDirectMessage.querySelector("[title='Unread direct messages with Lee Chen since you last opened it.']")).toBeTruthy()
+    expect(within(directMessages).queryByRole("button", { name: "Lee Chen" })).toBeNull()
+  })
+
+  it("announces inactive direct-message mention state in the rail button label", async () => {
+    const directConversation = { id: "direct-1", otherUser: { id: "user-2", displayName: "Lee Chen" } }
+    render(
+      <WorkspaceChat
+        model={{
+          ...makeChatModel(),
+          directConversations: [directConversation],
+          channelIndicators: [{ channelId: directConversation.id, indicator: "mentioned" }]
+        }}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+      />
+    )
+
+    const directMessages = within(await screen.findByLabelText("Global navigation")).getByRole("navigation", { name: "Direct messages" })
+
+    expect(within(directMessages).getByRole("button", {
+      name: "Lee Chen, Mention in direct message with Lee Chen since you last opened it."
+    })).toBeTruthy()
+    expect(within(directMessages).queryByRole("button", {
+      name: "Lee Chen, Unread direct messages with Lee Chen since you last opened it."
+    })).toBeNull()
+  })
+
+  it("does not announce stale unread state on the active direct message", async () => {
+    const directConversation = { id: "direct-1", otherUser: { id: "user-2", displayName: "Lee Chen" } }
+    render(
+      <WorkspaceChat
+        model={{
+          ...makeChatModel(),
+          activeConversation: { kind: "direct", directConversation },
+          directConversations: [directConversation],
+          channelIndicators: [{ channelId: directConversation.id, indicator: "mentioned" }]
+        }}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+      />
+    )
+
+    const directMessages = within(await screen.findByLabelText("Global navigation")).getByRole("navigation", { name: "Direct messages" })
+    const activeDirectMessage = within(directMessages).getByRole("button", { name: "Lee Chen" })
+
+    expect(activeDirectMessage.getAttribute("aria-current")).toBe("page")
+    expect(activeDirectMessage.querySelector("[title]")).toBeNull()
+    expect(within(directMessages).queryByRole("button", {
+      name: "Lee Chen, Mention in direct message with Lee Chen since you last opened it."
+    })).toBeNull()
+  })
+
   it("starts a direct message from eligible members and prevents duplicate submission", async () => {
     let resolveStart!: (conversation: { id: string; otherUser: { id: string; displayName: string } }) => void
     const pending = new Promise<{ id: string; otherUser: { id: string; displayName: string } }>((resolve) => {
