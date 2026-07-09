@@ -14,6 +14,7 @@ export type DogfoodChannelMemberView = FunctionReturnType<typeof api.chat.channe
 export type DogfoodPrivateChannelInviteCandidateView = FunctionReturnType<typeof api.chat.eligiblePrivateChannelMembers>[number]
 export type DogfoodChannelIndicatorView = FunctionReturnType<typeof api.chat.channelIndicators>[number]
 export type DogfoodDirectConversationView = FunctionReturnType<typeof api.direct_conversations.list>[number]
+export type DogfoodDirectConversationCandidateView = FunctionReturnType<typeof api.direct_conversations.candidates>[number]
 
 export type DogfoodActiveConversation =
   | { readonly kind: "channel"; readonly id: Id<"channels"> }
@@ -24,6 +25,7 @@ export type DogfoodChatAdapterInput = {
     readonly workspace: DogfoodWorkspaceView
     readonly channels: ReadonlyArray<DogfoodChannelView>
     readonly directConversations?: ReadonlyArray<DogfoodDirectConversationView>
+    readonly directConversationCandidates?: ReadonlyArray<DogfoodDirectConversationCandidateView>
     readonly selectedConversation?: DogfoodActiveConversation
     /** Compatibility for plain adapter callers that have not selected a DM. */
     readonly selectedChannelId?: Id<"channels">
@@ -38,6 +40,7 @@ export type DogfoodChatAdapterInput = {
     readonly messagesHasMore?: boolean
     readonly messagesLoadingMore?: boolean
     readonly membersLoading?: boolean
+    readonly directConversationsLoading?: boolean
   }
   readonly commands: {
     readonly createChannel?: (
@@ -47,6 +50,7 @@ export type DogfoodChatAdapterInput = {
     readonly deleteChannel?: (input: FunctionArgs<typeof api.chat.deleteChannel>) => Promise<unknown>
     readonly selectChannel?: (channelId: Id<"channels">) => void
     readonly selectDirectConversation?: (conversationId: Id<"channels">) => void
+    readonly startDirectConversation?: (recipientUserId: Id<"users">) => Promise<DogfoodDirectConversationView>
     readonly addChannelMember?: (
       input: FunctionArgs<typeof api.chat.addPrivateChannelMember>
     ) => Promise<unknown>
@@ -101,6 +105,11 @@ export const dogfoodChatToChatData = ({ data, state, commands }: DogfoodChatAdap
       activeConversation,
       channels: data.channels.map(toChatChannel),
       directConversations: data.directConversations?.map(toChatDirectConversation) ?? [],
+      directConversationCandidates: data.directConversationCandidates?.map((candidate) => ({
+        id: String(candidate.id),
+        displayName: candidate.displayName
+      })),
+      directConversationsLoading: state?.directConversationsLoading ?? data.directConversations === undefined,
       channelMessages: data.messages.map(toChatMessage),
       channelMembers: directActive ? undefined : data.members?.map((member) => ({
         id: String(member.id),
@@ -147,6 +156,9 @@ export const dogfoodChatToChatData = ({ data, state, commands }: DogfoodChatAdap
     selectDirectConversation: commands.selectDirectConversation === undefined
       ? undefined
       : (conversationId) => commands.selectDirectConversation?.(convexId<"channels">(conversationId)),
+    startDirectConversation: commands.startDirectConversation === undefined
+      ? undefined
+      : async (recipientUserId) => toChatDirectConversation(await commands.startDirectConversation!(convexId<"users">(recipientUserId))),
     addChannelMember: directActive || commands.addChannelMember === undefined
       ? undefined
       : ({ channelId, userId }) => commands.addChannelMember!({

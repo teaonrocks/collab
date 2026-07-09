@@ -71,6 +71,16 @@ export const mergeChannelMembers = (
   return changed ? Array.from(byId.values()) : members
 }
 
+export const filterDirectConversationCandidates = (
+  candidates: ReadonlyArray<ChatChannelMember>,
+  query: string
+): ReadonlyArray<ChatChannelMember> => {
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  return normalizedQuery.length === 0
+    ? candidates
+    : candidates.filter((candidate) => candidate.displayName.toLocaleLowerCase().includes(normalizedQuery))
+}
+
 export const searchChannelMessages = (
   messages: ReadonlyArray<ChatMessage>,
   query: string

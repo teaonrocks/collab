@@ -92,6 +92,8 @@ export type ChatDataModel = {
   readonly activeConversation: ChatActiveConversation
   readonly channels: ReadonlyArray<ChatChannel>
   readonly directConversations: ReadonlyArray<ChatDirectConversation>
+  readonly directConversationCandidates?: ReadonlyArray<ChatChannelMember>
+  readonly directConversationsLoading?: boolean
   readonly channelMessages: ReadonlyArray<ChatMessage>
   readonly channelMembers?: ReadonlyArray<ChatChannelMember>
   readonly channelMemberInviteCandidates?: ReadonlyArray<ChatChannelInviteCandidate>
@@ -111,6 +113,7 @@ export type CreateChatChannel = (input: {
 
 export type SelectChatChannel = (channelId: ChatChannelId) => void
 export type SelectChatDirectConversation = (conversationId: ChatChannelId) => void
+export type StartChatDirectConversation = (recipientUserId: ChatChannelMember["id"]) => Promise<ChatDirectConversation>
 
 export type EditChatChannel = (input: {
   readonly channelId: ChatChannelId
@@ -168,6 +171,7 @@ export type ChatDataView = {
   readonly deleteChannel?: DeleteChatChannel
   readonly selectChannel?: SelectChatChannel
   readonly selectDirectConversation?: SelectChatDirectConversation
+  readonly startDirectConversation?: StartChatDirectConversation
   readonly addChannelMember?: AddChatChannelMember
   readonly removeChannelMember?: RemoveChatChannelMember
   readonly createChannelMessage: CreateChatMessage

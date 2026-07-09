@@ -42,12 +42,14 @@ const mocks = vi.hoisted(() => ({
   generateAttachmentUploadUrl: vi.fn(),
   registerAttachmentUpload: vi.fn(),
   deleteAttachmentUpload: vi.fn(),
+  startOrReopenDirectConversation: vi.fn(),
   loadMore: vi.fn(),
   paginationStatus: undefined as "LoadingFirstPage" | "CanLoadMore" | "LoadingMore" | "Exhausted" | undefined,
   mutationCallCount: 0,
   workspace: undefined as DogfoodWorkspaceView | null | undefined,
   channels: undefined as ReadonlyArray<DogfoodChannelView> | undefined,
   directConversations: [] as ReadonlyArray<DogfoodDirectConversationView> | undefined,
+  directConversationCandidates: undefined as ReadonlyArray<{ readonly id: Id<"users">; readonly displayName: string }> | undefined,
   messages: undefined as ReadonlyArray<DogfoodChannelMessageView> | undefined,
   messagesByChannel: undefined as Record<string, ReadonlyArray<DogfoodChannelMessageView>> | undefined,
   members: undefined as ReadonlyArray<DogfoodChannelMemberView> | undefined,
@@ -80,8 +82,9 @@ vi.mock("convex/react", () => ({
       mocks.markChannelRead,
       mocks.generateAttachmentUploadUrl,
       mocks.registerAttachmentUpload,
-      mocks.deleteAttachmentUpload
-    ][mocks.mutationCallCount % 14]
+      mocks.deleteAttachmentUpload,
+      mocks.startOrReopenDirectConversation
+    ][mocks.mutationCallCount % 15]
     mocks.mutationCallCount += 1
     return mutation
   },
@@ -98,6 +101,7 @@ vi.mock("convex/react", () => ({
   useQuery: (query: unknown, args: unknown) => {
     if (args === "skip") return undefined
     if (getFunctionName(query as never) === "direct_conversations:list") return mocks.directConversations
+    if (getFunctionName(query as never) === "direct_conversations:candidates") return mocks.directConversationCandidates
     if (getFunctionName(query as never) === "chat:eligiblePrivateChannelMembers") {
       return typeof args === "object" && args !== null && "channelId" in args
         ? mocks.managementCandidates
@@ -124,6 +128,7 @@ vi.mock("./workspace-chat", () => ({
       readonly activeConversation: { readonly kind: "channel"; readonly channel: { readonly id: string } } | { readonly kind: "direct"; readonly directConversation: { readonly id: string } }
       readonly channels: ReadonlyArray<{ readonly id: string; readonly name: string }>
       readonly directConversations: ReadonlyArray<{ readonly id: string; readonly otherUser: { readonly displayName: string } }>
+      readonly directConversationCandidates?: ReadonlyArray<{ readonly id: string; readonly displayName: string }>
       readonly channelMessages: ReadonlyArray<ChatMessage>
       readonly channelMembers?: ReadonlyArray<{ readonly id: string; readonly displayName: string }>
       readonly channelMemberInviteCandidates?: ReadonlyArray<{ readonly id: string; readonly displayName: string }>
@@ -141,6 +146,7 @@ vi.mock("./workspace-chat", () => ({
   }) => Promise<unknown>
   readonly selectChannel?: (channelId: string) => void
   readonly selectDirectConversation?: (conversationId: string) => void
+  readonly startDirectConversation?: (recipientUserId: string) => Promise<unknown>
   readonly addChannelMember?: (input: { readonly channelId: string; readonly userId: string }) => Promise<unknown>
   readonly removeChannelMember?: (input: { readonly channelId: string; readonly userId: string }) => Promise<unknown>
   readonly createChannelMessage: (input: {
@@ -187,6 +193,13 @@ vi.mock("./workspace-chat", () => ({
           {props.model.directConversations.map((conversation) => (
             <li key={conversation.id}>
               <button type="button" onClick={() => props.selectDirectConversation?.(conversation.id)}>{conversation.otherUser.displayName}</button>
+            </li>
+          ))}
+        </ul>
+        <ul aria-label="mock direct candidates">
+          {props.model.directConversationCandidates?.map((candidate) => (
+            <li key={candidate.id}>
+              <button type="button" onClick={() => void props.startDirectConversation?.(candidate.id)}>Start {candidate.displayName}</button>
             </li>
           ))}
         </ul>
@@ -330,10 +343,17 @@ beforeEach(() => {
   })
   mocks.registerAttachmentUpload.mockResolvedValue({ status: "registered", storageId: "storage-1" })
   mocks.deleteAttachmentUpload.mockResolvedValue({})
+  mocks.startOrReopenDirectConversation.mockResolvedValue({
+    id: "direct-1",
+    workspaceId: "workspace-1",
+    otherUser: { id: "user-2", displayName: "Lee Chen" },
+    createdAt: 44
+  })
   mocks.mutationCallCount = 0
   mocks.workspace = undefined
   mocks.channels = undefined
   mocks.directConversations = []
+  mocks.directConversationCandidates = undefined
   mocks.messages = undefined
   mocks.messagesByChannel = undefined
   mocks.paginationStatus = undefined
@@ -495,18 +515,20 @@ describe("dogfoodChatToChatData", () => {
     })
   })
 
-  it("adapts the Convex dogfood chat view into the chat data interface", () => {
+  it("adapts the Convex dogfood chat view into the chat data interface", async () => {
     const chatData = dogfoodChatToChatData({
       data: {
         workspace,
         channels,
         selectedChannelId: workspace.channel.id,
+        directConversationCandidates: inviteCandidates,
         messages,
         members,
         channelMemberInviteCandidates: inviteCandidates,
         createChannelInviteCandidates: inviteCandidates
       },
       commands: {
+        startDirectConversation: mocks.startOrReopenDirectConversation,
         addChannelMember: mocks.addPrivateChannelMember,
         removeChannelMember: mocks.removePrivateChannelMember,
         sendMessage: mocks.sendMessage,
@@ -523,10 +545,16 @@ describe("dogfoodChatToChatData", () => {
     expect(chatData.model.channels.map((channel) => channel.name)).toEqual(["general", "design"])
     expect(chatData.model.channelMembers?.map((member) => member.displayName)).toEqual(["Lee Chen", "Maya Patel"])
     expect(chatData.model.channelMembers?.map((member) => member.role)).toEqual(["member", "admin"])
+    expect(chatData.model.directConversationCandidates).toEqual([{ id: "user-2", displayName: "Lee Chen" }])
     expect(chatData.model.channelMemberInviteCandidates).toEqual([{ id: "user-2", displayName: "Lee Chen" }])
     expect(chatData.model.createChannelInviteCandidates).toEqual([{ id: "user-2", displayName: "Lee Chen" }])
+    await expect(chatData.startDirectConversation?.("user-2")).resolves.toEqual({
+      id: "direct-1",
+      otherUser: { id: "user-2", displayName: "Lee Chen" }
+    })
     void chatData.addChannelMember?.({ channelId: "channel-1", userId: "user-2" })
     void chatData.removeChannelMember?.({ channelId: "channel-1", userId: "user-2" })
+    expect(mocks.startOrReopenDirectConversation).toHaveBeenCalledWith("user-2")
     expect(mocks.addPrivateChannelMember).toHaveBeenCalledWith({ channelId: "channel-1", userId: "user-2" })
     expect(mocks.removePrivateChannelMember).toHaveBeenCalledWith({ channelId: "channel-1", userId: "user-2" })
     expect(chatData.model.channelMessages).toHaveLength(1)
@@ -1028,6 +1056,34 @@ describe("ConvexDogfoodApp", () => {
 
     await waitFor(() => expect(screen.getByLabelText("active channel").textContent).toBe("direct-1"))
     expect(mocks.ensureChannelMember).not.toHaveBeenCalled()
+  })
+
+  it("starts or reopens a direct conversation from eligible workspace members", async () => {
+    const { ConvexDogfoodApp } = await import("./dogfood-chat")
+    const directConversation: DogfoodDirectConversationView = {
+      id: "direct-1" as Id<"channels">,
+      workspaceId: workspace.workspace.id,
+      otherUser: { id: "user-2" as Id<"users">, displayName: "Lee Chen" },
+      createdAt: 44
+    }
+    mocks.auth.user = { id: "user-1" }
+    mocks.convexAuth.isAuthenticated = true
+    mocks.workspace = workspace
+    mocks.channels = channels
+    mocks.directConversations = []
+    mocks.directConversationCandidates = [{ id: "user-2" as Id<"users">, displayName: "Lee Chen" }]
+    mocks.messagesByChannel = { "channel-1": messages, "direct-1": [] }
+    mocks.startOrReopenDirectConversation.mockResolvedValue(directConversation)
+
+    render(<ConvexDogfoodApp />)
+    fireEvent.click(await screen.findByRole("button", { name: "Start Lee Chen" }))
+
+    await waitFor(() => expect(mocks.startOrReopenDirectConversation).toHaveBeenCalledWith({
+      workspaceId: workspace.workspace.id,
+      recipientUserId: "user-2"
+    }))
+    await waitFor(() => expect(screen.getByLabelText("active channel").textContent).toBe("direct-1"))
+    expect(screen.getByRole("button", { name: "Lee Chen" })).toBeTruthy()
   })
 
   it("exposes incremental history loading from the Convex pagination state", async () => {

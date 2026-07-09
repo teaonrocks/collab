@@ -119,6 +119,65 @@ describe("WorkspaceChat", () => {
     expect(within(workspaceNavigation).queryByText("Maya Patel")).toBeNull()
   })
 
+  it("starts a direct message from eligible members and prevents duplicate submission", async () => {
+    let resolveStart!: (conversation: { id: string; otherUser: { id: string; displayName: string } }) => void
+    const pending = new Promise<{ id: string; otherUser: { id: string; displayName: string } }>((resolve) => {
+      resolveStart = resolve
+    })
+    const starts = vi.fn(() => pending)
+    render(
+      <WorkspaceChat
+        model={{
+          ...makeChatModel(),
+          directConversationCandidates: [{ id: "user-2", displayName: "Lee Chen" }]
+        }}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+        startDirectConversation={starts}
+      />
+    )
+
+    fireEvent.click(await screen.findByRole("button", { name: "Start direct message" }))
+    const dialog = await screen.findByRole("dialog")
+    const recipient = within(dialog).getByRole("button", { name: "Lee Chen" })
+    fireEvent.click(recipient)
+    fireEvent.click(recipient)
+
+    expect(starts).toHaveBeenCalledTimes(1)
+    expect(starts).toHaveBeenCalledWith("user-2")
+    resolveStart({ id: "direct-1", otherUser: { id: "user-2", displayName: "Lee Chen" } })
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Start direct message")
+  })
+
+  it("shows direct-message candidate loading, empty search, and retryable failure states", async () => {
+    const starts = vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValue({
+      id: "direct-1",
+      otherUser: { id: "user-2", displayName: "Lee Chen" }
+    })
+    const base = makeChatModel()
+    const props = {
+      createChannelMessage: () => Promise.resolve(),
+      deleteChannelMessage: () => Promise.resolve(),
+      startDirectConversation: starts
+    }
+    const { rerender } = render(<WorkspaceChat {...props} model={{ ...base, directConversationCandidates: undefined }} />)
+
+    fireEvent.click(await screen.findByRole("button", { name: "Start direct message" }))
+    expect(await screen.findByText("Loading eligible members...")).toBeTruthy()
+
+    rerender(<WorkspaceChat {...props} model={{ ...base, directConversationCandidates: [{ id: "user-2", displayName: "Lee Chen" }] }} />)
+    const search = await screen.findByPlaceholderText("Search workspace members")
+    fireEvent.change(search, { target: { value: "nobody" } })
+    expect(await screen.findByText("No matching members.")).toBeTruthy()
+    fireEvent.change(search, { target: { value: "Lee" } })
+    fireEvent.click(await screen.findByRole("button", { name: "Lee Chen" }))
+    expect((await screen.findByRole("alert")).textContent).toContain("Check your connection and try again")
+    fireEvent.click(await screen.findByRole("button", { name: "Lee Chen" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    expect(starts).toHaveBeenCalledTimes(2)
+  })
+
   it("keeps direct messages in the global rail while changing channels", async () => {
     const base = makeChatModel()
     const directConversations = [{ id: "direct-1", otherUser: { id: "user-2", displayName: "Lee Chen" } }]

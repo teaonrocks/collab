@@ -76,6 +76,7 @@ function ConvexDogfoodChat() {
   const generateAttachmentUploadUrl = useMutation(api.chat.generateAttachmentUploadUrl)
   const registerAttachmentUpload = useMutation(api.chat.registerAttachmentUpload)
   const deleteAttachmentUpload = useMutation(api.chat.deleteAttachmentUpload)
+  const startOrReopenDirectConversation = useMutation(api.direct_conversations.startOrReopen)
   const [ensuredUserId, setEnsuredUserId] = useState<string | null>(null)
   const [selectedConversation, setSelectedConversation] = useState<DogfoodActiveConversation | null>(null)
   const [stableDirectConversations, setStableDirectConversations] = useState<ReadonlyArray<DogfoodDirectConversationView>>([])
@@ -99,6 +100,10 @@ function ConvexDogfoodChat() {
   )
   const directConversations = useQuery(
     api.direct_conversations.list,
+    workspace === undefined || workspace === null ? "skip" : { workspaceId: workspace.workspace.id }
+  )
+  const directConversationCandidates = useQuery(
+    api.direct_conversations.candidates,
     workspace === undefined || workspace === null ? "skip" : { workspaceId: workspace.workspace.id }
   )
   useEffect(() => {
@@ -241,6 +246,7 @@ function ConvexDogfoodChat() {
             workspace,
             channels: channelList,
             directConversations: stableDirectConversations,
+            directConversationCandidates,
             selectedConversation: activeKind === "direct"
               ? { kind: "direct", id: activeChannelId }
               : { kind: "channel", id: activeChannelId },
@@ -254,7 +260,8 @@ function ConvexDogfoodChat() {
             messagesLoading: messagePagination.status === "LoadingFirstPage",
             messagesHasMore: messagePagination.status === "CanLoadMore" || messagePagination.status === "LoadingMore",
             messagesLoadingMore: messagePagination.status === "LoadingMore",
-            membersLoading: members === undefined
+            membersLoading: members === undefined,
+            directConversationsLoading: directConversations === undefined
           },
           commands: {
             loadOlderMessages: () => messagePagination.loadMore(50),
@@ -267,6 +274,18 @@ function ConvexDogfoodChat() {
             },
             selectChannel: (channelId) => setSelectedConversation({ kind: "channel", id: channelId }),
             selectDirectConversation: (conversationId) => setSelectedConversation({ kind: "direct", id: conversationId }),
+            startDirectConversation: async (recipientUserId) => {
+              const conversation = await startOrReopenDirectConversation({
+                workspaceId: workspace.workspace.id,
+                recipientUserId
+              })
+              setStableDirectConversations((existing) => {
+                const withoutConversation = existing.filter((item) => item.id !== conversation.id)
+                return [conversation, ...withoutConversation]
+              })
+              setSelectedConversation({ kind: "direct", id: conversation.id })
+              return conversation
+            },
             editChannel,
             deleteChannel: async (input) => {
               await deleteChannel(input)
@@ -306,7 +325,7 @@ function ConvexDogfoodChat() {
             operationErrorMessage: dogfoodOperationErrorMessage
           }
         }),
-    [activeChannelId, activeKind, addPrivateChannelMember, channelIndicators, channelList, channelMemberInviteCandidates, convex, createChannel, createChannelInviteCandidates, deleteAttachmentUpload, deleteChannel, deleteMessage, editChannel, editMessage, generateAttachmentUploadUrl, members, messagePagination, messages, registerAttachmentUpload, removePrivateChannelMember, selectedConversation, sendMessage, stableDirectConversations, toggleMessageReaction, workspace]
+    [activeChannelId, activeKind, addPrivateChannelMember, channelIndicators, channelList, channelMemberInviteCandidates, convex, createChannel, createChannelInviteCandidates, deleteAttachmentUpload, deleteChannel, deleteMessage, directConversationCandidates, directConversations, editChannel, editMessage, generateAttachmentUploadUrl, members, messagePagination, messages, registerAttachmentUpload, removePrivateChannelMember, selectedConversation, sendMessage, stableDirectConversations, startOrReopenDirectConversation, toggleMessageReaction, workspace]
   )
 
   if (auth.isLoading) {

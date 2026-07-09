@@ -50,6 +50,7 @@ import {
   type ChannelMessageSearchResult,
   type ChannelMessageSearchState,
   createChannelViewModel,
+  filterDirectConversationCandidates,
   filterMentionMembers,
   formatClockPart,
   formatDatePart,
@@ -170,6 +171,7 @@ export function WorkspaceChat(props: {
   readonly deleteChannel?: ChatDataView["deleteChannel"]
   readonly selectChannel?: SelectChatChannel
   readonly selectDirectConversation?: ChatDataView["selectDirectConversation"]
+  readonly startDirectConversation?: ChatDataView["startDirectConversation"]
   readonly addChannelMember?: ChatDataView["addChannelMember"]
   readonly removeChannelMember?: ChatDataView["removeChannelMember"]
   readonly editChannelMessage?: ChatDataView["editChannelMessage"]
@@ -189,6 +191,7 @@ export function WorkspaceChat(props: {
     deleteChannel,
     selectChannel,
     selectDirectConversation,
+    startDirectConversation,
     createChannelMessage,
     uploadMessageAttachment,
     discardMessageAttachment,
@@ -417,8 +420,12 @@ export function WorkspaceChat(props: {
         workspaceName={model.workspace.name}
         currentUserName={model.currentUser.displayName}
         conversations={model.directConversations}
+        indicators={new Map(model.channelIndicators?.map((state) => [state.channelId, state.indicator]))}
         activeConversationId={activeConversation.kind === "direct" ? activeId : null}
         onSelectConversation={selectDirectConversation}
+        candidates={model.directConversationCandidates}
+        conversationsLoading={model.directConversationsLoading === true}
+        onStartConversation={startDirectConversation}
         profileMenuOpen={profileMenuOpen}
         profileMenuActions={profileMenuActions}
         onOpenProfileMenu={() => setProfileMenuOpen(true)}
@@ -559,8 +566,12 @@ function WorkspaceRail(props: {
   readonly workspaceName: string
   readonly currentUserName: string
   readonly conversations: ReadonlyArray<ChatDirectConversation>
+  readonly indicators: ReadonlyMap<ChatChannelId, ChatChannelIndicator>
   readonly activeConversationId: ChatChannelId | null
   readonly onSelectConversation?: ChatDataView["selectDirectConversation"]
+  readonly candidates?: ReadonlyArray<ChatChannelMember>
+  readonly conversationsLoading: boolean
+  readonly onStartConversation?: ChatDataView["startDirectConversation"]
   readonly profileMenuOpen: boolean
   readonly profileMenuActions: ReadonlyArray<ProfileMenuAction>
   readonly onOpenProfileMenu: () => void
@@ -570,14 +581,20 @@ function WorkspaceRail(props: {
     workspaceName,
     currentUserName,
     conversations,
+    indicators,
     activeConversationId,
     onSelectConversation,
+    candidates,
+    conversationsLoading,
+    onStartConversation,
     profileMenuOpen,
     profileMenuActions,
     onOpenProfileMenu,
     onCloseProfileMenu
   } = props
   const hasProfileActions = profileMenuActions.length > 0
+  const [startOpen, setStartOpen] = useState(false)
+  const addButtonRef = useRef<HTMLButtonElement>(null)
   return (
     <aside className="workspaceRail flex h-full min-h-0 min-w-0 flex-col items-center gap-3 border-r border-border bg-surface-rail px-2 py-3 [grid-area:rail]" aria-label="Global navigation">
       <nav className="railGroup flex w-full flex-col items-center gap-2" aria-label="Workspaces">
@@ -595,7 +612,28 @@ function WorkspaceRail(props: {
       </nav>
       <div className="railDivider h-px w-8 shrink-0 bg-border-strong" role="separator" aria-label="Direct messages" />
       <nav className="railGroup flex w-full flex-col items-center gap-2" aria-label="Direct messages">
-        {conversations.map((conversation) => (
+        {onStartConversation === undefined
+          ? null
+          : (
+            <button
+              ref={addButtonRef}
+              type="button"
+              className={classNames(railItemClassName, "rounded-full text-foreground-muted")}
+              aria-label="Start direct message"
+              onClick={() => setStartOpen(true)}
+            >
+              <Plus className={iconClassName} aria-hidden="true" />
+              <span className={railTooltipClassName} role="tooltip">Start direct message</span>
+            </button>
+          )}
+        {conversationsLoading && conversations.length === 0
+          ? <span className="sr-only" role="status">Loading direct messages...</span>
+          : conversations.length === 0
+            ? <span className="sr-only">No direct messages yet.</span>
+            : null}
+        {conversations.map((conversation) => {
+          const indicator = conversation.id === activeConversationId ? undefined : indicators.get(conversation.id)
+          return (
           <button
             key={conversation.id}
             type="button"
@@ -605,9 +643,11 @@ function WorkspaceRail(props: {
             onClick={() => onSelectConversation?.(conversation.id)}
           >
             {initials(conversation.otherUser.displayName)}
+            {indicator === undefined ? null : <span className="absolute right-0 top-0 size-2 rounded-full bg-accent" title={indicator === "mentioned" ? "Mentioned" : "Unread"} />}
             <span className={railTooltipClassName} role="tooltip">{conversation.otherUser.displayName}</span>
           </button>
-        ))}
+          )
+        })}
       </nav>
       <div className="railSpacer flex-1" />
       <div
@@ -663,7 +703,87 @@ function WorkspaceRail(props: {
           )
           : null}
       </div>
+      {startOpen && onStartConversation !== undefined
+        ? <StartDirectMessageDialog
+            candidates={candidates}
+            onStart={onStartConversation}
+            onClose={() => {
+              setStartOpen(false)
+              window.setTimeout(() => addButtonRef.current?.focus(), 0)
+            }}
+          />
+        : null}
     </aside>
+  )
+}
+
+function StartDirectMessageDialog(props: {
+  readonly candidates?: ReadonlyArray<ChatChannelMember>
+  readonly onStart: NonNullable<ChatDataView["startDirectConversation"]>
+  readonly onClose: () => void
+}) {
+  const { candidates, onStart, onClose } = props
+  const [query, setQuery] = useState("")
+  const [savingUserId, setSavingUserId] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const savingRef = useRef(false)
+  const visibleCandidates = filterDirectConversationCandidates(candidates ?? [], query)
+
+  const start = (candidate: ChatChannelMember) => {
+    if (savingRef.current) return
+    savingRef.current = true
+    setSavingUserId(candidate.id)
+    setError(null)
+    void onStart(candidate.id)
+      .then(onClose)
+      .catch(() => {
+        savingRef.current = false
+        setSavingUserId(null)
+        setError("Could not open this direct message. Check your connection and try again.")
+      })
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+      <DialogContent className="directMessageDialog max-w-[420px]">
+        <DialogTitle>Start Direct Message</DialogTitle>
+        <DialogDescription className="sr-only">Search eligible workspace members and open a direct conversation.</DialogDescription>
+        <div className="mt-3 flex flex-col gap-2">
+          <label className="sr-only" htmlFor="direct-message-member-search">Search workspace members</label>
+          <Input
+            id="direct-message-member-search"
+            type="search"
+            value={query}
+            placeholder="Search workspace members"
+            autoFocus
+            disabled={savingUserId !== null || candidates === undefined || candidates.length === 0}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          <div className="max-h-60 overflow-y-auto rounded-control border border-border bg-surface-canvas p-1" aria-label="Eligible direct message recipients">
+            {candidates === undefined
+              ? <p className="m-0 px-2 py-3 text-sm text-foreground-subtle" role="status">Loading eligible members...</p>
+              : candidates.length === 0
+                ? <p className="m-0 px-2 py-3 text-sm text-foreground-subtle">No eligible recipients are available.</p>
+                : visibleCandidates.length === 0
+                  ? <p className="m-0 px-2 py-3 text-sm text-foreground-subtle">No matching members.</p>
+                  : visibleCandidates.map((candidate) => (
+                      <button
+                        key={candidate.id}
+                        type="button"
+                        className="flex min-h-10 w-full items-center gap-2 rounded-control border-0 bg-transparent px-2 text-left text-sm text-foreground hover:bg-surface-muted focus-visible:bg-surface-muted"
+                        disabled={savingUserId !== null}
+                        onClick={() => start(candidate)}
+                      >
+                        <Avatar name={candidate.displayName} aria-hidden="true" className="size-8" />
+                        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-bold">{candidate.displayName}</span>
+                        {savingUserId === candidate.id ? <span className="text-xs text-foreground-subtle">Opening...</span> : null}
+                      </button>
+                    ))}
+          </div>
+          {error === null ? null : <p className="m-0 text-sm text-destructive-text" role="alert">{error}</p>}
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 
