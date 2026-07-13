@@ -18,7 +18,13 @@ import {
 const mocks = vi.hoisted(() => ({
   auth: {
     isLoading: false,
-    user: null as null | { readonly id: string },
+    user: null as null | {
+      readonly id: string
+      readonly email?: string
+      readonly firstName?: string | null
+      readonly lastName?: string | null
+      readonly profilePictureUrl?: string | null
+    },
     signOut: vi.fn(),
     getSignInUrl: vi.fn()
   },
@@ -171,7 +177,13 @@ vi.mock("./workspace-chat", () => ({
   readonly operationErrorMessage?: (operation: "send" | "edit" | "delete" | "react", cause: unknown) => string
   readonly canEditMessage?: (message: ChatMessage) => boolean
   readonly canDeleteMessage?: (message: ChatMessage) => boolean
-  readonly profileMenuActions?: ReadonlyArray<{ readonly label: string; readonly onSelect: () => void }>
+  readonly profileMenuActions?: ReadonlyArray<{
+    readonly id?: string
+    readonly label: string
+    readonly detail?: string
+    readonly selected?: boolean
+    readonly onSelect: () => void
+  }>
   readonly loadOlderChannelMessages?: () => void
 }) => {
     const firstMessage = props.model.channelMessages[0]
@@ -308,9 +320,15 @@ vi.mock("./workspace-chat", () => ({
         {secondMessage !== undefined && props.canDeleteMessage?.(secondMessage)
           ? <button type="button">Delete second message</button>
           : null}
-        <button type="button" onClick={() => props.profileMenuActions?.[0]?.onSelect()}>
-          Sign out
-        </button>
+        <ul aria-label="mock profile actions">
+          {props.profileMenuActions?.map((action) => (
+            <li key={action.id ?? action.label}>
+              <button type="button" onClick={action.onSelect}>{action.label}</button>
+              {action.detail === undefined ? null : <span>{action.detail}</span>}
+              {action.selected === true ? <span>selected</span> : null}
+            </li>
+          ))}
+        </ul>
         <p>{props.operationErrorMessage?.("send", new Error("secret mutation details"))}</p>
       </section>
     )
@@ -321,6 +339,7 @@ afterEach(() => {
   cleanup()
   vi.clearAllMocks()
   vi.unstubAllGlobals()
+  Reflect.deleteProperty(window, "aetherShell")
 })
 
 beforeEach(() => {
@@ -892,6 +911,39 @@ describe("ConvexDogfoodApp", () => {
     expect(screen.getByRole("button", { name: "Sign in" })).toBeTruthy()
   })
 
+  it("binds system-browser sign-in to the initiating account window", async () => {
+    const openExternal = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(window, "aetherShell", {
+      configurable: true,
+      value: {
+        openExternal,
+        accountContext: vi.fn().mockResolvedValue({
+          windowId: "window-2",
+          currentAccountId: "account-2",
+          accounts: [{
+            id: "account-2",
+            displayName: "Sign in",
+            email: null,
+            avatarUrl: null,
+            current: true
+          }]
+        })
+      }
+    })
+    const { ConvexDogfoodApp } = await import("./dogfood-chat")
+
+    render(<ConvexDogfoodApp />)
+    fireEvent.click(await screen.findByRole("button", { name: "Sign in" }))
+
+    await waitFor(() => expect(mocks.auth.getSignInUrl).toHaveBeenCalledWith({
+      state: {
+        aetherWindowId: "window-2",
+        aetherAccountId: "account-2"
+      }
+    }))
+    expect(openExternal).toHaveBeenCalledTimes(1)
+  })
+
   it("shows access setup errors from ensureViewer", async () => {
     const { ConvexDogfoodApp } = await import("./dogfood-chat")
     mocks.auth.user = { id: "user-1" }
@@ -935,6 +987,57 @@ describe("ConvexDogfoodApp", () => {
     expect(mocks.auth.signOut).toHaveBeenCalledWith({
       returnTo: "http://localhost:3000/"
     })
+  })
+
+  it("exposes saved accounts and account lifecycle actions in the profile menu", async () => {
+    const switchAccount = vi.fn().mockResolvedValue(undefined)
+    const addAccount = vi.fn().mockResolvedValue(undefined)
+    const removeCurrentAccount = vi.fn().mockResolvedValue(undefined)
+    const signOutAllAccounts = vi.fn().mockResolvedValue(undefined)
+    const accountContext = {
+      windowId: "window-1",
+      currentAccountId: "default",
+      accounts: [
+        { id: "default", displayName: "Maya Patel", email: "maya@example.com", avatarUrl: null, current: true },
+        { id: "account-2", displayName: "Archer", email: "archer@example.com", avatarUrl: null, current: false }
+      ]
+    }
+    Object.defineProperty(window, "aetherShell", {
+      configurable: true,
+      value: {
+        accountContext: vi.fn().mockResolvedValue(accountContext),
+        updateAccountProfile: vi.fn().mockResolvedValue(accountContext),
+        switchAccount,
+        addAccount,
+        removeCurrentAccount,
+        signOutAllAccounts
+      }
+    })
+    const { ConvexDogfoodApp } = await import("./dogfood-chat")
+    mocks.auth.user = {
+      id: "user-1",
+      email: "maya@example.com",
+      firstName: "Maya",
+      lastName: "Patel",
+      profilePictureUrl: null
+    }
+    mocks.convexAuth.isAuthenticated = true
+    mocks.workspace = workspace
+    mocks.channels = channels
+    mocks.messages = messages
+
+    render(<ConvexDogfoodApp />)
+
+    fireEvent.click(await screen.findByRole("button", { name: "Archer" }))
+    expect(switchAccount).toHaveBeenCalledWith("account-2")
+    expect(screen.getByText("archer@example.com")).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: "Add account" }))
+    expect(addAccount).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole("button", { name: "Sign out all accounts" }))
+    await waitFor(() => expect(signOutAllAccounts).toHaveBeenCalledTimes(1))
+    expect(mocks.auth.signOut).toHaveBeenCalledWith({ navigate: false })
   })
 
   it("sends messages through the Convex mutation using the active channel", async () => {

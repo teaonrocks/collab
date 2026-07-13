@@ -202,8 +202,17 @@ still deferred.
 
 Authentication opens AuthKit in the system browser and returns through
 `aether://auth/callback`. Strict URL validation, callback queuing/focusing, packaged renderer
-translation, and safe sign-out return handling are implemented even though signed distribution is
-not. Development still uses the electron-vite renderer origin where required by AuthKit.
+translation, and exact callback-to-window routing are implemented even though signed distribution
+is not. Development still uses the electron-vite renderer origin where required by AuthKit.
+
+Each account is assigned a persistent Electron session partition because AuthKit browser sessions
+are session-scoped and a BrowserWindow cannot change partitions after creation. A display-only
+registry remembers available accounts, while credentials remain in Chromium-managed session
+storage. A newly added account remains ephemeral until authentication supplies its profile, so a
+canceled sign-in cannot leave a saved placeholder. Each window has one active account, switching
+recreates only that window on the selected partition, and new windows inherit the focused window's
+account. OAuth state carries opaque window and account identifiers so the PKCE callback returns to
+the browsing context that owns its verifier.
 
 #### Measure Dogfood Success As Real Use
 

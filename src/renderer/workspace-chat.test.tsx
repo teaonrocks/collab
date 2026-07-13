@@ -624,7 +624,10 @@ describe("WorkspaceChat", () => {
     fireEvent.mouseEnter(profileRail!)
 
     const menu = await screen.findByRole("menu", { name: "Profile settings" })
+    const actions = within(menu).getByRole("group", { name: "Accounts and profile actions" })
     expect(within(menu).getByText("Maya Patel")).toBeTruthy()
+    expect(menu.className).toContain("max-h-[calc(100dvh-24px)]")
+    expect(actions.className).toContain("overflow-y-auto")
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Sign out" }))
 
     expect(signOuts).toBe(1)

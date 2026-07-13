@@ -1,6 +1,15 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { isSafeExternalAuthUrl, openExternalUrl } from "./electron-shell"
+import {
+  addWindowAccount,
+  getWindowAccountContext,
+  isSafeExternalAuthUrl,
+  openExternalUrl,
+  removeCurrentWindowAccount,
+  signOutAllWindowAccounts,
+  switchWindowAccount,
+  updateWindowAccountProfile
+} from "./electron-shell"
 
 const signInUrl = (host = "api.workos.com", protocol = "https:"): string => {
   const url = new URL(`${protocol}//${host}/user_management/authorize`)
@@ -45,5 +54,44 @@ describe("electron shell URL gate", () => {
 
   it("rejects unsafe browser fallback navigation when preload is unavailable", async () => {
     await expect(openExternalUrl("https://example.com/phishing")).rejects.toThrow("unsupported external URL")
+  })
+
+  it("delegates account lifecycle commands to the isolated preload bridge", async () => {
+    const context = {
+      windowId: "window-1",
+      currentAccountId: "default",
+      accounts: []
+    }
+    const bridge = {
+      accountContext: vi.fn().mockResolvedValue(context),
+      updateAccountProfile: vi.fn().mockResolvedValue(context),
+      switchAccount: vi.fn().mockResolvedValue(undefined),
+      addAccount: vi.fn().mockResolvedValue(undefined),
+      removeCurrentAccount: vi.fn().mockResolvedValue(undefined),
+      signOutAllAccounts: vi.fn().mockResolvedValue(undefined)
+    }
+    Object.defineProperty(window, "aetherShell", {
+      configurable: true,
+      value: bridge
+    })
+    const profile = {
+      userId: "user-1",
+      displayName: "Maya Patel",
+      email: "maya@example.com",
+      avatarUrl: null
+    }
+
+    await expect(getWindowAccountContext()).resolves.toEqual(context)
+    await expect(updateWindowAccountProfile(profile)).resolves.toEqual(context)
+    await switchWindowAccount("account-2")
+    await addWindowAccount()
+    await removeCurrentWindowAccount()
+    await signOutAllWindowAccounts()
+
+    expect(bridge.updateAccountProfile).toHaveBeenCalledWith(profile)
+    expect(bridge.switchAccount).toHaveBeenCalledWith("account-2")
+    expect(bridge.addAccount).toHaveBeenCalledTimes(1)
+    expect(bridge.removeCurrentAccount).toHaveBeenCalledTimes(1)
+    expect(bridge.signOutAllAccounts).toHaveBeenCalledTimes(1)
   })
 })

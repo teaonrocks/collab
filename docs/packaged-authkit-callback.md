@@ -22,7 +22,9 @@ Packaged builds use the unique bundle identifier `com.aether.chat`, declare `aet
 
 - rejects anything that is not the strict native callback shape;
 - queues the callback if the renderer window does not exist yet;
-- focuses the existing window when possible;
+- reads the opaque Aether window/account identifiers echoed through OAuth state;
+- returns the callback to the exact window and account partition that initiated sign-in;
+- focuses that window when possible;
 - loads the renderer entrypoint with the callback query parameters.
 
 AuthKit's browser client only handles a redirect when the current page pathname matches its
@@ -31,9 +33,15 @@ configured `redirectUri` pathname. In packaged Electron, the page is the built r
 native callback. Normal sign-in URL generation continues to use `VITE_WORKOS_REDIRECT_URI`, which
 should remain `aether://auth/callback`.
 
-Sign-out passes the current app page without callback query parameters as AuthKit's `returnTo` value
-so a packaged window can return to the local renderer after logout instead of staying on a hosted
-logout page.
+Each saved account uses a separate persistent Electron session partition. The initial account keeps
+the historical default partition so an existing installation does not lose its current sign-in.
+The display-only account registry lives under Electron's `userData` directory and never contains
+access or refresh tokens. Switching accounts replaces only the initiating window with one bound to
+the selected partition; other windows remain untouched.
+
+Removing an account first asks AuthKit to end the current session without navigation, then clears
+that account partition and moves every window using it to another saved account. Sign out all clears
+every saved partition and returns all open windows to a fresh signed-out default account.
 
 ## Manual Smoke Check
 
@@ -48,6 +56,11 @@ smoke test when more than one Electron checkout is registered with Launch Servic
 4. Complete sign-in and confirm the OS deep link returns to Aether.
 5. Quit Aether, open a fresh `aether://auth/callback?code=fake` URL, then confirm the app opens or
    focuses without navigating to an arbitrary external URL.
-6. Sign out from the profile menu and confirm the app returns to the signed-out state.
+6. From the bottom-left profile avatar, choose Add account and complete sign-in with a second account.
+7. Open a second window with `Cmd+N`; confirm it inherits the focused window's account.
+8. Switch only the second window to the other saved account and confirm the first window is unchanged.
+9. Quit and reopen Aether; confirm both accounts remain available without signing in again.
+10. Sign out the active account and confirm every window using it moves to another saved account.
+11. Choose Sign out all accounts and confirm every open window returns to the signed-out state.
 
 Do not share raw callback URLs from a real sign-in because they contain short-lived auth material.

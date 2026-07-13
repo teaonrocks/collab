@@ -13,7 +13,8 @@ The dogfood app currently supports:
 - shallow message replies with inline parent previews;
 - message reactions;
 - image and file attachments stored in Convex; and
-- system-browser sign-in with an `aether://auth/callback` deep link back to Electron.
+- system-browser sign-in with an `aether://auth/callback` deep link back to Electron; and
+- persistent multi-account sessions with independently switchable app windows.
 
 Direct-message navigation is present in the shared UI model, but Convex-backed direct-message
 conversations are not implemented. Agent workflows, notifications, installers, and automatic
@@ -23,7 +24,7 @@ updates are also outside the current runtime.
 
 ```text
 Electron main process
-  native window and aether:// callback handling
+  account registry, isolated window sessions, and aether:// callback routing
                 |
                 v
 React renderer -> WorkOS AuthKit -> Convex
@@ -32,6 +33,10 @@ React renderer -> WorkOS AuthKit -> Convex
 ```
 
 - `src/main/index.ts` owns Electron startup, native protocol registration, and external URL policy.
+- `src/main/account-registry.ts` owns the display-only saved-account registry; AuthKit credentials
+  stay inside persistent, account-specific Electron session partitions.
+- `src/shared/account-session.ts` defines the account/session and callback-routing policy shared
+  across Electron boundaries.
 - `src/shared/auth-redirect-policy.ts` validates AuthKit URLs and native callback URLs.
 - `src/renderer/main.tsx` selects the configured dogfood app or a configuration-required screen.
 - `src/renderer/convex-auth.tsx` connects AuthKit to Convex.
@@ -89,6 +94,12 @@ development Electron app is shared by every Electron checkout and cannot reliabl
 pnpm package:mac
 pnpm start:mac
 ```
+
+Open another Aether window with File → New Window or `Cmd/Ctrl+N`. A new window inherits the active
+account of the focused window. Launching Aether again while it is already running also opens an
+inheriting window. Use the bottom-left profile avatar to switch that window, add another account,
+sign out the current account everywhere it is open, or sign out all saved accounts. Other windows
+do not change when one window switches accounts.
 
 If any required `VITE_` value is missing, the renderer intentionally shows a configuration-required
 screen. It does not fall back to the local JSON chat.

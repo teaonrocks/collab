@@ -10,6 +10,7 @@ export type AuthCallbackCoordinator = {
   readonly pendingAuthCallbackUrl: () => string | null
   readonly handleAuthCallback: (rawUrl: string, window: AuthCallbackWindow | null) => void
   readonly consumePendingAuthCallback: (window: AuthCallbackWindow) => void
+  readonly discardPendingAuthCallback: () => void
 }
 
 export const focusAuthCallbackWindow = (window: AuthCallbackWindow): void => {
@@ -45,6 +46,9 @@ export const createAuthCallbackCoordinator = (options: {
       const callbackUrl = pendingAuthCallbackUrl
       pendingAuthCallbackUrl = null
       handleAuthCallback(callbackUrl, window)
+    },
+    discardPendingAuthCallback: () => {
+      pendingAuthCallbackUrl = null
     }
   }
 }

@@ -5,11 +5,13 @@ For failure capture and recovery, see [`docs/dogfood-debugging.md`](dogfood-debu
 
 ## Setup
 
-- Use two clean tester checkouts with `.env.local` copied from the checked-in `.env.example`.
-- Confirm both checkouts use `https://polished-bison-174.convex.cloud`; neither checkout may contain
-  `CONVEX_DEPLOYMENT` or `CONVEX_DEPLOY_KEY`, and neither tester needs Convex team access.
-- Start both apps with `pnpm dev` without running `pnpm convex:dev`.
-- Use two different allowlisted accounts in separate app/browser sessions.
+- Use one clean tester checkout with `.env.local` copied from the checked-in `.env.example`.
+- Confirm it uses `https://polished-bison-174.convex.cloud`; the checkout may not contain
+  `CONVEX_DEPLOYMENT` or `CONVEX_DEPLOY_KEY`, and the tester does not need Convex team access.
+- Start the packaged app without running `pnpm convex:dev` so the native callback identity and
+  persistent account partitions are exercised.
+- Use two different allowlisted accounts. Add both to Aether, then open two windows and switch one
+  window to each account from the bottom-left profile avatar.
 
 ## Checklist
 
@@ -17,6 +19,11 @@ For failure capture and recovery, see [`docs/dogfood-debugging.md`](dogfood-debu
 - Sign-in opens AuthKit in the system browser and returns to the app.
 - In preview or packaged-style builds, the `aether://auth/callback` deep link focuses Aether and
   completes the AuthKit callback without opening unsupported external URLs.
+- Adding an account returns the callback to the exact window that initiated sign-in.
+- `Cmd/Ctrl+N` and relaunching Aether while it is running open a new window that inherits the focused
+  window's account.
+- Switching one window's account does not change another window, and both accounts remain available
+  after quitting and reopening Aether.
 - A non-allowlisted account sees a compact access error and can sign out.
 - An allowlisted account joins the shared `#general` channel.
 - Public channel creation is visible to the other account; selecting it joins the viewer before
@@ -61,7 +68,8 @@ For failure capture and recovery, see [`docs/dogfood-debugging.md`](dogfood-debu
 - Edited messages show an `edited` marker after realtime sync.
 - Delete asks for confirmation, then hard-deletes the message for both users.
 - Edit and delete failures show compact retryable errors without raw internal details.
-- Signing out from the profile menu returns to the sign-in state.
+- Signing out an account removes it globally and moves every window using it to another saved
+  account. Signing out all accounts returns every open window to the sign-in state.
 
 ## Shared-Deployment Acceptance Record
 

@@ -88,7 +88,12 @@ type ChannelNameValidation =
   | { readonly valid: false; readonly message: string }
 
 export type ProfileMenuAction = {
+  readonly id?: string
   readonly label: string
+  readonly detail?: string
+  readonly selected?: boolean
+  readonly separatorBefore?: boolean
+  readonly tone?: "default" | "destructive"
   readonly onSelect: () => void
 }
 
@@ -730,24 +735,38 @@ function WorkspaceRail(props: {
           ? (
             <>
               <div className="profileMenuBridge absolute bottom-0 left-full z-30 h-8 w-2.5" aria-hidden="true" />
-              <div className="profileMenu absolute bottom-0 left-[calc(100%+10px)] z-40 w-[180px] overflow-hidden rounded-panel border border-border-strong bg-surface-canvas shadow-popover" role="menu" aria-label="Profile settings">
-              <div className="profileMenuHeader border-b border-surface-rail p-2.5">
-                <strong className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[13px] leading-tight text-foreground">{currentUserName}</strong>
-              </div>
-              {profileMenuActions.map((action) => (
-                <button
-                  key={action.label}
-                  type="button"
-                  role="menuitem"
-                  className="min-h-9 w-full border-0 bg-surface-canvas px-2.5 text-left font-[inherit] text-[13px] font-bold text-foreground hover:bg-surface-muted focus-visible:bg-surface-muted"
-                  onClick={() => {
-                    onCloseProfileMenu()
-                    action.onSelect()
-                  }}
-                >
-                  {action.label}
-                </button>
-              ))}
+              <div className="profileMenu absolute bottom-0 left-[calc(100%+10px)] z-40 flex max-h-[calc(100dvh-24px)] w-[248px] flex-col overflow-hidden rounded-panel border border-border-strong bg-surface-canvas shadow-popover" role="menu" aria-label="Profile settings">
+                <div className="profileMenuHeader shrink-0 border-b border-surface-rail p-2.5">
+                  <strong className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[13px] leading-tight text-foreground">{currentUserName}</strong>
+                </div>
+                <div className="profileMenuActions min-h-0 overflow-y-auto overscroll-contain" role="group" aria-label="Accounts and profile actions">
+                  {profileMenuActions.map((action) => (
+                    <button
+                      key={action.id ?? action.label}
+                      type="button"
+                      role="menuitem"
+                      className={classNames(
+                        "relative grid min-h-9 w-full grid-cols-[18px_minmax(0,1fr)] items-center gap-1.5 border-0 bg-surface-canvas px-2.5 py-2 text-left font-[inherit] text-[13px] text-foreground hover:bg-surface-muted focus-visible:bg-surface-muted",
+                        action.separatorBefore && "border-t border-t-surface-rail",
+                        action.tone === "destructive" && "text-destructive-text"
+                      )}
+                      onClick={() => {
+                        onCloseProfileMenu()
+                        action.onSelect()
+                      }}
+                    >
+                      <span className="grid size-[18px] place-items-center" aria-hidden="true">
+                        {action.selected === true ? <Check className="size-3.5 [stroke-width:2.25]" /> : null}
+                      </span>
+                      <span className="min-w-0">
+                        <strong className="block overflow-hidden text-ellipsis whitespace-nowrap text-[13px] leading-tight">{action.label}</strong>
+                        {action.detail === undefined
+                          ? null
+                          : <span className="mt-0.5 block overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-normal leading-tight text-foreground-subtle">{action.detail}</span>}
+                      </span>
+                    </button>
+                  ))}
+                </div>
               </div>
             </>
           )

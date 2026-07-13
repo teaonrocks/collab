@@ -3,6 +3,7 @@ import { useAction, useConvex, useConvexAuth, useMutation, usePaginatedQuery, us
 import { Component, type ErrorInfo, type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import { api } from "../../convex/_generated/api"
 import type { Id } from "../../convex/_generated/dataModel"
+import type { WindowAccountContext } from "../shared/account-session"
 import { uploadAttachment } from "./attachment-draft"
 import { authKitSignOutReturnTo } from "./authkit-redirect"
 import {
@@ -14,8 +15,16 @@ import {
   type DogfoodDirectConversationView,
   type DogfoodWorkspaceView
 } from "./dogfood-chat-adapter"
-import { openExternalUrl } from "./electron-shell"
-import { WorkspaceChat } from "./workspace-chat"
+import {
+  addWindowAccount,
+  getWindowAccountContext,
+  openExternalUrl,
+  removeCurrentWindowAccount,
+  signOutAllWindowAccounts,
+  switchWindowAccount,
+  updateWindowAccountProfile
+} from "./electron-shell"
+import { WorkspaceChat, type ProfileMenuAction } from "./workspace-chat"
 
 export { dogfoodChatToChatData } from "./dogfood-chat-adapter"
 export type {
@@ -87,6 +96,7 @@ function ConvexDogfoodChat() {
   const [createdChannels, setCreatedChannels] = useState<ReadonlyArray<DogfoodChannelView>>([])
   const [error, setError] = useState<ConvexDogfoodError | null>(null)
   const [signInOpening, setSignInOpening] = useState(false)
+  const [accountContext, setAccountContext] = useState<WindowAccountContext | null>(null)
   const [ensureAttempt, setEnsureAttempt] = useState(0)
   const lastReadMarkerRef = useRef<string | null>(null)
   const authUserId = auth.user?.id ?? null
@@ -154,6 +164,48 @@ function ConvexDogfoodChat() {
     api.chat.channelIndicators,
     workspace === undefined || workspace === null ? "skip" : { workspaceId: workspace.workspace.id }
   )
+
+  useEffect(() => {
+    let cancelled = false
+    void getWindowAccountContext()
+      .then((context) => {
+        if (!cancelled) setAccountContext(context)
+      })
+      .catch((cause: unknown) => {
+        console.warn("Could not load the Aether account list", cause)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    const user = auth.user
+    if (
+      user === null ||
+      typeof user.email !== "string" ||
+      user.email.length === 0
+    ) {
+      return
+    }
+    const displayName = [user.firstName, user.lastName]
+      .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
+      .join(" ") || user.email
+    let cancelled = false
+    void updateWindowAccountProfile({
+      userId: user.id,
+      displayName,
+      email: user.email,
+      avatarUrl: user.profilePictureUrl
+    }).then((context) => {
+      if (!cancelled && context !== null) setAccountContext(context)
+    }).catch((cause: unknown) => {
+      console.warn("Could not remember the signed-in Aether account", cause)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [auth.user])
 
   useEffect(() => {
     if (workspace === undefined || workspace === null) return
@@ -344,16 +396,28 @@ function ConvexDogfoodChat() {
   }
 
   if (auth.user === null) {
+    const previousAccount = accountContext?.accounts.find((account) => !account.current && account.displayName !== "Sign in")
     return (
       <DogfoodShell title="Welcome to Aether" variant="plain">
         <button
           type="button"
           className={dogfoodPrimaryButtonClassName}
-          disabled={signInOpening}
-          onClick={() => void signInInDefaultBrowser(auth, setSignInOpening, setError)}
+          disabled={signInOpening || (window.aetherShell !== undefined && accountContext === null)}
+          onClick={() => void signInInDefaultBrowser(auth, setSignInOpening, setError, accountContext)}
         >
-          {signInOpening ? "Opening browser..." : "Sign in"}
+          {signInOpening ? "Opening browser..." : accountContext === null && window.aetherShell !== undefined ? "Loading account..." : "Sign in"}
         </button>
+        {previousAccount === undefined
+          ? null
+          : (
+            <button
+              type="button"
+              className={dogfoodSecondaryButtonClassName}
+              onClick={() => void switchWindowAccount(previousAccount.id)}
+            >
+              Back to {previousAccount.displayName}
+            </button>
+          )}
       </DogfoodShell>
     )
   }
@@ -378,7 +442,7 @@ function ConvexDogfoodChat() {
         >
           Try again
         </button>
-        <button type="button" className={dogfoodSecondaryButtonClassName} onClick={() => auth.signOut()}>
+        <button type="button" className={dogfoodSecondaryButtonClassName} onClick={() => void signOutCurrentAccount(auth, accountContext)}>
           Sign out
         </button>
       </DogfoodShell>
@@ -406,7 +470,7 @@ function ConvexDogfoodChat() {
   return (
     <WorkspaceChat
       {...model}
-      profileMenuActions={[{ label: "Sign out", onSelect: () => auth.signOut({ returnTo: authKitSignOutReturnTo() }) }]}
+      profileMenuActions={profileMenuActions(auth, accountContext, setError)}
     />
   )
 }
@@ -414,12 +478,20 @@ function ConvexDogfoodChat() {
 const signInInDefaultBrowser = async (
   auth: ReturnType<typeof useAuth>,
   setSignInOpening: (opening: boolean) => void,
-  setError: (error: ConvexDogfoodError | null) => void
+  setError: (error: ConvexDogfoodError | null) => void,
+  accountContext: WindowAccountContext | null
 ) => {
   setSignInOpening(true)
   setError(null)
   try {
-    const url = await auth.getSignInUrl()
+    const url = await auth.getSignInUrl(accountContext === null
+      ? {}
+      : {
+          state: {
+            aetherWindowId: accountContext.windowId,
+            aetherAccountId: accountContext.currentAccountId
+          }
+        })
     await openExternalUrl(url)
   } catch (cause) {
     const diagnostic = dogfoodDiagnostic("auth", "sign-in", cause)
@@ -428,6 +500,90 @@ const signInInDefaultBrowser = async (
   } finally {
     setSignInOpening(false)
   }
+}
+
+const signOutCurrentAccount = async (
+  auth: ReturnType<typeof useAuth>,
+  accountContext: WindowAccountContext | null
+): Promise<void> => {
+  if (accountContext === null) {
+    auth.signOut({ returnTo: authKitSignOutReturnTo() })
+    return
+  }
+  try {
+    await auth.signOut({ navigate: false })
+  } catch {
+    // The main process clears the isolated partition even if AuthKit has
+    // already lost its in-memory access token.
+  }
+  await removeCurrentWindowAccount()
+}
+
+const signOutAllAccounts = async (
+  auth: ReturnType<typeof useAuth>,
+  accountContext: WindowAccountContext | null
+): Promise<void> => {
+  if (accountContext === null) {
+    auth.signOut({ returnTo: authKitSignOutReturnTo() })
+    return
+  }
+  try {
+    await auth.signOut({ navigate: false })
+  } catch {
+    // Every saved partition is cleared by the main process below.
+  }
+  await signOutAllWindowAccounts()
+}
+
+const profileMenuActions = (
+  auth: ReturnType<typeof useAuth>,
+  accountContext: WindowAccountContext | null,
+  setError: (error: ConvexDogfoodError | null) => void
+): ReadonlyArray<ProfileMenuAction> => {
+  if (accountContext === null) {
+    return [{
+      label: "Sign out",
+      onSelect: () => auth.signOut({ returnTo: authKitSignOutReturnTo() })
+    }]
+  }
+
+  const run = (operation: () => Promise<void>) => {
+    void operation().catch((cause: unknown) => {
+      const diagnostic = dogfoodDiagnostic("auth", "try-again", cause)
+      logDogfoodDiagnostic("auth", cause, diagnostic)
+      setError({ message: "Could not update the active account. Try again.", diagnostic })
+    })
+  }
+
+  return [
+    ...accountContext.accounts.map<ProfileMenuAction>((account) => ({
+      id: `account:${account.id}`,
+      label: account.displayName,
+      ...(account.email === null ? {} : { detail: account.email }),
+      selected: account.current,
+      onSelect: () => {
+        if (!account.current) run(() => switchWindowAccount(account.id))
+      }
+    })),
+    {
+      id: "account:add",
+      label: "Add account",
+      separatorBefore: true,
+      onSelect: () => run(addWindowAccount)
+    },
+    {
+      id: "account:sign-out",
+      label: "Sign out this account",
+      separatorBefore: true,
+      onSelect: () => run(() => signOutCurrentAccount(auth, accountContext))
+    },
+    {
+      id: "account:sign-out-all",
+      label: "Sign out all accounts",
+      tone: "destructive",
+      onSelect: () => run(() => signOutAllAccounts(auth, accountContext))
+    }
+  ]
 }
 
 function DogfoodDiagnosticDetails(props: { readonly diagnostic: DogfoodDiagnostic }) {

@@ -66,4 +66,15 @@ describe("auth callback coordinator", () => {
 
     expect(coordinator.pendingAuthCallbackUrl()).toBe("aether://auth/callback?code=abc")
   })
+
+  it("can discard a stale callback that no longer has its initiating window", () => {
+    const coordinator = createAuthCallbackCoordinator({
+      initialAuthCallbackUrl: "aether://auth/callback?code=stale",
+      rendererCallbackUrl: () => "file:///app/index.html?code=stale"
+    })
+
+    coordinator.discardPendingAuthCallback()
+
+    expect(coordinator.pendingAuthCallbackUrl()).toBeNull()
+  })
 })
