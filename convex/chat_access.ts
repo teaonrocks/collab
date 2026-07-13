@@ -159,7 +159,12 @@ export const requireChannelMember = async (
 ) => {
   const channel = await ctx.db.get(input.channelId)
   if (channel === null || channel.deletedAt !== undefined) throw new Error("Channel not found")
-  await requireWorkspaceMember(ctx, { workspaceId: channel.workspaceId, userId: input.userId })
+  // Direct conversations are account-to-account. Legacy direct conversations may
+  // retain their original workspaceId during rollout, but that never gates access.
+  if (channel.kind !== "direct") {
+    if (channel.workspaceId === undefined) throw new Error("Channel is missing its workspace")
+    await requireWorkspaceMember(ctx, { workspaceId: channel.workspaceId, userId: input.userId })
+  }
   const channelMembership = await ctx.db
     .query("channelMemberships")
     .withIndex("by_channel_user", (q) =>

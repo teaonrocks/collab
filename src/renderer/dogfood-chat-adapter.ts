@@ -26,6 +26,8 @@ export type DogfoodChatAdapterInput = {
     readonly channels: ReadonlyArray<DogfoodChannelView>
     readonly directConversations?: ReadonlyArray<DogfoodDirectConversationView>
     readonly directConversationCandidates?: ReadonlyArray<DogfoodDirectConversationCandidateView>
+    readonly directMessageProfile?: FunctionReturnType<typeof api.social.profile>
+    readonly incomingFriendRequests?: FunctionReturnType<typeof api.social.incomingFriendRequests>
     readonly selectedConversation?: DogfoodActiveConversation
     /** Compatibility for plain adapter callers that have not selected a DM. */
     readonly selectedChannelId?: Id<"channels">
@@ -51,6 +53,10 @@ export type DogfoodChatAdapterInput = {
     readonly selectChannel?: (channelId: Id<"channels">) => void
     readonly selectDirectConversation?: (conversationId: Id<"channels">) => void
     readonly startDirectConversation?: (recipientUserId: Id<"users">) => Promise<DogfoodDirectConversationView>
+    readonly searchDirectConversationCandidates?: (query: string) => Promise<FunctionReturnType<typeof api.social.searchUsers>>
+    readonly sendFriendRequest?: (input: FunctionArgs<typeof api.social.sendFriendRequest>) => Promise<unknown>
+    readonly updateDirectMessageProfile?: (input: FunctionArgs<typeof api.social.updateProfile>) => Promise<FunctionReturnType<typeof api.social.updateProfile>>
+    readonly respondToFriendRequest?: (input: FunctionArgs<typeof api.social.respondToFriendRequest>) => Promise<unknown>
     readonly addChannelMember?: (
       input: FunctionArgs<typeof api.chat.addPrivateChannelMember>
     ) => Promise<unknown>
@@ -107,9 +113,19 @@ export const dogfoodChatToChatData = ({ data, state, commands }: DogfoodChatAdap
       directConversations: data.directConversations?.map(toChatDirectConversation) ?? [],
       directConversationCandidates: data.directConversationCandidates?.map((candidate) => ({
         id: String(candidate.id),
-        displayName: candidate.displayName
+        displayName: candidate.displayName,
+        username: candidate.username,
+        canStartDirectMessage: candidate.canStartDirectMessage
       })),
       directConversationsLoading: state?.directConversationsLoading ?? data.directConversations === undefined,
+      directMessageProfile: data.directMessageProfile === undefined ? undefined : {
+        username: data.directMessageProfile.username,
+        directMessagePreference: data.directMessageProfile.directMessagePreference
+      },
+      incomingFriendRequests: data.incomingFriendRequests?.map((request) => ({
+        id: String(request.id),
+        requester: { id: String(request.requester.id), displayName: request.requester.displayName, username: request.requester.username }
+      })),
       channelMessages: data.messages.map(toChatMessage),
       channelMembers: directActive ? undefined : data.members?.map((member) => ({
         id: String(member.id),
@@ -159,6 +175,29 @@ export const dogfoodChatToChatData = ({ data, state, commands }: DogfoodChatAdap
     startDirectConversation: commands.startDirectConversation === undefined
       ? undefined
       : async (recipientUserId) => toChatDirectConversation(await commands.startDirectConversation!(convexId<"users">(recipientUserId))),
+    searchDirectConversationCandidates: commands.searchDirectConversationCandidates === undefined
+      ? undefined
+      : async (query) => (await commands.searchDirectConversationCandidates!(query)).map((candidate) => ({
+          id: String(candidate.id),
+          displayName: candidate.displayName,
+          username: candidate.username,
+          canStartDirectMessage: candidate.canStartDirectMessage
+        })),
+    sendFriendRequest: commands.sendFriendRequest === undefined
+      ? undefined
+      : (recipientUserId) => commands.sendFriendRequest!({ recipientUserId: convexId<"users">(recipientUserId) }),
+    updateDirectMessageProfile: commands.updateDirectMessageProfile === undefined
+      ? undefined
+      : async (input) => {
+          const profile = await commands.updateDirectMessageProfile!({
+            username: input.username ?? undefined,
+            directMessagePreference: input.directMessagePreference
+          })
+          return { username: profile.username, directMessagePreference: profile.directMessagePreference }
+        },
+    respondToFriendRequest: commands.respondToFriendRequest === undefined
+      ? undefined
+      : ({ friendRequestId, accept }) => commands.respondToFriendRequest!({ friendRequestId: convexId<"friendRequests">(friendRequestId), accept }),
     addChannelMember: directActive || commands.addChannelMember === undefined
       ? undefined
       : ({ channelId, userId }) => commands.addChannelMember!({

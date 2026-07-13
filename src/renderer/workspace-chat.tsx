@@ -30,6 +30,7 @@ import type {
   ChatChannelInviteCandidate,
   ChatChannelMember,
   ChatDirectConversation,
+  ChatDirectMessageProfile,
   ChatDataModel,
   ChatDataView,
   ChatMessage,
@@ -138,6 +139,8 @@ const appShellClassName =
   "appShell grid h-full min-h-0 w-full overflow-hidden bg-surface-canvas font-sans text-foreground [grid-template-areas:'rail_sidebar_header_header'_'rail_sidebar_chat_members'] [grid-template-columns:56px_minmax(200px,236px)_minmax(360px,1fr)_minmax(280px,320px)] [grid-template-rows:56px_minmax(0,1fr)] [&_*]:box-border max-[920px]:[grid-template-areas:'rail_header'_'rail_chat'] max-[920px]:[grid-template-columns:56px_minmax(0,1fr)]"
 const appShellMembersCollapsedClassName =
   "membersCollapsed [grid-template-areas:'rail_sidebar_header'_'rail_sidebar_chat'] [grid-template-columns:56px_minmax(200px,236px)_minmax(360px,1fr)] max-[920px]:[grid-template-areas:'rail_header'_'rail_chat'] max-[920px]:[grid-template-columns:56px_minmax(0,1fr)]"
+const appShellDirectConversationClassName =
+  "directConversation [grid-template-areas:'rail_header'_'rail_chat'] [grid-template-columns:56px_minmax(0,1fr)]"
 const railItemClassName =
   "group/rail relative grid size-9 cursor-pointer place-items-center rounded-card border-0 bg-surface-muted text-[13px] font-extrabold text-foreground"
 const railTooltipClassName =
@@ -185,6 +188,10 @@ export function WorkspaceChat(props: {
   readonly selectChannel?: SelectChatChannel
   readonly selectDirectConversation?: ChatDataView["selectDirectConversation"]
   readonly startDirectConversation?: ChatDataView["startDirectConversation"]
+  readonly searchDirectConversationCandidates?: ChatDataView["searchDirectConversationCandidates"]
+  readonly sendFriendRequest?: ChatDataView["sendFriendRequest"]
+  readonly updateDirectMessageProfile?: ChatDataView["updateDirectMessageProfile"]
+  readonly respondToFriendRequest?: ChatDataView["respondToFriendRequest"]
   readonly addChannelMember?: ChatDataView["addChannelMember"]
   readonly removeChannelMember?: ChatDataView["removeChannelMember"]
   readonly editChannelMessage?: ChatDataView["editChannelMessage"]
@@ -205,6 +212,10 @@ export function WorkspaceChat(props: {
     selectChannel,
     selectDirectConversation,
     startDirectConversation,
+    searchDirectConversationCandidates,
+    sendFriendRequest,
+    updateDirectMessageProfile,
+    respondToFriendRequest,
     createChannelMessage,
     uploadMessageAttachment,
     discardMessageAttachment,
@@ -233,6 +244,7 @@ export function WorkspaceChat(props: {
   const [membersOpen, setMembersOpen] = useState(true)
   const [searchOpen, setSearchOpen] = useState(false)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
+  const [directMessageSettingsOpen, setDirectMessageSettingsOpen] = useState(false)
   const [messageSearchQuery, setMessageSearchQuery] = useState("")
   const [activeSearchMessageId, setActiveSearchMessageId] = useState<ChatMessageId | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -428,7 +440,12 @@ export function WorkspaceChat(props: {
   const pendingDeleteMessage = messageInteractions.pendingDeleteMessage
 
   return (
-    <main className={classNames(appShellClassName, !membersOpen && appShellMembersCollapsedClassName)}>
+    <main className={classNames(
+      appShellClassName,
+      activeConversation.kind === "direct"
+        ? appShellDirectConversationClassName
+        : !membersOpen && appShellMembersCollapsedClassName
+    )}>
       <WorkspaceRail
         workspaceName={model.workspace.name}
         currentUserName={model.currentUser.displayName}
@@ -439,13 +456,26 @@ export function WorkspaceChat(props: {
         candidates={model.directConversationCandidates}
         conversationsLoading={model.directConversationsLoading === true}
         onStartConversation={startDirectConversation}
+        onSearchConversationCandidates={searchDirectConversationCandidates}
+        onSendFriendRequest={sendFriendRequest}
         profileMenuOpen={profileMenuOpen}
-        profileMenuActions={profileMenuActions}
+        profileMenuActions={model.directMessageProfile === undefined || updateDirectMessageProfile === undefined
+          ? profileMenuActions
+          : [{ label: "DM settings", onSelect: () => setDirectMessageSettingsOpen(true) }, ...profileMenuActions]}
         onOpenProfileMenu={() => setProfileMenuOpen(true)}
         onCloseProfileMenu={() => setProfileMenuOpen(false)}
       />
+      {directMessageSettingsOpen && model.directMessageProfile !== undefined && updateDirectMessageProfile !== undefined
+        ? <DirectMessageSettingsDialog
+            profile={model.directMessageProfile}
+            incomingFriendRequests={model.incomingFriendRequests ?? []}
+            onSave={updateDirectMessageProfile}
+            onRespondToFriendRequest={respondToFriendRequest}
+            onClose={() => setDirectMessageSettingsOpen(false)}
+          />
+        : null}
 
-      <ChannelSidebar
+      {activeConversation.kind === "direct" ? null : <ChannelSidebar
         workspaceName={model.workspace.name}
         channels={model.channels}
         activeChannelId={activeChannel?.id ?? null}
@@ -463,7 +493,7 @@ export function WorkspaceChat(props: {
           setMembersOpen(true)
         }}
         onChannelOperationError={setChannelOperationError}
-      />
+      />}
 
       <ChannelHeader
         channelName={activeName}
@@ -585,6 +615,8 @@ function WorkspaceRail(props: {
   readonly candidates?: ReadonlyArray<ChatChannelMember>
   readonly conversationsLoading: boolean
   readonly onStartConversation?: ChatDataView["startDirectConversation"]
+  readonly onSearchConversationCandidates?: ChatDataView["searchDirectConversationCandidates"]
+  readonly onSendFriendRequest?: ChatDataView["sendFriendRequest"]
   readonly profileMenuOpen: boolean
   readonly profileMenuActions: ReadonlyArray<ProfileMenuAction>
   readonly onOpenProfileMenu: () => void
@@ -600,6 +632,8 @@ function WorkspaceRail(props: {
     candidates,
     conversationsLoading,
     onStartConversation,
+    onSearchConversationCandidates,
+    onSendFriendRequest,
     profileMenuOpen,
     profileMenuActions,
     onOpenProfileMenu,
@@ -723,6 +757,8 @@ function WorkspaceRail(props: {
         ? <StartDirectMessageDialog
             candidates={candidates}
             onStart={onStartConversation}
+            onSearch={onSearchConversationCandidates}
+            onSendFriendRequest={onSendFriendRequest}
             onClose={() => {
               setStartOpen(false)
               window.setTimeout(() => addButtonRef.current?.focus(), 0)
@@ -733,17 +769,109 @@ function WorkspaceRail(props: {
   )
 }
 
+function DirectMessageSettingsDialog(props: {
+  readonly profile: ChatDirectMessageProfile
+  readonly incomingFriendRequests: NonNullable<ChatDataModel["incomingFriendRequests"]>
+  readonly onSave: NonNullable<ChatDataView["updateDirectMessageProfile"]>
+  readonly onRespondToFriendRequest?: ChatDataView["respondToFriendRequest"]
+  readonly onClose: () => void
+}) {
+  const { profile, incomingFriendRequests, onSave, onRespondToFriendRequest, onClose } = props
+  const [username, setUsername] = useState(profile.username ?? "")
+  const [preference, setPreference] = useState(profile.directMessagePreference)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const save = () => {
+    if (saving) return
+    setSaving(true)
+    setError(null)
+    void onSave({ username, directMessagePreference: preference })
+      .then(onClose)
+      .catch((cause: unknown) => {
+        setSaving(false)
+        setError(cause instanceof Error ? cause.message : "Could not save DM settings.")
+      })
+  }
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+      <DialogContent className="max-w-[420px]">
+        <DialogTitle>DM settings</DialogTitle>
+        <DialogDescription>Set the username people use to find you and who can start a new direct message.</DialogDescription>
+        <div className="mt-4 grid gap-4">
+          <label className="grid gap-1.5 text-sm font-bold text-foreground" htmlFor="dm-username">
+            Username
+            <Input id="dm-username" value={username} onChange={(event) => setUsername(event.target.value)} disabled={saving} autoCapitalize="none" />
+          </label>
+          <fieldset className="grid gap-2">
+            <legend className="text-sm font-bold text-foreground">Who can start a new DM</legend>
+            {([
+              ["all", "Anyone on Aether"],
+              ["mutuals", "People who share a workspace with you"],
+              ["friends", "Accepted friends only"]
+            ] as const).map(([value, label]) => (
+              <label key={value} className="flex items-center gap-2 text-sm text-foreground">
+                <input type="radio" name="dm-preference" value={value} checked={preference === value} disabled={saving} onChange={() => setPreference(value)} />
+                {label}
+              </label>
+            ))}
+          </fieldset>
+          {incomingFriendRequests.length === 0 ? null : (
+            <section className="grid gap-2" aria-label="Friend requests">
+              <h3 className="m-0 text-sm font-bold text-foreground">Friend requests</h3>
+              {incomingFriendRequests.map((request) => (
+                <div key={request.id} className="flex items-center gap-2 text-sm">
+                  <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap"><strong>{request.requester.displayName}</strong> <span className="text-foreground-subtle">@{request.requester.username}</span></span>
+                  <Button size="sm" disabled={saving || onRespondToFriendRequest === undefined} onClick={() => void onRespondToFriendRequest?.({ friendRequestId: request.id, accept: true })}>Accept</Button>
+                  <Button size="sm" variant="secondary" disabled={saving || onRespondToFriendRequest === undefined} onClick={() => void onRespondToFriendRequest?.({ friendRequestId: request.id, accept: false })}>Decline</Button>
+                </div>
+              ))}
+            </section>
+          )}
+          {error === null ? null : <p className="m-0 text-sm text-destructive-text" role="alert">{error}</p>}
+        </div>
+        <DialogFooter>
+          <Button variant="secondary" disabled={saving} onClick={onClose}>Cancel</Button>
+          <Button disabled={saving} onClick={save}>{saving ? "Saving..." : "Save"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function StartDirectMessageDialog(props: {
   readonly candidates?: ReadonlyArray<ChatChannelMember>
   readonly onStart: NonNullable<ChatDataView["startDirectConversation"]>
+  readonly onSearch?: ChatDataView["searchDirectConversationCandidates"]
+  readonly onSendFriendRequest?: ChatDataView["sendFriendRequest"]
   readonly onClose: () => void
 }) {
-  const { candidates, onStart, onClose } = props
+  const { candidates, onStart, onSearch, onSendFriendRequest, onClose } = props
   const [query, setQuery] = useState("")
+  const [searchResults, setSearchResults] = useState<ReadonlyArray<ChatChannelMember> | undefined>(candidates)
   const [savingUserId, setSavingUserId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const savingRef = useRef(false)
-  const visibleCandidates = filterDirectConversationCandidates(candidates ?? [], query)
+  const visibleCandidates = onSearch === undefined
+    ? filterDirectConversationCandidates(candidates ?? [], query)
+    : searchResults ?? []
+  const candidateResults = onSearch === undefined ? candidates : searchResults
+
+  useEffect(() => {
+    if (onSearch === undefined) {
+      setSearchResults(candidates)
+      return
+    }
+    const normalizedQuery = query.trim()
+    if (normalizedQuery.length === 0) {
+      setSearchResults([])
+      return
+    }
+    let cancelled = false
+    void onSearch(normalizedQuery)
+      .then((results) => { if (!cancelled) setSearchResults(results) })
+      .catch(() => { if (!cancelled) setSearchResults([]) })
+    return () => { cancelled = true }
+  }, [candidates, onSearch, query])
 
   const start = (candidate: ChatChannelMember) => {
     if (savingRef.current) return
@@ -759,41 +887,57 @@ function StartDirectMessageDialog(props: {
       })
   }
 
+  const sendFriendRequest = (candidate: ChatChannelMember) => {
+    if (savingRef.current || onSendFriendRequest === undefined) return
+    savingRef.current = true
+    setSavingUserId(candidate.id)
+    setError(null)
+    void onSendFriendRequest(candidate.id)
+      .then(() => {
+        savingRef.current = false
+        setSavingUserId(null)
+      })
+      .catch(() => {
+        savingRef.current = false
+        setSavingUserId(null)
+        setError("Could not send the friend request. Check your connection and try again.")
+      })
+  }
+
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="directMessageDialog max-w-[420px]">
         <DialogTitle>Start Direct Message</DialogTitle>
-        <DialogDescription className="sr-only">Search eligible workspace members and open a direct conversation.</DialogDescription>
+        <DialogDescription className="sr-only">Search Aether accounts by username, open a direct conversation, or send a friend request.</DialogDescription>
         <div className="mt-3 flex flex-col gap-2">
-          <label className="sr-only" htmlFor="direct-message-member-search">Search workspace members</label>
+          <label className="sr-only" htmlFor="direct-message-member-search">Search usernames</label>
           <Input
             id="direct-message-member-search"
             type="search"
             value={query}
-            placeholder="Search workspace members"
+            placeholder="Search usernames"
             autoFocus
-            disabled={savingUserId !== null || candidates === undefined || candidates.length === 0}
+            disabled={savingUserId !== null}
             onChange={(event) => setQuery(event.target.value)}
           />
-          <div className="max-h-60 overflow-y-auto rounded-control border border-border bg-surface-canvas p-1" aria-label="Eligible direct message recipients">
-            {candidates === undefined
-              ? <p className="m-0 px-2 py-3 text-sm text-foreground-subtle" role="status">Loading eligible members...</p>
-              : candidates.length === 0
-                ? <p className="m-0 px-2 py-3 text-sm text-foreground-subtle">No eligible recipients are available.</p>
+          <div className="max-h-60 overflow-y-auto rounded-control border border-border bg-surface-canvas p-1" aria-label="Aether accounts">
+            {onSearch !== undefined && query.trim().length === 0
+              ? <p className="m-0 px-2 py-3 text-sm text-foreground-subtle">Search for a username to begin.</p>
+              : candidateResults === undefined
+                ? <p className="m-0 px-2 py-3 text-sm text-foreground-subtle" role="status">Loading accounts...</p>
+              : candidateResults.length === 0
+                ? <p className="m-0 px-2 py-3 text-sm text-foreground-subtle">No accounts are available.</p>
                 : visibleCandidates.length === 0
-                  ? <p className="m-0 px-2 py-3 text-sm text-foreground-subtle">No matching members.</p>
+                  ? <p className="m-0 px-2 py-3 text-sm text-foreground-subtle">No matching accounts.</p>
                   : visibleCandidates.map((candidate) => (
-                      <button
-                        key={candidate.id}
-                        type="button"
-                        className="flex min-h-10 w-full items-center gap-2 rounded-control border-0 bg-transparent px-2 text-left text-sm text-foreground hover:bg-surface-muted focus-visible:bg-surface-muted"
-                        disabled={savingUserId !== null}
-                        onClick={() => start(candidate)}
-                      >
+                      <div key={candidate.id} className="flex min-h-10 items-center gap-2 rounded-control px-2 text-sm text-foreground hover:bg-surface-muted">
                         <Avatar name={candidate.displayName} aria-hidden="true" className="size-8" />
-                        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-bold">{candidate.displayName}</span>
-                        {savingUserId === candidate.id ? <span className="text-xs text-foreground-subtle">Opening...</span> : null}
-                      </button>
+                        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap"><strong className="block">{candidate.displayName}</strong><span className="text-xs text-foreground-subtle">@{candidate.username}</span></span>
+                        {savingUserId === candidate.id ? <span className="text-xs text-foreground-subtle">Working...</span> : candidate.canStartDirectMessage !== false
+                          ? <Button size="sm" aria-label={candidate.displayName} onClick={() => start(candidate)}>Message</Button>
+                          : onSendFriendRequest === undefined ? <span className="text-xs text-foreground-subtle">DM restricted</span>
+                            : <Button size="sm" variant="secondary" onClick={() => sendFriendRequest(candidate)}>Add friend</Button>}
+                      </div>
                     ))}
           </div>
           {error === null ? null : <p className="m-0 text-sm text-destructive-text" role="alert">{error}</p>}

@@ -43,6 +43,9 @@ const mocks = vi.hoisted(() => ({
   registerAttachmentUpload: vi.fn(),
   deleteAttachmentUpload: vi.fn(),
   startOrReopenDirectConversation: vi.fn(),
+  sendFriendRequest: vi.fn(),
+  updateDirectMessageProfile: vi.fn(),
+  respondToFriendRequest: vi.fn(),
   loadMore: vi.fn(),
   paginationStatus: undefined as "LoadingFirstPage" | "CanLoadMore" | "LoadingMore" | "Exhausted" | undefined,
   mutationCallCount: 0,
@@ -83,8 +86,11 @@ vi.mock("convex/react", () => ({
       mocks.generateAttachmentUploadUrl,
       mocks.registerAttachmentUpload,
       mocks.deleteAttachmentUpload,
-      mocks.startOrReopenDirectConversation
-    ][mocks.mutationCallCount % 15]
+      mocks.startOrReopenDirectConversation,
+      mocks.sendFriendRequest,
+      mocks.updateDirectMessageProfile,
+      mocks.respondToFriendRequest
+    ][mocks.mutationCallCount % 18]
     mocks.mutationCallCount += 1
     return mutation
   },
@@ -102,6 +108,9 @@ vi.mock("convex/react", () => ({
     if (args === "skip") return undefined
     if (getFunctionName(query as never) === "direct_conversations:list") return mocks.directConversations
     if (getFunctionName(query as never) === "direct_conversations:candidates") return mocks.directConversationCandidates
+    if (getFunctionName(query as never) === "direct_conversations:indicators") return []
+    if (getFunctionName(query as never) === "social:profile") return undefined
+    if (getFunctionName(query as never) === "social:incomingFriendRequests") return undefined
     if (getFunctionName(query as never) === "chat:eligiblePrivateChannelMembers") {
       return typeof args === "object" && args !== null && "channelId" in args
         ? mocks.managementCandidates
@@ -470,7 +479,6 @@ describe("dogfoodChatToChatData", () => {
   it("adapts a direct conversation into the shared timeline without channel-only controls", async () => {
     const directConversation = {
       id: "direct-1" as Id<"channels">,
-      workspaceId: workspace.workspace.id,
       otherUser: { id: "user-2" as Id<"users">, displayName: "Lee Chen" },
       createdAt: 44
     }
@@ -1035,7 +1043,6 @@ describe("ConvexDogfoodApp", () => {
     const { ConvexDogfoodApp } = await import("./dogfood-chat")
     const directConversation: DogfoodDirectConversationView = {
       id: "direct-1" as Id<"channels">,
-      workspaceId: workspace.workspace.id,
       otherUser: { id: "user-2" as Id<"users">, displayName: "Lee Chen" },
       createdAt: 44
     }
@@ -1062,7 +1069,6 @@ describe("ConvexDogfoodApp", () => {
     const { ConvexDogfoodApp } = await import("./dogfood-chat")
     const directConversation: DogfoodDirectConversationView = {
       id: "direct-1" as Id<"channels">,
-      workspaceId: workspace.workspace.id,
       otherUser: { id: "user-2" as Id<"users">, displayName: "Lee Chen" },
       createdAt: 44
     }
@@ -1079,7 +1085,6 @@ describe("ConvexDogfoodApp", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Start Lee Chen" }))
 
     await waitFor(() => expect(mocks.startOrReopenDirectConversation).toHaveBeenCalledWith({
-      workspaceId: workspace.workspace.id,
       recipientUserId: "user-2"
     }))
     await waitFor(() => expect(screen.getByLabelText("active channel").textContent).toBe("direct-1"))

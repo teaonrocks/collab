@@ -78,7 +78,10 @@ export const filterDirectConversationCandidates = (
   const normalizedQuery = query.trim().toLocaleLowerCase()
   return normalizedQuery.length === 0
     ? candidates
-    : candidates.filter((candidate) => candidate.displayName.toLocaleLowerCase().includes(normalizedQuery))
+    : candidates.filter((candidate) =>
+      candidate.displayName.toLocaleLowerCase().includes(normalizedQuery) ||
+      candidate.username?.toLocaleLowerCase().includes(normalizedQuery) === true
+    )
 }
 
 export const searchChannelMessages = (

@@ -4,69 +4,49 @@ import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/s
 import {
   isEmailAllowlisted,
   requireAllowedCurrentUser,
-  requireChannelMember,
-  requireWorkspaceMember
+  requireChannelMember
 } from "./chat_access"
+import { canStartDirectMessage, canonicalPairKey } from "./social"
 
 const MAX_DIRECT_CONVERSATIONS = 100
-const MAX_DIRECT_CANDIDATE_SCAN = 200
 const MAX_DIRECT_CANDIDATES = 100
-
-const canonicalPairKey = (left: Id<"users">, right: Id<"users">): string =>
-  [left, right].sort((a, b) => String(a).localeCompare(String(b))).join(":")
 
 const directConversationView = (
   channel: Doc<"channels">,
   otherUser: Doc<"users">
 ) => ({
   id: channel._id,
-  workspaceId: channel.workspaceId,
-  otherUser: { id: otherUser._id, displayName: otherUser.displayName },
+  otherUser: {
+    id: otherUser._id,
+    displayName: otherUser.displayName,
+    ...(otherUser.username === undefined ? {} : { username: otherUser.username })
+  },
   createdAt: channel.createdAt
 })
 
 const directEligibility = async (
   ctx: QueryCtx | MutationCtx,
   input: {
-    readonly workspaceId: Id<"workspaces">
     readonly userId: Id<"users">
   }
 ) => {
   const user = await ctx.db.get(input.userId)
   if (user === null || user.deletedAt !== undefined) return null
-  const membership = await ctx.db
-    .query("workspaceMemberships")
-    .withIndex("by_workspace_user", (q) =>
-      q.eq("workspaceId", input.workspaceId).eq("userId", input.userId))
-    .unique()
-  if (membership === null || membership.role === "guest" || !(await isEmailAllowlisted(ctx, user.email))) {
+  if (!(await isEmailAllowlisted(ctx, user.email))) {
     return null
   }
-  return { user, membership }
-}
-
-const requireDirectEligibleActor = async (
-  ctx: QueryCtx | MutationCtx,
-  input: {
-    readonly workspaceId: Id<"workspaces">
-    readonly userId: Id<"users">
-  }
-) => {
-  const membership = await requireWorkspaceMember(ctx, input)
-  if (membership.role === "guest") throw new Error("Current user is not eligible for direct conversations")
-  return membership
+  return { user }
 }
 
 const requireEligibleRecipient = async (
   ctx: QueryCtx | MutationCtx,
   input: {
-    readonly workspaceId: Id<"workspaces">
     readonly actorId: Id<"users">
     readonly recipientId: Id<"users">
   }
 ) => {
   if (input.actorId === input.recipientId) throw new Error("Cannot start a direct conversation with yourself")
-  const eligible = await directEligibility(ctx, { workspaceId: input.workspaceId, userId: input.recipientId })
+  const eligible = await directEligibility(ctx, { userId: input.recipientId })
   if (eligible === null) {
     throw new Error("Direct conversation recipient is not eligible")
   }
@@ -86,14 +66,12 @@ const ensureDirectMembershipTags = async (
 }
 
 export const list = query({
-  args: { workspaceId: v.id("workspaces") },
-  handler: async (ctx, args) => {
+  args: {},
+  handler: async (ctx) => {
     const actor = await requireAllowedCurrentUser(ctx)
-    await requireDirectEligibleActor(ctx, { workspaceId: args.workspaceId, userId: actor._id })
     const memberships = await ctx.db
       .query("channelMemberships")
-      .withIndex("by_user_workspace_and_channel_kind", (q) =>
-        q.eq("userId", actor._id).eq("workspaceId", args.workspaceId).eq("channelKind", "direct"))
+      .withIndex("by_user_and_channel_kind", (q) => q.eq("userId", actor._id).eq("channelKind", "direct"))
       .take(MAX_DIRECT_CONVERSATIONS)
     const conversations = []
     for (const membership of memberships) {
@@ -103,10 +81,7 @@ export const list = query({
       if (participants.length !== 2) throw new Error("Direct conversation must have exactly two participants")
       const otherMembership = participants.find((candidate) => candidate.userId !== actor._id)
       if (otherMembership === undefined) throw new Error("Direct conversation participant invariant failed")
-      const otherEligibility = await directEligibility(ctx, {
-        workspaceId: args.workspaceId,
-        userId: otherMembership.userId
-      })
+      const otherEligibility = await directEligibility(ctx, { userId: otherMembership.userId })
       if (otherEligibility === null) continue
       conversations.push(directConversationView(channel, otherEligibility.user))
     }
@@ -114,47 +89,66 @@ export const list = query({
   }
 })
 
-export const candidates = query({
-  args: { workspaceId: v.id("workspaces") },
-  handler: async (ctx, args) => {
+export const indicators = query({
+  args: {},
+  handler: async (ctx) => {
     const actor = await requireAllowedCurrentUser(ctx)
-    await requireDirectEligibleActor(ctx, { workspaceId: args.workspaceId, userId: actor._id })
-    const memberships = await ctx.db
-      .query("workspaceMemberships")
-      .withIndex("by_workspace", (q) => q.eq("workspaceId", args.workspaceId))
-      .take(MAX_DIRECT_CANDIDATE_SCAN)
-    const eligible: Array<{ id: Id<"users">; displayName: string }> = []
+    const memberships = await ctx.db.query("channelMemberships")
+      .withIndex("by_user_and_channel_kind", (q) => q.eq("userId", actor._id).eq("channelKind", "direct"))
+      .take(MAX_DIRECT_CONVERSATIONS)
+    const indicators: Array<{ readonly channelId: Id<"channels">; readonly indicator: "unread" | "mentioned" }> = []
     for (const membership of memberships) {
-      if (membership.userId === actor._id) continue
-      if (membership.role === "guest") continue
-      const candidate = await directEligibility(ctx, {
-        workspaceId: args.workspaceId,
-        userId: membership.userId
-      })
-      if (candidate === null) continue
-      eligible.push({ id: candidate.user._id, displayName: candidate.user.displayName })
-      if (eligible.length === MAX_DIRECT_CANDIDATES) break
+      const channel = await ctx.db.get(membership.channelId)
+      if (channel === null || channel.kind !== "direct" || channel.deletedAt !== undefined) continue
+      const lastReadAt = membership.lastReadAt ?? membership.createdAt
+      const newestUnread = await ctx.db.query("messages")
+        .withIndex("by_channel_created_at", (q) => q.eq("channelId", channel._id).gt("createdAt", lastReadAt))
+        .order("desc")
+        .first()
+      if (newestUnread === null) continue
+      indicators.push({ channelId: channel._id, indicator: "unread" })
     }
-    return eligible.sort((a, b) => a.displayName.localeCompare(b.displayName))
+    return indicators
+  }
+})
+
+export const candidates = query({
+  args: {},
+  handler: async (ctx) => {
+    const actor = await requireAllowedCurrentUser(ctx)
+    const users = await ctx.db.query("users").take(MAX_DIRECT_CANDIDATES)
+    const candidates = []
+    for (const candidate of users) {
+      if (candidate._id === actor._id || candidate.deletedAt !== undefined || !(await isEmailAllowlisted(ctx, candidate.email))) continue
+      const canStart = await canStartDirectMessage(ctx, actor._id, candidate)
+      candidates.push({
+        id: candidate._id,
+        displayName: candidate.displayName,
+        ...(candidate.username === undefined ? {} : { username: candidate.username }),
+        ...(canStart ? {} : { canStartDirectMessage: false })
+      })
+    }
+    return candidates
   }
 })
 
 export const startOrReopen = mutation({
-  args: { workspaceId: v.id("workspaces"), recipientUserId: v.id("users") },
+  args: { recipientUserId: v.id("users") },
   handler: async (ctx, args) => {
     const actor = await requireAllowedCurrentUser(ctx)
-    await requireDirectEligibleActor(ctx, { workspaceId: args.workspaceId, userId: actor._id })
     const recipient = await requireEligibleRecipient(ctx, {
-      workspaceId: args.workspaceId,
       actorId: actor._id,
       recipientId: args.recipientUserId
     })
     const pairKey = canonicalPairKey(actor._id, recipient._id)
-    const existing = await ctx.db
+    const existingConversations = await ctx.db
       .query("channels")
-      .withIndex("by_workspace_and_direct_pair_key", (q) =>
-        q.eq("workspaceId", args.workspaceId).eq("directPairKey", pairKey))
-      .unique()
+      .withIndex("by_direct_pair_key", (q) => q.eq("directPairKey", pairKey))
+      .take(2)
+    if (existingConversations.length > 1) {
+      throw new Error("Duplicate direct conversations must be migrated before reopening")
+    }
+    const existing = existingConversations[0] ?? null
     if (existing !== null) {
       if (existing.kind !== "direct") throw new Error("Direct conversation identity is already in use")
       const participants = await directParticipants(ctx, existing._id)
@@ -166,10 +160,12 @@ export const startOrReopen = mutation({
       if (existing.deletedAt !== undefined) await ctx.db.patch(existing._id, { deletedAt: undefined })
       return directConversationView(existing, recipient)
     }
+    if (!(await canStartDirectMessage(ctx, actor._id, recipient))) {
+      throw new Error("This user is not accepting new direct messages from you")
+    }
 
     const now = Date.now()
     const channelId = await ctx.db.insert("channels", {
-      workspaceId: args.workspaceId,
       key: `direct-${pairKey}`,
       name: "Direct conversation",
       visibility: "private",
@@ -181,7 +177,6 @@ export const startOrReopen = mutation({
     for (const userId of [actor._id, recipient._id]) {
       await ctx.db.insert("channelMemberships", {
         channelId,
-        workspaceId: args.workspaceId,
         channelKind: "direct",
         userId,
         role: "member",

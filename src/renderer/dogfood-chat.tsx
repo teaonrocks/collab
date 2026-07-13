@@ -77,6 +77,9 @@ function ConvexDogfoodChat() {
   const registerAttachmentUpload = useMutation(api.chat.registerAttachmentUpload)
   const deleteAttachmentUpload = useMutation(api.chat.deleteAttachmentUpload)
   const startOrReopenDirectConversation = useMutation(api.direct_conversations.startOrReopen)
+  const sendFriendRequest = useMutation(api.social.sendFriendRequest)
+  const updateDirectMessageProfile = useMutation(api.social.updateProfile)
+  const respondToFriendRequest = useMutation(api.social.respondToFriendRequest)
   const [ensuredUserId, setEnsuredUserId] = useState<string | null>(null)
   const [selectedConversation, setSelectedConversation] = useState<DogfoodActiveConversation | null>(null)
   const [stableDirectConversations, setStableDirectConversations] = useState<ReadonlyArray<DogfoodDirectConversationView>>([])
@@ -100,12 +103,14 @@ function ConvexDogfoodChat() {
   )
   const directConversations = useQuery(
     api.direct_conversations.list,
-    workspace === undefined || workspace === null ? "skip" : { workspaceId: workspace.workspace.id }
+    viewerReady ? {} : "skip"
   )
-  const directConversationCandidates = useQuery(
-    api.direct_conversations.candidates,
-    workspace === undefined || workspace === null ? "skip" : { workspaceId: workspace.workspace.id }
-  )
+  // Kept as a compatibility fallback for plain consumers; the dialog itself
+  // uses the server-side username search command below.
+  const directConversationCandidates = useQuery(api.direct_conversations.candidates, viewerReady ? {} : "skip")
+  const directIndicators = useQuery(api.direct_conversations.indicators, viewerReady ? {} : "skip")
+  const directMessageProfile = useQuery(api.social.profile, viewerReady ? {} : "skip")
+  const incomingFriendRequests = useQuery(api.social.incomingFriendRequests, viewerReady ? {} : "skip")
   useEffect(() => {
     if (directConversations !== undefined) setStableDirectConversations(directConversations)
   }, [directConversations])
@@ -247,6 +252,8 @@ function ConvexDogfoodChat() {
             channels: channelList,
             directConversations: stableDirectConversations,
             directConversationCandidates,
+            directMessageProfile,
+            incomingFriendRequests,
             selectedConversation: activeKind === "direct"
               ? { kind: "direct", id: activeChannelId }
               : { kind: "channel", id: activeChannelId },
@@ -254,7 +261,8 @@ function ConvexDogfoodChat() {
             members: members ?? [],
             channelMemberInviteCandidates,
             createChannelInviteCandidates,
-            channelIndicators: channelIndicators ?? []
+            channelIndicators: Array.from(new Map([...(Array.isArray(channelIndicators) ? channelIndicators : []), ...(Array.isArray(directIndicators) ? directIndicators : [])]
+              .map((indicator) => [indicator.channelId, indicator])).values())
           },
           state: {
             messagesLoading: messagePagination.status === "LoadingFirstPage",
@@ -276,7 +284,6 @@ function ConvexDogfoodChat() {
             selectDirectConversation: (conversationId) => setSelectedConversation({ kind: "direct", id: conversationId }),
             startDirectConversation: async (recipientUserId) => {
               const conversation = await startOrReopenDirectConversation({
-                workspaceId: workspace.workspace.id,
                 recipientUserId
               })
               setStableDirectConversations((existing) => {
@@ -286,6 +293,10 @@ function ConvexDogfoodChat() {
               setSelectedConversation({ kind: "direct", id: conversation.id })
               return conversation
             },
+            searchDirectConversationCandidates: (query) => convex.query(api.social.searchUsers, { query }),
+            sendFriendRequest,
+            updateDirectMessageProfile,
+            respondToFriendRequest,
             editChannel,
             deleteChannel: async (input) => {
               await deleteChannel(input)
@@ -325,7 +336,7 @@ function ConvexDogfoodChat() {
             operationErrorMessage: dogfoodOperationErrorMessage
           }
         }),
-    [activeChannelId, activeKind, addPrivateChannelMember, channelIndicators, channelList, channelMemberInviteCandidates, convex, createChannel, createChannelInviteCandidates, deleteAttachmentUpload, deleteChannel, deleteMessage, directConversationCandidates, directConversations, editChannel, editMessage, generateAttachmentUploadUrl, members, messagePagination, messages, registerAttachmentUpload, removePrivateChannelMember, selectedConversation, sendMessage, stableDirectConversations, startOrReopenDirectConversation, toggleMessageReaction, workspace]
+    [activeChannelId, activeKind, addPrivateChannelMember, channelIndicators, channelList, channelMemberInviteCandidates, convex, createChannel, createChannelInviteCandidates, deleteAttachmentUpload, deleteChannel, deleteMessage, directConversationCandidates, directConversations, directIndicators, directMessageProfile, editChannel, editMessage, generateAttachmentUploadUrl, incomingFriendRequests, members, messagePagination, messages, registerAttachmentUpload, removePrivateChannelMember, respondToFriendRequest, selectedConversation, sendFriendRequest, sendMessage, stableDirectConversations, startOrReopenDirectConversation, toggleMessageReaction, updateDirectMessageProfile, workspace]
   )
 
   if (auth.isLoading) {

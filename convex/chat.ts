@@ -23,6 +23,7 @@ import {
   sendMessageTransaction,
   toggleMessageReactionTransaction
 } from "./chat_message_transactions"
+import { seededUsername } from "./social"
 
 const DOGFOOD_WORKSPACE_KEY = "aether-dogfood"
 const DOGFOOD_WORKSPACE_NAME = "Aether Dogfood"
@@ -579,10 +580,13 @@ export const ensureViewerForIdentity = internalMutation({
     const existingUser =
       (await getUserByTokenIdentifier(ctx, args.tokenIdentifier)) ?? (await getUserByEmail(ctx, email))
 
+    const username = existingUser?.username ?? await seededUsername(ctx, email)
     const userId = existingUser?._id ?? (await ctx.db.insert("users", {
       tokenIdentifier: args.tokenIdentifier,
       email,
       displayName: args.displayName,
+      username,
+      directMessagePreference: "mutuals",
       createdAt: now,
       updatedAt: now
     }))
@@ -597,7 +601,9 @@ export const ensureViewerForIdentity = internalMutation({
         tokenIdentifier: args.tokenIdentifier,
         email,
         displayName: args.displayName,
-        updatedAt: now
+        updatedAt: now,
+        ...(existingUser.username === undefined ? { username } : {}),
+        ...(existingUser.directMessagePreference === undefined ? { directMessagePreference: "mutuals" as const } : {})
       })
     }
 
@@ -726,7 +732,10 @@ export const ensureChannelMember = mutation({
       return toChannelView(channel)
     }
 
-    await requireWorkspaceMember(ctx, { workspaceId: channel.workspaceId, userId: user._id })
+    if (channel.kind !== "direct") {
+      if (channel.workspaceId === undefined) throw new Error("Channel is missing its workspace")
+      await requireWorkspaceMember(ctx, { workspaceId: channel.workspaceId, userId: user._id })
+    }
     if (channel.visibility !== "public") {
       await requireChannelMember(ctx, { channelId: channel._id, userId: user._id })
       return toChannelView(channel)
@@ -750,7 +759,10 @@ export const markChannelRead = mutation({
     const channel = await ctx.db.get(args.channelId)
     if (channel === null) throw new Error("Channel not found")
 
-    await requireWorkspaceMember(ctx, { workspaceId: channel.workspaceId, userId: user._id })
+    if (channel.kind !== "direct") {
+      if (channel.workspaceId === undefined) throw new Error("Channel is missing its workspace")
+      await requireWorkspaceMember(ctx, { workspaceId: channel.workspaceId, userId: user._id })
+    }
     const membership = await ctx.db
       .query("channelMemberships")
       .withIndex("by_channel_user", (q) => q.eq("channelId", args.channelId).eq("userId", user._id))
@@ -952,6 +964,7 @@ export const addPrivateChannelMember = mutation({
   }, async () => {
     const actor = await requireAllowedCurrentUser(ctx)
     const channel = await requirePrivateChannelAdmin(ctx, { channelId: args.channelId, userId: actor._id })
+    if (channel.workspaceId === undefined) throw new Error("Channel is missing its workspace")
     await requireEligiblePrivateChannelMember(ctx, { workspaceId: channel.workspaceId, userId: args.userId })
 
     const existing = await ctx.db
@@ -992,6 +1005,7 @@ export const removePrivateChannelMember = mutation({
   }, async () => {
     const actor = await requireAllowedCurrentUser(ctx)
     const channel = await requirePrivateChannelAdmin(ctx, { channelId: args.channelId, userId: actor._id })
+    if (channel.workspaceId === undefined) throw new Error("Channel is missing its workspace")
     await requireWorkspaceMember(ctx, { workspaceId: channel.workspaceId, userId: args.userId })
     const membership = await ctx.db
       .query("channelMemberships")
@@ -1079,6 +1093,7 @@ export const channelMembers = query({
     const channel = await requireChannelMember(ctx, { channelId: args.channelId, userId: user._id })
 
     if (channel.visibility === "public") {
+      if (channel.workspaceId === undefined) throw new Error("Channel is missing its workspace")
       return listWorkspaceMembers(ctx, channel.workspaceId)
     }
 

@@ -237,12 +237,12 @@ describe("WorkspaceChat", () => {
     const { rerender } = render(<WorkspaceChat {...props} model={{ ...base, directConversationCandidates: undefined }} />)
 
     fireEvent.click(await screen.findByRole("button", { name: "Start direct message" }))
-    expect(await screen.findByText("Loading eligible members...")).toBeTruthy()
+    expect(await screen.findByText("Loading accounts...")).toBeTruthy()
 
     rerender(<WorkspaceChat {...props} model={{ ...base, directConversationCandidates: [{ id: "user-2", displayName: "Lee Chen" }] }} />)
-    const search = await screen.findByPlaceholderText("Search workspace members")
+    const search = await screen.findByPlaceholderText("Search usernames")
     fireEvent.change(search, { target: { value: "nobody" } })
-    expect(await screen.findByText("No matching members.")).toBeTruthy()
+    expect(await screen.findByText("No matching accounts.")).toBeTruthy()
     fireEvent.change(search, { target: { value: "Lee" } })
     fireEvent.click(await screen.findByRole("button", { name: "Lee Chen" }))
     expect((await screen.findByRole("alert")).textContent).toContain("Check your connection and try again")
@@ -296,6 +296,23 @@ describe("WorkspaceChat", () => {
     expect(screen.getByLabelText("Channel members").querySelector("[aria-busy='true']")).toBeTruthy()
     expect(document.querySelector(".chatTimeline [class*='skeletonPulse']")).toBeTruthy()
     expect(document.querySelector("[class*='skeletonPulse']")).toBeTruthy()
+  })
+
+  it("hides workspace channels while a direct conversation is active", () => {
+    const directConversation = { id: "direct-1", otherUser: { id: "user-2", displayName: "Lee Chen" } }
+    render(
+      <WorkspaceChat
+        model={{
+          ...makeChatModel(),
+          activeConversation: { kind: "direct", directConversation },
+          directConversations: [directConversation]
+        }}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+      />
+    )
+    expect(screen.queryByRole("complementary", { name: "Workspace navigation" })).toBeNull()
+    expect(screen.queryByRole("navigation", { name: "Channels" })).toBeNull()
   })
 
   it("renders and switches channels from the model channel list", async () => {

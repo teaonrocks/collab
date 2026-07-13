@@ -3,6 +3,8 @@ import { v } from "convex/values"
 
 const workspaceRole = v.union(v.literal("owner"), v.literal("admin"), v.literal("member"), v.literal("guest"))
 const channelRole = v.union(v.literal("admin"), v.literal("member"), v.literal("guest"))
+const directMessagePreference = v.union(v.literal("all"), v.literal("mutuals"), v.literal("friends"))
+const friendRequestStatus = v.union(v.literal("pending"), v.literal("accepted"), v.literal("declined"))
 const messageAttachmentKind = v.union(v.literal("file"), v.literal("image"))
 const messageAttachment = v.object({
   storageId: v.id("_storage"),
@@ -18,10 +20,26 @@ export default defineSchema({
     authSubject: v.optional(v.string()),
     email: v.string(),
     displayName: v.string(),
+    // Optional during the rollout so existing accounts can be backfilled safely.
+    username: v.optional(v.string()),
+    directMessagePreference: v.optional(directMessagePreference),
     createdAt: v.number(),
     updatedAt: v.number(),
     deletedAt: v.optional(v.number())
-  }).index("by_token_identifier", ["tokenIdentifier"]).index("by_email", ["email"]),
+  }).index("by_token_identifier", ["tokenIdentifier"]).index("by_email", ["email"])
+    .index("by_username", ["username"])
+    .searchIndex("search_username", { searchField: "username" }),
+
+  friendRequests: defineTable({
+    pairKey: v.string(),
+    requesterUserId: v.id("users"),
+    recipientUserId: v.id("users"),
+    status: friendRequestStatus,
+    createdAt: v.number(),
+    respondedAt: v.optional(v.number())
+  }).index("by_pair_key", ["pairKey"])
+    .index("by_recipient_and_status", ["recipientUserId", "status"])
+    .index("by_requester_and_status", ["requesterUserId", "status"]),
 
   workspaces: defineTable({
     key: v.string(),
@@ -40,7 +58,8 @@ export default defineSchema({
   ]),
 
   channels: defineTable({
-    workspaceId: v.id("workspaces"),
+    // Workspace channels require this; global direct conversations omit it.
+    workspaceId: v.optional(v.id("workspaces")),
     key: v.string(),
     name: v.string(),
     visibility: v.union(v.literal("public"), v.literal("private")),
@@ -53,7 +72,8 @@ export default defineSchema({
     .index("by_workspace_and_deleted_at", ["workspaceId", "deletedAt"])
     .index("by_workspace_kind_and_deleted_at", ["workspaceId", "kind", "deletedAt"])
     .index("by_workspace_key", ["workspaceId", "key"])
-    .index("by_workspace_and_direct_pair_key", ["workspaceId", "directPairKey"]),
+    .index("by_workspace_and_direct_pair_key", ["workspaceId", "directPairKey"])
+    .index("by_direct_pair_key", ["directPairKey"]),
 
   channelMemberships: defineTable({
     channelId: v.id("channels"),
@@ -67,13 +87,14 @@ export default defineSchema({
   }).index("by_channel", ["channelId"]).index("by_user", ["userId"])
     .index("by_user_and_workspace", ["userId", "workspaceId"])
     .index("by_user_workspace_and_channel_kind", ["userId", "workspaceId", "channelKind"])
+    .index("by_user_and_channel_kind", ["userId", "channelKind"])
     .index("by_channel_user", [
     "channelId",
     "userId"
   ]),
 
   messages: defineTable({
-    workspaceId: v.id("workspaces"),
+    workspaceId: v.optional(v.id("workspaces")),
     channelId: v.id("channels"),
     authorUserId: v.id("users"),
     authorDisplayName: v.optional(v.string()),
@@ -113,7 +134,7 @@ export default defineSchema({
   }).index("by_uploader", ["uploaderUserId"]),
 
   messageReactions: defineTable({
-    workspaceId: v.id("workspaces"),
+    workspaceId: v.optional(v.id("workspaces")),
     channelId: v.id("channels"),
     messageId: v.id("messages"),
     userId: v.id("users"),

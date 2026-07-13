@@ -21,6 +21,16 @@ export type ChatDirectConversation = {
   readonly otherUser: ChatChannelMember
 }
 
+export type ChatDirectMessageProfile = {
+  readonly username: string | null
+  readonly directMessagePreference: "all" | "mutuals" | "friends"
+}
+
+export type ChatIncomingFriendRequest = {
+  readonly id: string
+  readonly requester: { readonly id: string; readonly displayName: string; readonly username: string | null }
+}
+
 export type ChatActiveConversation =
   | { readonly kind: "channel"; readonly channel: ChatChannel }
   | { readonly kind: "direct"; readonly directConversation: ChatDirectConversation }
@@ -34,6 +44,8 @@ export const activeConversationName = (conversation: ChatActiveConversation): st
 export type ChatChannelMember = {
   readonly id: string
   readonly displayName: string
+  readonly username?: string | null
+  readonly canStartDirectMessage?: boolean
   readonly role?: "admin" | "member" | "guest"
 }
 
@@ -94,6 +106,8 @@ export type ChatDataModel = {
   readonly directConversations: ReadonlyArray<ChatDirectConversation>
   readonly directConversationCandidates?: ReadonlyArray<ChatChannelMember>
   readonly directConversationsLoading?: boolean
+  readonly directMessageProfile?: ChatDirectMessageProfile
+  readonly incomingFriendRequests?: ReadonlyArray<ChatIncomingFriendRequest>
   readonly channelMessages: ReadonlyArray<ChatMessage>
   readonly channelMembers?: ReadonlyArray<ChatChannelMember>
   readonly channelMemberInviteCandidates?: ReadonlyArray<ChatChannelInviteCandidate>
@@ -114,6 +128,10 @@ export type CreateChatChannel = (input: {
 export type SelectChatChannel = (channelId: ChatChannelId) => void
 export type SelectChatDirectConversation = (conversationId: ChatChannelId) => void
 export type StartChatDirectConversation = (recipientUserId: ChatChannelMember["id"]) => Promise<ChatDirectConversation>
+export type SearchChatDirectConversationCandidates = (query: string) => Promise<ReadonlyArray<ChatChannelMember>>
+export type SendChatFriendRequest = (recipientUserId: ChatChannelMember["id"]) => Promise<unknown>
+export type UpdateChatDirectMessageProfile = (input: ChatDirectMessageProfile) => Promise<ChatDirectMessageProfile>
+export type RespondToChatFriendRequest = (input: { readonly friendRequestId: string; readonly accept: boolean }) => Promise<unknown>
 
 export type EditChatChannel = (input: {
   readonly channelId: ChatChannelId
@@ -172,6 +190,10 @@ export type ChatDataView = {
   readonly selectChannel?: SelectChatChannel
   readonly selectDirectConversation?: SelectChatDirectConversation
   readonly startDirectConversation?: StartChatDirectConversation
+  readonly searchDirectConversationCandidates?: SearchChatDirectConversationCandidates
+  readonly sendFriendRequest?: SendChatFriendRequest
+  readonly updateDirectMessageProfile?: UpdateChatDirectMessageProfile
+  readonly respondToFriendRequest?: RespondToChatFriendRequest
   readonly addChannelMember?: AddChatChannelMember
   readonly removeChannelMember?: RemoveChatChannelMember
   readonly createChannelMessage: CreateChatMessage
