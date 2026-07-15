@@ -132,6 +132,9 @@ export const searchUsers = query({
       results.push({
         ...toUserView(user),
         friendship: request?.status ?? null,
+        friendRequestDirection: request?.status === "pending"
+          ? request.requesterUserId === actor._id ? "outgoing" as const : "incoming" as const
+          : null,
         canStartDirectMessage: await canStartDirectMessage(ctx, actor._id, user)
       })
     }
@@ -151,7 +154,13 @@ export const sendFriendRequest = mutation({
     const pairKey = canonicalPairKey(requester._id, recipient._id)
     const existing = await ctx.db.query("friendRequests").withIndex("by_pair_key", (q) => q.eq("pairKey", pairKey)).unique()
     if (existing?.status === "accepted") return { id: existing._id, status: existing.status }
-    if (existing?.status === "pending") return { id: existing._id, status: existing.status }
+    if (existing?.status === "pending") {
+      if (existing.recipientUserId === requester._id) {
+        await ctx.db.patch(existing._id, { status: "accepted", respondedAt: Date.now() })
+        return { id: existing._id, status: "accepted" as const }
+      }
+      return { id: existing._id, status: existing.status }
+    }
     const now = Date.now()
     if (existing !== null) {
       await ctx.db.patch(existing._id, { requesterUserId: requester._id, recipientUserId: recipient._id, status: "pending", createdAt: now, respondedAt: undefined })

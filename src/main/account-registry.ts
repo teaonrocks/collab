@@ -171,7 +171,8 @@ export const createAccountRegistry = (filePath: string, now: () => number = Date
           displayName: account.profile?.displayName ?? "Sign in",
           email: account.profile?.email ?? null,
           avatarUrl: account.profile?.avatarUrl ?? null,
-          current: account.id === currentAccountId
+          current: account.id === currentAccountId,
+          pending: pendingAccountIds.has(account.id)
         }))
     })
   }

@@ -251,6 +251,79 @@ describe("WorkspaceChat", () => {
     expect(starts).toHaveBeenCalledTimes(2)
   })
 
+  it("removes stale remote recipients immediately when the search query changes", async () => {
+    let resolveLee!: (results: ReadonlyArray<{ id: string; displayName: string; username: string; canStartDirectMessage: boolean }>) => void
+    let resolveMaya!: (results: ReadonlyArray<{ id: string; displayName: string; username: string; canStartDirectMessage: boolean }>) => void
+    const searchCandidates = vi.fn((query: string) => new Promise<ReadonlyArray<{ id: string; displayName: string; username: string; canStartDirectMessage: boolean }>>((resolve) => {
+      if (query === "lee") resolveLee = resolve
+      if (query === "maya") resolveMaya = resolve
+    }))
+
+    render(
+      <WorkspaceChat
+        model={makeChatModel()}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+        startDirectConversation={() => Promise.reject(new Error("not used"))}
+        searchDirectConversationCandidates={searchCandidates}
+      />
+    )
+
+    fireEvent.click(await screen.findByRole("button", { name: "Start direct message" }))
+    const search = await screen.findByPlaceholderText("Search usernames")
+    fireEvent.change(search, { target: { value: "lee" } })
+    expect(screen.getByText("Loading accounts...")).toBeTruthy()
+    await act(async () => resolveLee([{ id: "user-2", displayName: "Lee Chen", username: "lee", canStartDirectMessage: true }]))
+    expect(await screen.findByRole("button", { name: "Lee Chen" })).toBeTruthy()
+
+    fireEvent.change(search, { target: { value: "maya" } })
+
+    expect(screen.queryByRole("button", { name: "Lee Chen" })).toBeNull()
+    expect(screen.getByText("Loading accounts...")).toBeTruthy()
+    await act(async () => resolveMaya([{ id: "user-3", displayName: "Maya Singh", username: "maya", canStartDirectMessage: true }]))
+    expect(await screen.findByRole("button", { name: "Maya Singh" })).toBeTruthy()
+  })
+
+  it("accepts an incoming reciprocal friend request and refreshes the recipient action", async () => {
+    const searchCandidates = vi.fn()
+      .mockResolvedValueOnce([{
+        id: "user-2",
+        displayName: "Lee Chen",
+        username: "lee",
+        canStartDirectMessage: false,
+        friendship: "pending",
+        friendRequestDirection: "incoming"
+      }])
+      .mockResolvedValueOnce([{
+        id: "user-2",
+        displayName: "Lee Chen",
+        username: "lee",
+        canStartDirectMessage: true,
+        friendship: "accepted",
+        friendRequestDirection: null
+      }])
+    const sendFriendRequest = vi.fn().mockResolvedValue({ status: "accepted" })
+
+    render(
+      <WorkspaceChat
+        model={makeChatModel()}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+        startDirectConversation={() => Promise.reject(new Error("not used"))}
+        searchDirectConversationCandidates={searchCandidates}
+        sendFriendRequest={sendFriendRequest}
+      />
+    )
+
+    fireEvent.click(await screen.findByRole("button", { name: "Start direct message" }))
+    fireEvent.change(await screen.findByPlaceholderText("Search usernames"), { target: { value: "lee" } })
+    fireEvent.click(await screen.findByRole("button", { name: "Accept friend request from Lee Chen" }))
+
+    await waitFor(() => expect(sendFriendRequest).toHaveBeenCalledWith("user-2"))
+    expect(await screen.findByRole("button", { name: "Lee Chen" })).toBeTruthy()
+    expect(searchCandidates).toHaveBeenCalledTimes(2)
+  })
+
   it("keeps direct messages in the global rail while changing channels", async () => {
     const base = makeChatModel()
     const directConversations = [{ id: "direct-1", otherUser: { id: "user-2", displayName: "Lee Chen" } }]

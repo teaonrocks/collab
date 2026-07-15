@@ -46,6 +46,8 @@ export type ChatChannelMember = {
   readonly displayName: string
   readonly username?: string | null
   readonly canStartDirectMessage?: boolean
+  readonly friendship?: "pending" | "accepted" | "declined" | null
+  readonly friendRequestDirection?: "incoming" | "outgoing" | null
   readonly role?: "admin" | "member" | "guest"
 }
 

@@ -69,6 +69,21 @@ describe("global direct conversations", () => {
       .resolves.toEqual([expect.objectContaining({ username: "lee", canStartDirectMessage: false })])
   })
 
+  it("accepts a reciprocal pending friend request instead of silently keeping it pending", async () => {
+    const t = convexTest(schema, modules)
+    const mayaUser = await initialize(t, maya)
+    const leeUser = await initialize(t, lee)
+    await t.withIdentity(lee).mutation(api.social.updateProfile, { directMessagePreference: "friends" })
+    const incoming = await t.withIdentity(lee).mutation(api.social.sendFriendRequest, { recipientUserId: mayaUser.userId })
+
+    await expect(t.withIdentity(maya).query(api.social.searchUsers, { query: "lee" }))
+      .resolves.toEqual([expect.objectContaining({ friendship: "pending", friendRequestDirection: "incoming" })])
+    await expect(t.withIdentity(maya).mutation(api.social.sendFriendRequest, { recipientUserId: leeUser.userId }))
+      .resolves.toEqual({ id: incoming.id, status: "accepted" })
+    await expect(t.withIdentity(maya).query(api.social.searchUsers, { query: "lee" }))
+      .resolves.toEqual([expect.objectContaining({ friendship: "accepted", friendRequestDirection: null, canStartDirectMessage: true })])
+  })
+
   it("reports unread state for a global DM independently of a workspace", async () => {
     const t = convexTest(schema, modules)
     await initialize(t, maya)

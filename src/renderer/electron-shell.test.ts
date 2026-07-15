@@ -5,8 +5,10 @@ import {
   getWindowAccountContext,
   isSafeExternalAuthUrl,
   openExternalUrl,
+  openNativeAuthUrl,
   removeCurrentWindowAccount,
   signOutAllWindowAccounts,
+  subscribeToWindowAccountContext,
   switchWindowAccount,
   updateWindowAccountProfile
 } from "./electron-shell"
@@ -42,14 +44,17 @@ describe("electron shell URL gate", () => {
 
   it("delegates to the preload bridge when Electron exposes it", async () => {
     const openExternal = vi.fn().mockResolvedValue(undefined)
+    const openNativeAuth = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(window, "aetherShell", {
       configurable: true,
-      value: { openExternal }
+      value: { openExternal, openNativeAuth }
     })
 
     await openExternalUrl(signInUrl())
+    await openNativeAuthUrl(signInUrl())
 
     expect(openExternal).toHaveBeenCalledWith(signInUrl())
+    expect(openNativeAuth).toHaveBeenCalledWith(signInUrl())
   })
 
   it("rejects unsafe browser fallback navigation when preload is unavailable", async () => {
@@ -64,6 +69,10 @@ describe("electron shell URL gate", () => {
     }
     const bridge = {
       accountContext: vi.fn().mockResolvedValue(context),
+      onAccountContextChanged: vi.fn((listener: (next: typeof context) => void) => {
+        listener(context)
+        return vi.fn()
+      }),
       updateAccountProfile: vi.fn().mockResolvedValue(context),
       switchAccount: vi.fn().mockResolvedValue(undefined),
       addAccount: vi.fn().mockResolvedValue(undefined),
@@ -83,12 +92,16 @@ describe("electron shell URL gate", () => {
 
     await expect(getWindowAccountContext()).resolves.toEqual(context)
     await expect(updateWindowAccountProfile(profile)).resolves.toEqual(context)
+    const listener = vi.fn()
+    const unsubscribe = subscribeToWindowAccountContext(listener)
     await switchWindowAccount("account-2")
     await addWindowAccount()
     await removeCurrentWindowAccount()
     await signOutAllWindowAccounts()
 
     expect(bridge.updateAccountProfile).toHaveBeenCalledWith(profile)
+    expect(listener).toHaveBeenCalledWith(context)
+    expect(typeof unsubscribe).toBe("function")
     expect(bridge.switchAccount).toHaveBeenCalledWith("account-2")
     expect(bridge.addAccount).toHaveBeenCalledTimes(1)
     expect(bridge.removeCurrentAccount).toHaveBeenCalledTimes(1)

@@ -915,6 +915,13 @@ function StartDirectMessageDialog(props: {
       .then(() => {
         savingRef.current = false
         setSavingUserId(null)
+        const normalizedQuery = query.trim()
+        if (onSearch !== undefined && normalizedQuery.length > 0) {
+          setSearchResults(undefined)
+          void onSearch(normalizedQuery)
+            .then(setSearchResults)
+            .catch(() => setSearchResults([]))
+        }
       })
       .catch(() => {
         savingRef.current = false
@@ -937,7 +944,11 @@ function StartDirectMessageDialog(props: {
             placeholder="Search usernames"
             autoFocus
             disabled={savingUserId !== null}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              const nextQuery = event.target.value
+              setQuery(nextQuery)
+              if (onSearch !== undefined) setSearchResults(nextQuery.trim().length === 0 ? [] : undefined)
+            }}
           />
           <div className="max-h-60 overflow-y-auto rounded-control border border-border bg-surface-canvas p-1" aria-label="Aether accounts">
             {onSearch !== undefined && query.trim().length === 0
@@ -954,8 +965,12 @@ function StartDirectMessageDialog(props: {
                         <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap"><strong className="block">{candidate.displayName}</strong><span className="text-xs text-foreground-subtle">@{candidate.username}</span></span>
                         {savingUserId === candidate.id ? <span className="text-xs text-foreground-subtle">Working...</span> : candidate.canStartDirectMessage !== false
                           ? <Button size="sm" aria-label={candidate.displayName} onClick={() => start(candidate)}>Message</Button>
-                          : onSendFriendRequest === undefined ? <span className="text-xs text-foreground-subtle">DM restricted</span>
-                            : <Button size="sm" variant="secondary" onClick={() => sendFriendRequest(candidate)}>Add friend</Button>}
+                          : candidate.friendRequestDirection === "outgoing"
+                            ? <span className="text-xs text-foreground-subtle">Request sent</span>
+                            : candidate.friendship === "accepted"
+                              ? <span className="text-xs text-foreground-subtle">Friends · DM restricted</span>
+                              : onSendFriendRequest === undefined ? <span className="text-xs text-foreground-subtle">DM restricted</span>
+                                : <Button size="sm" variant="secondary" aria-label={candidate.friendRequestDirection === "incoming" ? `Accept friend request from ${candidate.displayName}` : undefined} onClick={() => sendFriendRequest(candidate)}>{candidate.friendRequestDirection === "incoming" ? "Accept request" : "Add friend"}</Button>}
                       </div>
                     ))}
           </div>

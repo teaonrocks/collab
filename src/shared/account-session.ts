@@ -1,4 +1,5 @@
 export const defaultAccountId = "default"
+export const accountContextChangedChannel = "aether:accounts-changed"
 
 export type AccountProfile = {
   readonly userId: string
@@ -13,6 +14,7 @@ export type AccountSummary = {
   readonly email: string | null
   readonly avatarUrl: string | null
   readonly current: boolean
+  readonly pending: boolean
 }
 
 export type WindowAccountContext = {

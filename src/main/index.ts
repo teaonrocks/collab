@@ -13,12 +13,19 @@ import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
 import { createAccountRegistry, type AccountRegistry } from "./account-registry"
+import { broadcastAccountContexts } from "./account-context-sync"
+import { authProtocolClientRegistration } from "./auth-protocol-client"
 import {
   retireAccountWindow,
   revealReplacementThenRetire,
   selectActiveWindowRecord
 } from "./account-window-lifecycle"
 import { createAuthCallbackCoordinator } from "./auth-callback"
+import {
+  cancelNativeAuthSessions,
+  nativeAuthHelperExecutable,
+  runNativeAuthSession
+} from "./native-auth-session"
 import {
   accountPartition,
   defaultAccountId,
@@ -73,6 +80,10 @@ const authCallbacks = createAuthCallbackCoordinator({
 const getAccounts = (): AccountRegistry => {
   if (accounts === null) throw new Error("Account registry is not ready.")
   return accounts
+}
+
+const notifyAccountContextChanged = (): void => {
+  broadcastAccountContexts(getAccounts(), windows.values())
 }
 
 const activeRecord = (): WindowRecord | null => {
@@ -174,9 +185,11 @@ const createWindow = (
       accountRegistry.isPending(resolvedAccountId) &&
       ![...windows.values()].some((candidate) => candidate.accountId === resolvedAccountId)
     ) {
-      void accountRegistry.remove(resolvedAccountId).catch((cause: unknown) => {
-        console.error("Failed to discard an unfinished Aether account", cause)
-      })
+      void accountRegistry.remove(resolvedAccountId)
+        .then(notifyAccountContextChanged)
+        .catch((cause: unknown) => {
+          console.error("Failed to discard an unfinished Aether account", cause)
+        })
     }
   })
 
@@ -283,6 +296,19 @@ const registerIpc = (): void => {
     return shell.openExternal(rawUrl)
   })
 
+  ipcMain.handle("aether:open-native-auth", async (event, rawUrl: unknown) => {
+    recordForEvent(event)
+    if (typeof rawUrl !== "string") {
+      throw new Error("Refusing to open non-string external URL.")
+    }
+    const callbackUrl = await runNativeAuthSession(rawUrl, nativeAuthHelperExecutable({
+      appPath: app.getAppPath(),
+      resourcesPath: process.resourcesPath,
+      packaged: app.isPackaged
+    }))
+    if (callbackUrl !== null) setImmediate(() => handleAuthCallback(callbackUrl))
+  })
+
   ipcMain.handle("aether:accounts-context", (event) => {
     const record = recordForEvent(event)
     return getAccounts().context(record.id, record.accountId)
@@ -299,6 +325,7 @@ const registerIpc = (): void => {
         await reopenWindowPlacements(placements, record.accountId)
       })
     }
+    notifyAccountContextChanged()
     return getAccounts().context(record.id, record.accountId)
   })
 
@@ -316,6 +343,7 @@ const registerIpc = (): void => {
         await getAccounts().remove(record.accountId)
         await reopenWindowPlacements(placements, accountId)
       })
+      notifyAccountContextChanged()
       return
     }
     await replaceWindowAccount(record, accountId)
@@ -324,10 +352,12 @@ const registerIpc = (): void => {
   ipcMain.handle("aether:accounts-add", async (event) => {
     const record = recordForEvent(event)
     const accountId = await getAccounts().create()
+    notifyAccountContextChanged()
     try {
       await replaceWindowAccount(record, accountId)
     } catch (cause) {
       await getAccounts().remove(accountId)
+      notifyAccountContextChanged()
       throw cause
     }
   })
@@ -342,6 +372,7 @@ const registerIpc = (): void => {
       await getAccounts().remove(removedAccountId)
       await reopenWindowPlacements(placements, getAccounts().preferredAccountId(removedAccountId))
     })
+    notifyAccountContextChanged()
   })
 
   ipcMain.handle("aether:accounts-sign-out-all", async (event) => {
@@ -354,6 +385,7 @@ const registerIpc = (): void => {
       await getAccounts().reset()
       await reopenWindowPlacements(placements, defaultAccountId)
     })
+    notifyAccountContextChanged()
   })
 }
 
@@ -384,15 +416,30 @@ const installApplicationMenu = (): void => {
   Menu.setApplicationMenu(Menu.buildFromTemplate([...template]))
 }
 
-if (process.defaultApp && process.argv.length >= 2) {
-  app.setAsDefaultProtocolClient(authCallbackScheme, process.execPath, [process.argv[1]!])
-} else {
-  app.setAsDefaultProtocolClient(authCallbackScheme)
+const protocolClientRegistration = authProtocolClientRegistration({
+  argv: process.argv,
+  defaultApp: process.defaultApp === true,
+  executablePath: process.execPath,
+  packaged: app.isPackaged,
+  platform: process.platform
+})
+if (protocolClientRegistration !== null) {
+  if (protocolClientRegistration.executablePath === undefined) {
+    app.setAsDefaultProtocolClient(authCallbackScheme)
+  } else {
+    app.setAsDefaultProtocolClient(
+      authCallbackScheme,
+      protocolClientRegistration.executablePath,
+      [...(protocolClientRegistration.args ?? [])]
+    )
+  }
 }
 
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
+  app.on("before-quit", cancelNativeAuthSessions)
+
   app.on("second-instance", (_event, argv) => {
     const callbackUrl = findAuthCallbackUrl(argv)
     if (callbackUrl !== null) {

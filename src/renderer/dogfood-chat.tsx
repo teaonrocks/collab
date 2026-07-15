@@ -19,8 +19,10 @@ import {
   addWindowAccount,
   getWindowAccountContext,
   openExternalUrl,
+  openNativeAuthUrl,
   removeCurrentWindowAccount,
   signOutAllWindowAccounts,
+  subscribeToWindowAccountContext,
   switchWindowAccount,
   updateWindowAccountProfile
 } from "./electron-shell"
@@ -52,11 +54,15 @@ const dogfoodShellClassName =
 const dogfoodAuthPanelClassName =
   "dogfoodAuthPanel flex w-[min(420px,100%)] flex-col items-start gap-3.5 rounded-card border border-border bg-surface-canvas p-5 shadow-panel [&_div]:m-0 [&_div]:text-sm [&_div]:leading-[1.45] [&_div]:text-foreground-muted [&_h1]:m-0 [&_h1]:text-lg [&_h1]:leading-tight [&_h1]:text-foreground [&_p]:m-0 [&_p]:text-sm [&_p]:leading-[1.45] [&_p]:text-foreground-muted"
 const dogfoodPlainStateClassName =
-  "dogfoodPlainState flex w-[min(420px,100%)] flex-col items-center gap-4 text-center [&_div]:m-0 [&_div]:flex [&_div]:h-10 [&_div]:items-center [&_div]:justify-center [&_div]:text-sm [&_div]:leading-[1.45] [&_div]:text-foreground-muted [&_h1]:m-0 [&_h1]:text-lg [&_h1]:leading-tight [&_h1]:text-foreground"
+  "dogfoodPlainState flex w-[min(420px,100%)] flex-col items-center gap-4 text-center [&_h1]:m-0 [&_h1]:text-lg [&_h1]:leading-tight [&_h1]:text-foreground"
+const dogfoodPlainContentClassName =
+  "m-0 flex min-h-10 flex-col items-center justify-center gap-3 text-sm leading-[1.45] text-foreground-muted"
 const dogfoodPrimaryButtonClassName =
   "dogfoodPrimaryButton min-h-9 cursor-pointer rounded-panel border border-foreground-strong bg-foreground-strong px-3.5 font-[inherit] font-bold text-foreground-inverse disabled:cursor-default disabled:border-foreground-subtle disabled:bg-foreground-subtle"
 const dogfoodSecondaryButtonClassName =
   "dogfoodSecondaryButton min-h-9 cursor-pointer rounded-panel border border-border-strong bg-surface-canvas px-3.5 font-[inherit] font-bold text-foreground"
+const dogfoodLinkButtonClassName =
+  "dogfoodLinkButton cursor-pointer border-0 bg-transparent p-0 font-[inherit] text-xs font-normal text-foreground-muted underline decoration-foreground-subtle underline-offset-4 hover:text-foreground hover:decoration-foreground focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
 
 export function ConvexDogfoodApp() {
   return (
@@ -115,9 +121,6 @@ function ConvexDogfoodChat() {
     api.direct_conversations.list,
     viewerReady ? {} : "skip"
   )
-  // Kept as a compatibility fallback for plain consumers; the dialog itself
-  // uses the server-side username search command below.
-  const directConversationCandidates = useQuery(api.direct_conversations.candidates, viewerReady ? {} : "skip")
   const directIndicators = useQuery(api.direct_conversations.indicators, viewerReady ? {} : "skip")
   const directMessageProfile = useQuery(api.social.profile, viewerReady ? {} : "skip")
   const incomingFriendRequests = useQuery(api.social.incomingFriendRequests, viewerReady ? {} : "skip")
@@ -167,15 +170,21 @@ function ConvexDogfoodChat() {
 
   useEffect(() => {
     let cancelled = false
+    let receivedUpdate = false
+    const unsubscribe = subscribeToWindowAccountContext((context) => {
+      receivedUpdate = true
+      if (!cancelled) setAccountContext(context)
+    })
     void getWindowAccountContext()
       .then((context) => {
-        if (!cancelled) setAccountContext(context)
+        if (!cancelled && !receivedUpdate) setAccountContext(context)
       })
       .catch((cause: unknown) => {
         console.warn("Could not load the Aether account list", cause)
       })
     return () => {
       cancelled = true
+      unsubscribe()
     }
   }, [])
 
@@ -303,7 +312,6 @@ function ConvexDogfoodChat() {
             workspace,
             channels: channelList,
             directConversations: stableDirectConversations,
-            directConversationCandidates,
             directMessageProfile,
             incomingFriendRequests,
             selectedConversation: activeKind === "direct"
@@ -388,7 +396,7 @@ function ConvexDogfoodChat() {
             operationErrorMessage: dogfoodOperationErrorMessage
           }
         }),
-    [activeChannelId, activeKind, addPrivateChannelMember, channelIndicators, channelList, channelMemberInviteCandidates, convex, createChannel, createChannelInviteCandidates, deleteAttachmentUpload, deleteChannel, deleteMessage, directConversationCandidates, directConversations, directIndicators, directMessageProfile, editChannel, editMessage, generateAttachmentUploadUrl, incomingFriendRequests, members, messagePagination, messages, registerAttachmentUpload, removePrivateChannelMember, respondToFriendRequest, selectedConversation, sendFriendRequest, sendMessage, stableDirectConversations, startOrReopenDirectConversation, toggleMessageReaction, updateDirectMessageProfile, workspace]
+    [activeChannelId, activeKind, addPrivateChannelMember, channelIndicators, channelList, channelMemberInviteCandidates, convex, createChannel, createChannelInviteCandidates, deleteAttachmentUpload, deleteChannel, deleteMessage, directConversations, directIndicators, directMessageProfile, editChannel, editMessage, generateAttachmentUploadUrl, incomingFriendRequests, members, messagePagination, messages, registerAttachmentUpload, removePrivateChannelMember, respondToFriendRequest, selectedConversation, sendFriendRequest, sendMessage, stableDirectConversations, startOrReopenDirectConversation, toggleMessageReaction, updateDirectMessageProfile, workspace]
   )
 
   if (auth.isLoading) {
@@ -412,7 +420,7 @@ function ConvexDogfoodChat() {
           : (
             <button
               type="button"
-              className={dogfoodSecondaryButtonClassName}
+              className={dogfoodLinkButtonClassName}
               onClick={() => void switchWindowAccount(previousAccount.id)}
             >
               Back to {previousAccount.displayName}
@@ -484,7 +492,7 @@ const signInInDefaultBrowser = async (
   setSignInOpening(true)
   setError(null)
   try {
-    const url = await auth.getSignInUrl(accountContext === null
+    const generatedUrl = await auth.getSignInUrl(accountContext === null
       ? {}
       : {
           state: {
@@ -492,7 +500,12 @@ const signInInDefaultBrowser = async (
             aetherAccountId: accountContext.currentAccountId
           }
         })
-    await openExternalUrl(url)
+    const currentAccount = accountContext?.accounts.find((account) => account.current)
+    if (currentAccount?.pending === true) {
+      await openNativeAuthUrl(generatedUrl)
+    } else {
+      await openExternalUrl(generatedUrl)
+    }
   } catch (cause) {
     const diagnostic = dogfoodDiagnostic("auth", "sign-in", cause)
     logDogfoodDiagnostic("auth", cause, diagnostic)
@@ -615,7 +628,7 @@ function DogfoodShell(props: {
       <section className={props.variant === "plain" ? dogfoodPlainStateClassName : dogfoodAuthPanelClassName} aria-live="polite">
         {props.variant === "plain" ? null : <span className="text-xs font-bold uppercase tracking-[0.08em] text-foreground-subtle">Aether Dogfood</span>}
         <h1>{props.title}</h1>
-        <div>{props.children}</div>
+        <div className={props.variant === "plain" ? dogfoodPlainContentClassName : undefined}>{props.children}</div>
       </section>
     </main>
   )

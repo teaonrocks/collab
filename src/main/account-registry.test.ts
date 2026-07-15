@@ -40,7 +40,8 @@ describe("account registry", () => {
         displayName: "Maya Patel",
         email: "maya@example.com",
         avatarUrl: null,
-        current: true
+        current: true,
+        pending: false
       }]
     })
     expect(await readFile(path, "utf8")).not.toContain("refresh")
@@ -65,7 +66,8 @@ describe("account registry", () => {
       displayName: "Archer",
       email: "archer@example.com",
       avatarUrl: "https://example.com/avatar.png",
-      current: true
+      current: true,
+      pending: false
     })
   })
 

@@ -10,14 +10,15 @@
   },
   "main": "./out/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "dev": "pnpm native:macos-auth && electron-vite dev",
+    "build": "pnpm native:macos-auth && electron-vite build",
     "convex": "convex",
     "convex:dev": "convex dev",
     "convex:codegen": "convex codegen",
     "convex:check": "tsc -p convex/tsconfig.json --noEmit && node scripts/check-convex-bindings.mjs",
     "dogfood:verify": "pnpm typecheck && pnpm convex:check && pnpm lint && pnpm test && pnpm build",
     "lint": "eslint . && knip --dependencies",
+    "native:macos-auth": "node scripts/build-macos-auth-helper.mjs",
     "start": "electron-vite preview",
     "package:mac": "pnpm build && electron-builder --mac dir --publish never",
     "start:mac": "node scripts/open-packaged-mac.mjs",
@@ -80,8 +81,17 @@
     },
     "mac": {
       "category": "public.app-category.productivity",
-      "target": "dir"
+      "target": "dir",
+      "binaries": [
+        "Contents/Resources/native/AetherWebAuthHelper.app"
+      ]
     },
+    "extraResources": [
+      {
+        "from": "build/native/AetherWebAuthHelper.app",
+        "to": "native/AetherWebAuthHelper.app"
+      }
+    ],
     "protocols": [
       {
         "name": "Aether authentication callback",

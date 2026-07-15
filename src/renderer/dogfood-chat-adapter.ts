@@ -181,7 +181,9 @@ export const dogfoodChatToChatData = ({ data, state, commands }: DogfoodChatAdap
           id: String(candidate.id),
           displayName: candidate.displayName,
           username: candidate.username,
-          canStartDirectMessage: candidate.canStartDirectMessage
+          canStartDirectMessage: candidate.canStartDirectMessage,
+          friendship: candidate.friendship,
+          friendRequestDirection: candidate.friendRequestDirection
         })),
     sendFriendRequest: commands.sendFriendRequest === undefined
       ? undefined

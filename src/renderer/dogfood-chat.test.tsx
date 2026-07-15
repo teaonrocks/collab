@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { getFunctionName } from "convex/server"
 import type { ComponentType } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
     isAuthenticated: false
   },
   convexQuery: vi.fn(),
+  queryCalls: [] as Array<string>,
   ensureViewer: vi.fn(),
   sendMessage: vi.fn(),
   editMessage: vi.fn(),
@@ -111,25 +112,27 @@ vi.mock("convex/react", () => ({
     }
   },
   useQuery: (query: unknown, args: unknown) => {
+    const functionName = getFunctionName(query as never)
+    mocks.queryCalls.push(functionName)
     if (args === "skip") return undefined
-    if (getFunctionName(query as never) === "direct_conversations:list") return mocks.directConversations
-    if (getFunctionName(query as never) === "direct_conversations:candidates") return mocks.directConversationCandidates
-    if (getFunctionName(query as never) === "direct_conversations:indicators") return []
-    if (getFunctionName(query as never) === "social:profile") return undefined
-    if (getFunctionName(query as never) === "social:incomingFriendRequests") return undefined
-    if (getFunctionName(query as never) === "chat:eligiblePrivateChannelMembers") {
+    if (functionName === "direct_conversations:list") return mocks.directConversations
+    if (functionName === "direct_conversations:candidates") return mocks.directConversationCandidates
+    if (functionName === "direct_conversations:indicators") return []
+    if (functionName === "social:profile") return undefined
+    if (functionName === "social:incomingFriendRequests") return undefined
+    if (functionName === "chat:eligiblePrivateChannelMembers") {
       return typeof args === "object" && args !== null && "channelId" in args
         ? mocks.managementCandidates
         : mocks.inviteCandidates
     }
     if (typeof args === "object" && args !== null && "channelId" in args) {
       const channelId = String(args.channelId)
-      if (getFunctionName(query as never) === "chat:channelMembers") {
+      if (functionName === "chat:channelMembers") {
         return mocks.membersByChannel?.[channelId] ?? mocks.members
       }
       return mocks.membersByChannel?.[channelId] ?? mocks.members
     }
-    if (getFunctionName(query as never) === "chat:channelIndicators") return mocks.channelIndicators
+    if (functionName === "chat:channelIndicators") return mocks.channelIndicators
     if (typeof args === "object" && args !== null && "workspaceId" in args) return mocks.channels
     return mocks.workspace
   }
@@ -162,6 +165,7 @@ vi.mock("./workspace-chat", () => ({
   readonly selectChannel?: (channelId: string) => void
   readonly selectDirectConversation?: (conversationId: string) => void
   readonly startDirectConversation?: (recipientUserId: string) => Promise<unknown>
+  readonly searchDirectConversationCandidates?: (query: string) => Promise<ReadonlyArray<{ readonly id: string; readonly displayName: string }>>
   readonly addChannelMember?: (input: { readonly channelId: string; readonly userId: string }) => Promise<unknown>
   readonly removeChannelMember?: (input: { readonly channelId: string; readonly userId: string }) => Promise<unknown>
   readonly createChannelMessage: (input: {
@@ -224,6 +228,7 @@ vi.mock("./workspace-chat", () => ({
             </li>
           ))}
         </ul>
+        <button type="button" onClick={() => void props.searchDirectConversationCandidates?.("lee")}>Search direct candidates</button>
         <p>{firstMessage?.body}</p>
         {firstMessage?.reactions.map((reaction) => (
           <span key={reaction.emoji}>{reaction.emoji} {reaction.count} {reaction.reactedByCurrentUser ? "active" : "idle"}</span>
@@ -378,6 +383,7 @@ beforeEach(() => {
     createdAt: 44
   })
   mocks.mutationCallCount = 0
+  mocks.queryCalls = []
   mocks.workspace = undefined
   mocks.channels = undefined
   mocks.directConversations = []
@@ -913,10 +919,12 @@ describe("ConvexDogfoodApp", () => {
 
   it("binds system-browser sign-in to the initiating account window", async () => {
     const openExternal = vi.fn().mockResolvedValue(undefined)
+    const openNativeAuth = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(window, "aetherShell", {
       configurable: true,
       value: {
         openExternal,
+        openNativeAuth,
         accountContext: vi.fn().mockResolvedValue({
           windowId: "window-2",
           currentAccountId: "account-2",
@@ -925,7 +933,8 @@ describe("ConvexDogfoodApp", () => {
             displayName: "Sign in",
             email: null,
             avatarUrl: null,
-            current: true
+            current: true,
+            pending: true
           }]
         })
       }
@@ -941,7 +950,8 @@ describe("ConvexDogfoodApp", () => {
         aetherAccountId: "account-2"
       }
     }))
-    expect(openExternal).toHaveBeenCalledTimes(1)
+    expect(openExternal).not.toHaveBeenCalled()
+    expect(openNativeAuth).toHaveBeenCalledWith("https://api.workos.com/user_management/authorize")
   })
 
   it("shows access setup errors from ensureViewer", async () => {
@@ -998,8 +1008,8 @@ describe("ConvexDogfoodApp", () => {
       windowId: "window-1",
       currentAccountId: "default",
       accounts: [
-        { id: "default", displayName: "Maya Patel", email: "maya@example.com", avatarUrl: null, current: true },
-        { id: "account-2", displayName: "Archer", email: "archer@example.com", avatarUrl: null, current: false }
+        { id: "default", displayName: "Maya Patel", email: "maya@example.com", avatarUrl: null, current: true, pending: false },
+        { id: "account-2", displayName: "Archer", email: "archer@example.com", avatarUrl: null, current: false, pending: false }
       ]
     }
     Object.defineProperty(window, "aetherShell", {
@@ -1038,6 +1048,60 @@ describe("ConvexDogfoodApp", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sign out all accounts" }))
     await waitFor(() => expect(signOutAllAccounts).toHaveBeenCalledTimes(1))
     expect(mocks.auth.signOut).toHaveBeenCalledWith({ navigate: false })
+  })
+
+  it("updates an already-open window when another window changes the shared account list", async () => {
+    const initialContext = {
+      windowId: "window-1",
+      currentAccountId: "default",
+      accounts: [
+        { id: "default", displayName: "Maya Patel", email: "maya@example.com", avatarUrl: null, current: true, pending: false }
+      ]
+    }
+    let accountContextListener!: (context: typeof initialContext) => void
+    const unsubscribe = vi.fn()
+    Object.defineProperty(window, "aetherShell", {
+      configurable: true,
+      value: {
+        accountContext: vi.fn().mockResolvedValue(initialContext),
+        onAccountContextChanged: vi.fn((listener: (context: typeof initialContext) => void) => {
+          accountContextListener = listener
+          return unsubscribe
+        }),
+        updateAccountProfile: vi.fn().mockResolvedValue(initialContext),
+        switchAccount: vi.fn().mockResolvedValue(undefined),
+        addAccount: vi.fn().mockResolvedValue(undefined),
+        removeCurrentAccount: vi.fn().mockResolvedValue(undefined),
+        signOutAllAccounts: vi.fn().mockResolvedValue(undefined)
+      }
+    })
+    const { ConvexDogfoodApp } = await import("./dogfood-chat")
+    mocks.auth.user = {
+      id: "user-1",
+      email: "maya@example.com",
+      firstName: "Maya",
+      lastName: "Patel",
+      profilePictureUrl: null
+    }
+    mocks.convexAuth.isAuthenticated = true
+    mocks.workspace = workspace
+    mocks.channels = channels
+    mocks.messages = messages
+
+    const { unmount } = render(<ConvexDogfoodApp />)
+    await screen.findByRole("button", { name: "Maya Patel" })
+
+    await act(async () => accountContextListener({
+      ...initialContext,
+      accounts: [
+        ...initialContext.accounts,
+        { id: "account-2", displayName: "Priya Rao", email: "priya@example.com", avatarUrl: null, current: false, pending: false }
+      ]
+    }))
+
+    expect(await screen.findByRole("button", { name: "Priya Rao" })).toBeTruthy()
+    unmount()
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
   it("sends messages through the Convex mutation using the active channel", async () => {
@@ -1168,30 +1232,24 @@ describe("ConvexDogfoodApp", () => {
     expect(mocks.ensureChannelMember).not.toHaveBeenCalled()
   })
 
-  it("starts or reopens a direct conversation from eligible workspace members", async () => {
+  it("uses server-side user search without subscribing to the legacy candidate scan", async () => {
     const { ConvexDogfoodApp } = await import("./dogfood-chat")
-    const directConversation: DogfoodDirectConversationView = {
-      id: "direct-1" as Id<"channels">,
-      otherUser: { id: "user-2" as Id<"users">, displayName: "Lee Chen" },
-      createdAt: 44
-    }
     mocks.auth.user = { id: "user-1" }
     mocks.convexAuth.isAuthenticated = true
     mocks.workspace = workspace
     mocks.channels = channels
     mocks.directConversations = []
-    mocks.directConversationCandidates = [{ id: "user-2" as Id<"users">, displayName: "Lee Chen" }]
-    mocks.messagesByChannel = { "channel-1": messages, "direct-1": [] }
-    mocks.startOrReopenDirectConversation.mockResolvedValue(directConversation)
+    mocks.messagesByChannel = { "channel-1": messages }
+    mocks.convexQuery.mockResolvedValue([{ id: "user-2", displayName: "Lee Chen", username: "lee", canStartDirectMessage: true }])
 
     render(<ConvexDogfoodApp />)
-    fireEvent.click(await screen.findByRole("button", { name: "Start Lee Chen" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Search direct candidates" }))
 
-    await waitFor(() => expect(mocks.startOrReopenDirectConversation).toHaveBeenCalledWith({
-      recipientUserId: "user-2"
-    }))
-    await waitFor(() => expect(screen.getByLabelText("active channel").textContent).toBe("direct-1"))
-    expect(screen.getByRole("button", { name: "Lee Chen" })).toBeTruthy()
+    await waitFor(() => expect(mocks.convexQuery).toHaveBeenCalledTimes(1))
+    const [query, args] = mocks.convexQuery.mock.calls[0]!
+    expect(getFunctionName(query as never)).toBe("social:searchUsers")
+    expect(args).toEqual({ query: "lee" })
+    expect(mocks.queryCalls).not.toContain("direct_conversations:candidates")
   })
 
   it("exposes incremental history loading from the Convex pagination state", async () => {

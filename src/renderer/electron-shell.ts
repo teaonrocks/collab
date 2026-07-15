@@ -3,7 +3,9 @@ import type { AccountProfile, WindowAccountContext } from "../shared/account-ses
 
 export type AetherShell = {
   readonly openExternal: (url: string) => Promise<void>
+  readonly openNativeAuth: (url: string) => Promise<void>
   readonly accountContext: () => Promise<WindowAccountContext>
+  readonly onAccountContextChanged?: (listener: (context: WindowAccountContext) => void) => () => void
   readonly updateAccountProfile: (profile: AccountProfile) => Promise<WindowAccountContext>
   readonly switchAccount: (accountId: string) => Promise<void>
   readonly addAccount: () => Promise<void>
@@ -32,8 +34,15 @@ export const openExternalUrl = (url: string): Promise<void> => {
   return Promise.resolve()
 }
 
+export const openNativeAuthUrl = (url: string): Promise<void> =>
+  window.aetherShell?.openNativeAuth(url) ?? Promise.reject(new Error("Native account sign-in requires the Aether desktop app."))
+
 export const getWindowAccountContext = (): Promise<WindowAccountContext | null> =>
   window.aetherShell?.accountContext() ?? Promise.resolve(null)
+
+export const subscribeToWindowAccountContext = (
+  listener: (context: WindowAccountContext) => void
+): (() => void) => window.aetherShell?.onAccountContextChanged?.(listener) ?? (() => {})
 
 export const updateWindowAccountProfile = (profile: AccountProfile): Promise<WindowAccountContext | null> =>
   window.aetherShell?.updateAccountProfile(profile) ?? Promise.resolve(null)

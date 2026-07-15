@@ -14,6 +14,18 @@ they use the expected authorize path, `provider=authkit`, `response_type=code`, 
 redirect URI that is either the native Aether callback or a local development callback. Other
 external URLs stay blocked before they reach `shell.openExternal`.
 
+The pending Add account flow opens the same hosted AuthKit URL through macOS Authentication
+Services. Aether's small native helper starts an `ASWebAuthenticationSession` with an ephemeral
+browser session, so WorkOS and upstream identity-provider cookies are not silently reused and no
+Incognito window or browser-specific command-line flags are needed. The helper returns only the
+native callback to the Electron process that started it. Normal sign-in continues to use the
+default browser session.
+
+The authentication UI is owned by macOS. Safari honors the ephemeral request; another selected
+browser may decide how to present the system web-authentication session. The authorization URL is
+sent to the helper over stdin rather than command-line arguments, and Electron accepts only a
+strict `aether://auth/callback` response.
+
 ## Packaged App Behavior
 
 Packaged builds use the unique bundle identifier `com.aether.chat`, declare `aether` in the app's
@@ -26,6 +38,14 @@ Packaged builds use the unique bundle identifier `com.aether.chat`, declare `aet
 - returns the callback to the exact window and account partition that initiated sign-in;
 - focuses that window when possible;
 - loads the renderer entrypoint with the callback query parameters.
+
+Development runs on macOS intentionally do not register the protocol. The generic `Electron.app`
+bundle has no durable app entrypoint when Launch Services opens it, so allowing `pnpm dev` to claim
+the scheme can produce Electron's default "no app was supplied" screen. Use the packaged app for
+callback smoke testing.
+
+`pnpm build` compiles the helper as a universal macOS app for Apple Silicon and Intel. Packaging
+copies it into `Aether.app/Contents/Resources/native` and includes it in the app's signing pass.
 
 AuthKit's browser client only handles a redirect when the current page pathname matches its
 configured `redirectUri` pathname. In packaged Electron, the page is the built renderer file, not
@@ -56,7 +76,9 @@ smoke test when more than one Electron checkout is registered with Launch Servic
 4. Complete sign-in and confirm the OS deep link returns to Aether.
 5. Quit Aether, open a fresh `aether://auth/callback?code=fake` URL, then confirm the app opens or
    focuses without navigating to an arbitrary external URL.
-6. From the bottom-left profile avatar, choose Add account and complete sign-in with a second account.
+6. From the bottom-left profile avatar, choose Add account. Confirm macOS presents a fresh,
+   system-managed web authentication session, then complete sign-in with a second account. A
+   non-Safari default browser may label this ephemeral system session as private or Incognito.
 7. Open a second window with `Cmd+N`; confirm it inherits the focused window's account.
 8. Switch only the second window to the other saved account and confirm the first window is unchanged.
 9. Quit and reopen Aether; confirm both accounts remain available without signing in again.

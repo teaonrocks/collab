@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest"
-import { authKitRedirectUriForCurrentLocation, authKitSignOutReturnTo } from "./authkit-redirect"
+import {
+  authKitRedirectUriForCurrentLocation,
+  authKitSignOutReturnTo
+} from "./authkit-redirect"
 
 describe("AuthKit renderer redirect helpers", () => {
   it("uses the packaged renderer page as the callback path when a native deep link lands with a code", () => {
