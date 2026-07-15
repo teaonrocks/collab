@@ -371,8 +371,9 @@ describe("WorkspaceChat", () => {
     expect(document.querySelector("[class*='skeletonPulse']")).toBeTruthy()
   })
 
-  it("hides workspace channels while a direct conversation is active", () => {
+  it("returns to the workspace from a direct conversation without marking both active", () => {
     const directConversation = { id: "direct-1", otherUser: { id: "user-2", displayName: "Lee Chen" } }
+    const selectChannel = vi.fn()
     render(
       <WorkspaceChat
         model={{
@@ -382,10 +383,21 @@ describe("WorkspaceChat", () => {
         }}
         createChannelMessage={() => Promise.resolve()}
         deleteChannelMessage={() => Promise.resolve()}
+        selectChannel={selectChannel}
       />
     )
     expect(screen.queryByRole("complementary", { name: "Workspace navigation" })).toBeNull()
     expect(screen.queryByRole("navigation", { name: "Channels" })).toBeNull()
+    const workspaceButton = screen.getByRole("button", { name: "Aether Labs" })
+    const directMessageButton = screen.getByRole("button", { name: "Lee Chen" })
+    expect(workspaceButton.getAttribute("aria-current")).toBeNull()
+    expect(workspaceButton.classList.contains("active")).toBe(false)
+    expect(directMessageButton.getAttribute("aria-current")).toBe("page")
+
+    fireEvent.click(workspaceButton)
+
+    expect(selectChannel).toHaveBeenCalledOnce()
+    expect(selectChannel).toHaveBeenCalledWith(channelId)
   })
 
   it("renders and switches channels from the model channel list", async () => {

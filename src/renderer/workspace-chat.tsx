@@ -453,10 +453,12 @@ export function WorkspaceChat(props: {
     )}>
       <WorkspaceRail
         workspaceName={model.workspace.name}
+        workspaceActive={activeConversation.kind === "channel"}
         currentUserName={model.currentUser.displayName}
         conversations={model.directConversations}
         indicators={new Map(model.channelIndicators?.map((state) => [state.channelId, state.indicator]))}
         activeConversationId={activeConversation.kind === "direct" ? activeId : null}
+        onSelectWorkspace={() => selectChannel?.(model.channel.id)}
         onSelectConversation={selectDirectConversation}
         candidates={model.directConversationCandidates}
         conversationsLoading={model.directConversationsLoading === true}
@@ -612,10 +614,12 @@ export function WorkspaceChat(props: {
 
 function WorkspaceRail(props: {
   readonly workspaceName: string
+  readonly workspaceActive: boolean
   readonly currentUserName: string
   readonly conversations: ReadonlyArray<ChatDirectConversation>
   readonly indicators: ReadonlyMap<ChatChannelId, ChatChannelIndicator>
   readonly activeConversationId: ChatChannelId | null
+  readonly onSelectWorkspace: () => void
   readonly onSelectConversation?: ChatDataView["selectDirectConversation"]
   readonly candidates?: ReadonlyArray<ChatChannelMember>
   readonly conversationsLoading: boolean
@@ -629,10 +633,12 @@ function WorkspaceRail(props: {
 }) {
   const {
     workspaceName,
+    workspaceActive,
     currentUserName,
     conversations,
     indicators,
     activeConversationId,
+    onSelectWorkspace,
     onSelectConversation,
     candidates,
     conversationsLoading,
@@ -654,9 +660,11 @@ function WorkspaceRail(props: {
           type="button"
           className={classNames(
             railItemClassName,
-            "active bg-surface-canvas outline-2 outline-border before:absolute before:-left-2 before:h-6 before:w-[3px] before:rounded-r-[3px] before:bg-foreground"
+            workspaceActive && "active bg-surface-canvas outline-2 outline-border before:absolute before:-left-2 before:h-6 before:w-[3px] before:rounded-r-[3px] before:bg-foreground"
           )}
           aria-label={workspaceName}
+          aria-current={workspaceActive ? "page" : undefined}
+          onClick={onSelectWorkspace}
         >
           {initials(workspaceName)}
           <span className={railTooltipClassName} role="tooltip">{workspaceName}</span>
