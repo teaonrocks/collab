@@ -116,8 +116,11 @@ describe("WorkspaceChat", () => {
     )
 
     const preference = await screen.findByRole("combobox", { name: "Notifications for origination" })
-    expect(within(preference).getByRole("option", { name: "Mentions only" })).toBeTruthy()
-    fireEvent.change(preference, { target: { value: "all" } })
+    fireEvent.click(preference)
+    expect(await screen.findByRole("option", { name: "Mentions only" })).toBeTruthy()
+    const allMessages = screen.getByRole("option", { name: "All messages" })
+    fireEvent.pointerDown(allMessages, { pointerType: "mouse" })
+    fireEvent.click(allMessages)
     await waitFor(() => expect(updates).toEqual([{ channelId, mode: "all" }]))
   })
 
@@ -138,9 +141,10 @@ describe("WorkspaceChat", () => {
     )
 
     const preference = await screen.findByRole("combobox", { name: "Notifications for Lee Chen" })
-    expect(within(preference).getByRole("option", { name: "All messages" })).toBeTruthy()
-    expect(within(preference).getByRole("option", { name: "Muted" })).toBeTruthy()
-    expect(within(preference).queryByRole("option", { name: "Mentions only" })).toBeNull()
+    fireEvent.click(preference)
+    expect(await screen.findByRole("option", { name: "All messages" })).toBeTruthy()
+    expect(screen.getByRole("option", { name: "Muted" })).toBeTruthy()
+    expect(screen.queryByRole("option", { name: "Mentions only" })).toBeNull()
   })
 
   it("presents explicit direct conversations in the global rail", async () => {
@@ -158,8 +162,9 @@ describe("WorkspaceChat", () => {
     const directMessages = within(globalNavigation).getByRole("navigation", { name: "Direct messages" })
 
     expect(directMessages).toBeTruthy()
-    expect(within(directMessages).getByRole("button", { name: "Lee Chen" })).toBeTruthy()
-    expect(within(directMessages).getByRole("tooltip", { name: "Lee Chen" })).toBeTruthy()
+    const directMessageButton = within(directMessages).getByRole("button", { name: "Lee Chen" })
+    expect(directMessageButton).toBeTruthy()
+    expect(directMessageButton.hasAttribute("data-base-ui-tooltip-trigger")).toBe(true)
     expect(within(workspaceNavigation).queryByRole("navigation", { name: "Direct messages" })).toBeNull()
     expect(within(workspaceNavigation).queryByText("Maya Patel")).toBeNull()
   })
@@ -393,7 +398,7 @@ describe("WorkspaceChat", () => {
 
     const globalNavigation = await screen.findByLabelText("Global navigation")
     const directMessages = within(globalNavigation).getByRole("navigation", { name: "Direct messages" })
-    expect(await within(directMessages).findByLabelText("Lee Chen")).toBeTruthy()
+    expect(await within(directMessages).findByRole("button", { name: "Lee Chen" })).toBeTruthy()
 
     rerender(
       <WorkspaceChat
@@ -409,8 +414,9 @@ describe("WorkspaceChat", () => {
       />
     )
 
-    expect(within(directMessages).getByRole("button", { name: "Lee Chen" })).toBeTruthy()
-    expect(within(directMessages).getByRole("tooltip", { name: "Lee Chen" })).toBeTruthy()
+    const directMessageButton = within(directMessages).getByRole("button", { name: "Lee Chen" })
+    expect(directMessageButton).toBeTruthy()
+    expect(directMessageButton.hasAttribute("data-base-ui-tooltip-trigger")).toBe(true)
     expect(screen.getByLabelText("Channel members").querySelector("[aria-busy='true']")).toBeTruthy()
     expect(document.querySelector(".chatTimeline [class*='skeletonPulse']")).toBeTruthy()
     expect(document.querySelector("[class*='skeletonPulse']")).toBeTruthy()
@@ -563,6 +569,7 @@ describe("WorkspaceChat", () => {
     const priya = within(form).getByRole("checkbox", { name: "Priya Shah" })
     priya.focus()
     fireEvent.keyDown(priya, { key: " " })
+    fireEvent.keyUp(priya, { key: " " })
     expect(within(form).getByText("2 of 3 selected")).toBeTruthy()
 
     fireEvent.change(within(form).getByLabelText("Channel name"), { target: { value: "Leadership" } })
@@ -577,7 +584,7 @@ describe("WorkspaceChat", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Add channel" }))
     const nextForm = await screen.findByRole("form", { name: "Create channel" })
-    expect((within(nextForm).getByRole("radio", { name: /public/i }) as HTMLInputElement).checked).toBe(true)
+    expect(within(nextForm).getByRole("radio", { name: /public/i }).getAttribute("aria-checked")).toBe("true")
     expect(within(nextForm).queryByLabelText("Initial invitations")).toBeNull()
   })
 
@@ -738,7 +745,7 @@ describe("WorkspaceChat", () => {
     expect(calls).toEqual([{ name: "design", visibility: "public" }])
   })
 
-  it("opens profile settings when hovering the rail avatar", async () => {
+  it("opens profile settings from the rail avatar", async () => {
     let signOuts = 0
     const { container } = render(
       <WorkspaceChat
@@ -751,13 +758,15 @@ describe("WorkspaceChat", () => {
 
     const profileRail = container.querySelector(".railProfile")
     expect(profileRail).toBeTruthy()
-    fireEvent.mouseEnter(profileRail!)
+    fireEvent.pointerDown(profileRail!, { pointerType: "mouse" })
+    fireEvent.click(profileRail!)
 
     const menu = await screen.findByRole("menu", { name: "Profile settings" })
-    const actions = within(menu).getByRole("group", { name: "Accounts and profile actions" })
+    const actions = menu.querySelector(".profileMenuActions")
+    expect(actions).toBeTruthy()
     expect(within(menu).getByText("Maya Patel")).toBeTruthy()
     expect(menu.className).toContain("max-h-[calc(100dvh-24px)]")
-    expect(actions.className).toContain("overflow-y-auto")
+    expect(actions?.className).toContain("overflow-y-auto")
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Sign out" }))
 
     expect(signOuts).toBe(1)

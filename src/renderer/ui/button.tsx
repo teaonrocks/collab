@@ -1,5 +1,6 @@
+import { Button as BaseButton } from "@base-ui/react/button"
 import { cva, type VariantProps } from "class-variance-authority"
-import { forwardRef, type ComponentPropsWithoutRef } from "react"
+import { forwardRef, type ComponentPropsWithoutRef, type ForwardedRef } from "react"
 import { cn } from "../lib/cn"
 
 export const buttonVariants = cva(
@@ -10,6 +11,7 @@ export const buttonVariants = cva(
         default: "border border-foreground bg-foreground text-foreground-inverse hover:bg-foreground-muted",
         secondary: "border border-border-strong bg-surface-raised text-foreground hover:bg-surface-muted",
         ghost: "border border-transparent bg-transparent text-foreground-muted hover:bg-surface-muted hover:text-foreground",
+        link: "h-auto border border-transparent bg-transparent p-0 text-foreground-muted underline decoration-foreground-subtle underline-offset-4 hover:text-foreground hover:decoration-foreground",
         danger: "border border-destructive bg-destructive text-foreground-inverse hover:bg-destructive-hover"
       },
       size: {
@@ -27,13 +29,13 @@ export const buttonVariants = cva(
 )
 
 export type ButtonProps =
-  & ComponentPropsWithoutRef<"button">
+  & ComponentPropsWithoutRef<typeof BaseButton>
   & VariantProps<typeof buttonVariants>
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, type = "button", ...props }, ref) => (
-    <button
-      ref={ref}
+    <BaseButton
+      ref={ref as ForwardedRef<HTMLElement>}
       type={type}
       className={cn(buttonVariants({ variant, size }), className)}
       {...props}

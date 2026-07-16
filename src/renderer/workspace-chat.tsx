@@ -21,7 +21,7 @@ import {
   X,
   Users
 } from "lucide-react"
-import { type FormEvent, type RefObject, useEffect, useMemo, useRef, useState } from "react"
+import { Fragment, type FormEvent, type RefObject, useEffect, useMemo, useRef, useState } from "react"
 import "./App.css"
 import { MESSAGE_ATTACHMENT_POLICY } from "../shared/attachment-policy"
 import { useAttachmentDraft } from "./attachment-draft"
@@ -72,17 +72,35 @@ import { cn } from "./lib/cn"
 import {
   Avatar,
   Button,
+  Checkbox,
   Combobox,
   ComboboxContent,
   ComboboxInput,
   ComboboxItem,
   ComboboxList,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogTitle,
   Input,
+  Radio,
+  RadioGroup,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
   Textarea
 } from "./ui"
 
@@ -105,6 +123,9 @@ const MESSAGE_CONTEXT_MENU_OFFSET = 6
 const COMPOSER_MIN_HEIGHT = 44
 const COMPOSER_MAX_HEIGHT = 140
 const MESSAGE_EDIT_MAX_HEIGHT = 180
+const pointAnchor = (x: number, y: number) => ({
+  getBoundingClientRect: () => new DOMRect(x, y, 0, 0)
+})
 const normalizeChannelName = (name: string): string =>
   name.trim().replace(/^#+/, "").replace(/\s+/g, "-").toLowerCase()
 
@@ -151,8 +172,6 @@ const appShellDirectConversationClassName =
   "directConversation [grid-template-areas:'rail_header'_'rail_chat'] [grid-template-columns:56px_minmax(0,1fr)]"
 const railItemClassName =
   "group/rail relative grid size-9 cursor-pointer place-items-center rounded-card border-0 bg-surface-muted text-[13px] font-extrabold text-foreground"
-const railTooltipClassName =
-  "pointer-events-none absolute left-[calc(100%+10px)] top-1/2 z-30 flex min-h-7 max-w-[180px] -translate-y-1/2 -translate-x-1 items-center whitespace-nowrap rounded-control bg-foreground px-[9px] text-xs font-bold leading-none text-foreground-inverse opacity-0 transition-[opacity,transform] duration-150 before:absolute before:right-full before:top-1/2 before:size-0 before:-translate-y-1/2 before:border-y-[5px] before:border-r-[5px] before:border-y-transparent before:border-r-foreground group-hover/rail:translate-x-0 group-hover/rail:opacity-100 group-focus-visible/rail:translate-x-0 group-focus-visible/rail:opacity-100"
 const channelNavItemClassName =
   "channelNavItem group/channel flex min-h-[34px] w-full items-center justify-between gap-2 rounded-none border-0 bg-transparent px-5 py-[7px] text-left font-[inherit] text-foreground-muted hover:bg-surface-muted-hover"
 const memberListClassName =
@@ -255,7 +274,6 @@ export function WorkspaceChat(props: {
   const [channelOperationError, setChannelOperationError] = useState<string | null>(null)
   const [membersOpen, setMembersOpen] = useState(true)
   const [searchOpen, setSearchOpen] = useState(false)
-  const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [directMessageSettingsOpen, setDirectMessageSettingsOpen] = useState(false)
   const [notificationPreferenceSaving, setNotificationPreferenceSaving] = useState(false)
   const [notificationPreferenceError, setNotificationPreferenceError] = useState<string | null>(null)
@@ -362,15 +380,6 @@ export function WorkspaceChat(props: {
   }, [channelMessagesLoading, view.members])
 
   useEffect(() => {
-    if (!profileMenuOpen) return
-    const closeMenuOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setProfileMenuOpen(false)
-    }
-    window.addEventListener("keydown", closeMenuOnEscape)
-    return () => window.removeEventListener("keydown", closeMenuOnEscape)
-  }, [profileMenuOpen])
-
-  useEffect(() => {
     const openSearchOnHotkey = (event: KeyboardEvent) => {
       if (event.key.toLowerCase() !== "f") return
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return
@@ -456,12 +465,13 @@ export function WorkspaceChat(props: {
   const pendingDeleteMessage = messageInteractions.pendingDeleteMessage
 
   return (
-    <main className={classNames(
-      appShellClassName,
-      activeConversation.kind === "direct"
-        ? appShellDirectConversationClassName
-        : !membersOpen && appShellMembersCollapsedClassName
-    )}>
+    <TooltipProvider delay={500}>
+      <main className={classNames(
+        appShellClassName,
+        activeConversation.kind === "direct"
+          ? appShellDirectConversationClassName
+          : !membersOpen && appShellMembersCollapsedClassName
+      )}>
       <WorkspaceRail
         workspaceName={model.workspace.name}
         workspaceActive={activeConversation.kind === "channel"}
@@ -476,12 +486,9 @@ export function WorkspaceChat(props: {
         onStartConversation={startDirectConversation}
         onSearchConversationCandidates={searchDirectConversationCandidates}
         onSendFriendRequest={sendFriendRequest}
-        profileMenuOpen={profileMenuOpen}
         profileMenuActions={model.directMessageProfile === undefined || updateDirectMessageProfile === undefined
           ? profileMenuActions
           : [{ label: "DM settings", onSelect: () => setDirectMessageSettingsOpen(true) }, ...profileMenuActions]}
-        onOpenProfileMenu={() => setProfileMenuOpen(true)}
-        onCloseProfileMenu={() => setProfileMenuOpen(false)}
       />
       {directMessageSettingsOpen && model.directMessageProfile !== undefined && updateDirectMessageProfile !== undefined
         ? <DirectMessageSettingsDialog
@@ -638,7 +645,8 @@ export function WorkspaceChat(props: {
             onConfirm={messageInteractions.confirmDeleteMessage}
           />
         )}
-    </main>
+      </main>
+    </TooltipProvider>
   )
 }
 
@@ -656,10 +664,7 @@ function WorkspaceRail(props: {
   readonly onStartConversation?: ChatDataView["startDirectConversation"]
   readonly onSearchConversationCandidates?: ChatDataView["searchDirectConversationCandidates"]
   readonly onSendFriendRequest?: ChatDataView["sendFriendRequest"]
-  readonly profileMenuOpen: boolean
   readonly profileMenuActions: ReadonlyArray<ProfileMenuAction>
-  readonly onOpenProfileMenu: () => void
-  readonly onCloseProfileMenu: () => void
 }) {
   const {
     workspaceName,
@@ -675,46 +680,49 @@ function WorkspaceRail(props: {
     onStartConversation,
     onSearchConversationCandidates,
     onSendFriendRequest,
-    profileMenuOpen,
-    profileMenuActions,
-    onOpenProfileMenu,
-    onCloseProfileMenu
+    profileMenuActions
   } = props
   const hasProfileActions = profileMenuActions.length > 0
   const [startOpen, setStartOpen] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
   const addButtonRef = useRef<HTMLButtonElement>(null)
+  const profileButtonRef = useRef<HTMLButtonElement>(null)
   return (
     <aside className="workspaceRail flex h-full min-h-0 min-w-0 flex-col items-center gap-3 border-r border-border bg-surface-rail px-2 py-3 [grid-area:rail]" aria-label="Global navigation">
       <nav className="railGroup flex w-full flex-col items-center gap-2" aria-label="Workspaces">
-        <button
-          type="button"
-          className={classNames(
-            railItemClassName,
-            workspaceActive && "active bg-surface-canvas outline-2 outline-border before:absolute before:-left-2 before:h-6 before:w-[3px] before:rounded-r-[3px] before:bg-foreground"
-          )}
-          aria-label={workspaceName}
-          aria-current={workspaceActive ? "page" : undefined}
-          onClick={onSelectWorkspace}
-        >
-          {initials(workspaceName)}
-          <span className={railTooltipClassName} role="tooltip">{workspaceName}</span>
-        </button>
+        <Tooltip>
+          <TooltipTrigger
+            render={<Button variant="ghost" size="icon" />}
+            className={classNames(
+              railItemClassName,
+              workspaceActive && "active bg-surface-canvas outline-2 outline-border before:absolute before:-left-2 before:h-6 before:w-[3px] before:rounded-r-[3px] before:bg-foreground"
+            )}
+            aria-label={workspaceName}
+            aria-current={workspaceActive ? "page" : undefined}
+            onClick={onSelectWorkspace}
+          >
+            {initials(workspaceName)}
+          </TooltipTrigger>
+          <TooltipContent side="right">{workspaceName}</TooltipContent>
+        </Tooltip>
       </nav>
       <div className="railDivider h-px w-8 shrink-0 bg-border-strong" role="separator" aria-label="Direct messages" />
       <nav className="railGroup flex w-full flex-col items-center gap-2" aria-label="Direct messages">
         {onStartConversation === undefined
           ? null
           : (
-            <button
-              ref={addButtonRef}
-              type="button"
-              className={classNames(railItemClassName, "rounded-full text-foreground-muted")}
-              aria-label="Start direct message"
-              onClick={() => setStartOpen(true)}
-            >
-              <Plus className={iconClassName} aria-hidden="true" />
-              <span className={railTooltipClassName} role="tooltip">Start direct message</span>
-            </button>
+            <Tooltip>
+              <TooltipTrigger
+                ref={addButtonRef}
+                render={<Button variant="ghost" size="icon" />}
+                className={classNames(railItemClassName, "rounded-full text-foreground-muted")}
+                aria-label="Start direct message"
+                onClick={() => setStartOpen(true)}
+              >
+                <Plus className={iconClassName} aria-hidden="true" />
+              </TooltipTrigger>
+              <TooltipContent side="right">Start direct message</TooltipContent>
+            </Tooltip>
           )}
         {conversationsLoading && conversations.length === 0
           ? <span className="sr-only" role="status">Loading direct messages...</span>
@@ -727,89 +735,83 @@ function WorkspaceRail(props: {
             ? undefined
             : directConversationIndicatorDescription(indicator, conversation.otherUser.displayName)
           return (
-          <button
-            key={conversation.id}
-            type="button"
-            className={classNames(railItemClassName, "dmRailItem rounded-full", conversation.id === activeConversationId && "active bg-surface-canvas outline-2 outline-border")}
-            aria-label={directConversationButtonLabel(conversation.otherUser.displayName, indicator)}
-            aria-current={conversation.id === activeConversationId ? "page" : undefined}
-            onClick={() => onSelectConversation?.(conversation.id)}
-          >
-            {initials(conversation.otherUser.displayName)}
-            {indicator === undefined ? null : <span className="absolute right-0 top-0 size-2 rounded-full bg-accent" title={indicatorDescription} />}
-            <span className={railTooltipClassName} role="tooltip">{conversation.otherUser.displayName}</span>
-          </button>
+            <Tooltip key={conversation.id}>
+              <TooltipTrigger
+                render={<Button variant="ghost" size="icon" />}
+                className={classNames(railItemClassName, "dmRailItem rounded-full", conversation.id === activeConversationId && "active bg-surface-canvas outline-2 outline-border")}
+                aria-label={directConversationButtonLabel(conversation.otherUser.displayName, indicator)}
+                aria-current={conversation.id === activeConversationId ? "page" : undefined}
+                onClick={() => onSelectConversation?.(conversation.id)}
+              >
+                <Avatar name={conversation.otherUser.displayName} aria-hidden="true" className="size-full rounded-full" />
+                {indicator === undefined ? null : <span className="absolute right-0 top-0 size-2 rounded-full bg-accent" title={indicatorDescription} />}
+              </TooltipTrigger>
+              <TooltipContent side="right">{conversation.otherUser.displayName}</TooltipContent>
+            </Tooltip>
           )
         })}
       </nav>
       <div className="railSpacer flex-1" />
-      <div
-        className="railProfile relative"
-        onMouseEnter={() => {
-          if (hasProfileActions) onOpenProfileMenu()
-        }}
-        onMouseLeave={() => {
-          if (hasProfileActions) onCloseProfileMenu()
-        }}
-        onFocusCapture={() => {
-          if (hasProfileActions) onOpenProfileMenu()
-        }}
-        onBlurCapture={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget)) onCloseProfileMenu()
-        }}
+      <DropdownMenu
+        open={profileOpen}
+        onOpenChange={setProfileOpen}
+        modal={false}
       >
-        <button
+        <Button
+          ref={profileButtonRef}
           type="button"
-          className="railUser grid size-8 cursor-pointer place-items-center rounded-full border-0 bg-surface-muted p-0 text-[11px] font-extrabold text-foreground disabled:cursor-default"
+          variant="ghost"
+          size="icon"
+          className="railProfile railUser grid size-8 cursor-pointer place-items-center rounded-full border-0 bg-surface-muted p-0 text-[11px] font-extrabold text-foreground disabled:cursor-default"
           title={currentUserName}
           aria-label={hasProfileActions ? `Profile menu for ${currentUserName}` : currentUserName}
           aria-haspopup={hasProfileActions ? "menu" : undefined}
-          aria-expanded={hasProfileActions ? profileMenuOpen : undefined}
+          aria-expanded={hasProfileActions ? profileOpen : undefined}
           disabled={!hasProfileActions}
+          onClick={() => setProfileOpen((open) => !open)}
         >
-          {initials(currentUserName)}
-        </button>
-        {profileMenuOpen && hasProfileActions
-          ? (
-            <>
-              <div className="profileMenuBridge absolute bottom-0 left-full z-30 h-8 w-2.5" aria-hidden="true" />
-              <div className="profileMenu absolute bottom-0 left-[calc(100%+10px)] z-40 flex max-h-[calc(100dvh-24px)] w-[248px] flex-col overflow-hidden rounded-panel border border-border-strong bg-surface-canvas shadow-popover" role="menu" aria-label="Profile settings">
-                <div className="profileMenuHeader shrink-0 border-b border-surface-rail p-2.5">
-                  <strong className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[13px] leading-tight text-foreground">{currentUserName}</strong>
-                </div>
-                <div className="profileMenuActions min-h-0 overflow-y-auto overscroll-contain" role="group" aria-label="Accounts and profile actions">
-                  {profileMenuActions.map((action) => (
-                    <button
-                      key={action.id ?? action.label}
-                      type="button"
-                      role="menuitem"
-                      className={classNames(
-                        "relative grid min-h-9 w-full grid-cols-[18px_minmax(0,1fr)] items-center gap-1.5 border-0 bg-surface-canvas px-2.5 py-2 text-left font-[inherit] text-[13px] text-foreground hover:bg-surface-muted focus-visible:bg-surface-muted",
-                        action.separatorBefore && "border-t border-t-surface-rail",
-                        action.tone === "destructive" && "text-destructive-text"
-                      )}
-                      onClick={() => {
-                        onCloseProfileMenu()
-                        action.onSelect()
-                      }}
-                    >
-                      <span className="grid size-[18px] place-items-center" aria-hidden="true">
-                        {action.selected === true ? <Check className="size-3.5 [stroke-width:2.25]" /> : null}
-                      </span>
-                      <span className="min-w-0">
-                        <strong className="block overflow-hidden text-ellipsis whitespace-nowrap text-[13px] leading-tight">{action.label}</strong>
-                        {action.detail === undefined
-                          ? null
-                          : <span className="mt-0.5 block overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-normal leading-tight text-foreground-subtle">{action.detail}</span>}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </>
-          )
-          : null}
-      </div>
+          <Avatar name={currentUserName} aria-hidden="true" className="size-full rounded-full" />
+        </Button>
+        <DropdownMenuContent
+          sideOffset={10}
+          side="right"
+          align="end"
+          anchor={profileButtonRef}
+          finalFocus={profileButtonRef}
+          className="profileMenu flex max-h-[calc(100dvh-24px)] w-[248px] flex-col p-0"
+          aria-label="Profile settings"
+        >
+          <DropdownMenuGroup className="flex min-h-0 flex-1 flex-col" aria-label="Accounts and profile actions">
+            <DropdownMenuLabel className="profileMenuHeader shrink-0 border-b border-surface-rail p-2.5">
+              <strong className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[13px] leading-tight text-foreground">{currentUserName}</strong>
+            </DropdownMenuLabel>
+            <div className="profileMenuActions min-h-0 flex-1 overflow-y-auto overscroll-contain">
+              {profileMenuActions.map((action) => (
+                <Fragment key={action.id ?? action.label}>
+                  {action.separatorBefore ? <DropdownMenuSeparator className="m-0" /> : null}
+                  <DropdownMenuItem
+                    className={classNames(
+                      "relative grid min-h-9 w-full grid-cols-[18px_minmax(0,1fr)] items-center gap-1.5 rounded-none bg-surface-canvas px-2.5 py-2 text-left text-[13px] text-foreground",
+                      action.tone === "destructive" && "text-destructive-text"
+                    )}
+                    onClick={action.onSelect}
+                  >
+                    <span className="grid size-[18px] place-items-center" aria-hidden="true">
+                      {action.selected === true ? <Check className="size-3.5 [stroke-width:2.25]" /> : null}
+                    </span>
+                    <span className="min-w-0">
+                      <strong className="block overflow-hidden text-ellipsis whitespace-nowrap text-[13px] leading-tight">{action.label}</strong>
+                      {action.detail === undefined
+                        ? null
+                        : <span className="mt-0.5 block overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-normal leading-tight text-foreground-subtle">{action.detail}</span>}
+                    </span>
+                  </DropdownMenuItem>
+                </Fragment>
+              ))}
+            </div>
+          </DropdownMenuGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
       {startOpen && onStartConversation !== undefined
         ? <StartDirectMessageDialog
             candidates={candidates}
@@ -861,16 +863,23 @@ function DirectMessageSettingsDialog(props: {
           </label>
           <fieldset className="grid gap-2">
             <legend className="text-sm font-bold text-foreground">Who can start a new DM</legend>
-            {([
-              ["all", "Anyone on Aether"],
-              ["mutuals", "People who share a workspace with you"],
-              ["friends", "Accepted friends only"]
-            ] as const).map(([value, label]) => (
-              <label key={value} className="flex items-center gap-2 text-sm text-foreground">
-                <input type="radio" name="dm-preference" value={value} checked={preference === value} disabled={saving} onChange={() => setPreference(value)} />
-                {label}
-              </label>
-            ))}
+            <RadioGroup
+              name="dm-preference"
+              value={preference}
+              disabled={saving}
+              onValueChange={(value) => setPreference(value)}
+            >
+              {([
+                ["all", "Anyone on Aether"],
+                ["mutuals", "People who share a workspace with you"],
+                ["friends", "Accepted friends only"]
+              ] as const).map(([value, label]) => (
+                <label key={value} className="flex items-center gap-2 text-sm text-foreground">
+                  <Radio value={value} />
+                  {label}
+                </label>
+              ))}
+            </RadioGroup>
           </fieldset>
           {incomingFriendRequests.length === 0 ? null : (
             <section className="grid gap-2" aria-label="Friend requests">
@@ -1120,9 +1129,11 @@ function ChannelSidebar(props: {
         <nav className="sidebarSection flex min-w-0 flex-col p-0" aria-label="Channels">
           <div className="sidebarHeaderRow flex min-h-6 items-center justify-between gap-2 px-4 text-xs font-bold uppercase text-foreground-subtle">
             <span>Channels</span>
-            <button
+            <Button
               type="button"
-              className="grid size-6 cursor-pointer place-items-center rounded-[4px] border-0 bg-transparent font-[inherit] text-foreground-subtle disabled:cursor-not-allowed disabled:opacity-50 enabled:hover:bg-surface-muted-hover enabled:hover:text-foreground enabled:focus-visible:bg-surface-muted-hover enabled:focus-visible:text-foreground"
+              variant="ghost"
+              size="icon"
+              className="size-6 rounded-[4px] text-foreground-subtle enabled:hover:bg-surface-muted-hover enabled:hover:text-foreground enabled:focus-visible:bg-surface-muted-hover enabled:focus-visible:text-foreground"
               aria-label="Add channel"
               aria-haspopup="dialog"
               aria-expanded={creating}
@@ -1133,16 +1144,17 @@ function ChannelSidebar(props: {
               }}
             >
               <Plus className={iconClassName} aria-hidden="true" />
-            </button>
+            </Button>
           </div>
           {channels.map((channel) => {
             const active = channel.id === activeChannelId
             const channelIndicator = active ? null : channelIndicators.get(channel.id) ?? null
             const indicatorLabel = channelIndicator === null ? null : channelIndicatorDescription(channelIndicator, channel.name)
             return (
-              <button
+              <Button
                 key={channel.id}
                 type="button"
+                variant="ghost"
                 className={classNames(channelNavItemClassName, active && "active bg-surface-rail")}
                 aria-current={active ? "page" : undefined}
                 onClick={() => {
@@ -1171,19 +1183,19 @@ function ChannelSidebar(props: {
                     />
                   )
                   : null}
-              </button>
+              </Button>
             )
           })}
           {channels.length === 0
             ? (
-              <button type="button" className={classNames(channelNavItemClassName, "active bg-surface-rail")} aria-current="page">
+              <Button type="button" variant="ghost" className={classNames(channelNavItemClassName, "active bg-surface-rail")} aria-current="page">
                 <span className="channelNavMain min-w-0 flex flex-col gap-[3px]">
                   <span className="channelNavName flex min-w-0 items-center gap-1 overflow-hidden text-ellipsis whitespace-nowrap font-bold">
                     <ChannelGlyph visibility={channelVisibility} />
                     <span className="channelNavText min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{channelName}</span>
                   </span>
                 </span>
-              </button>
+              </Button>
             )
             : null}
         </nav>
@@ -1287,23 +1299,27 @@ function ChannelContextMenu(props: {
     onClose()
   }
   return (
-    <div
-      className="channelContextMenu fixed z-40 flex min-w-[170px] flex-col overflow-hidden rounded-panel border border-border-strong bg-surface-raised shadow-popover"
-      role="menu"
-      aria-label={`Context menu for #${channel.name}`}
-      style={{ left: Math.min(x, window.innerWidth - 180), top: Math.min(y, window.innerHeight - 112) }}
-      onClick={(event) => event.stopPropagation()}
-    >
-      <Button type="button" variant="ghost" className={itemClassName} role="menuitem" disabled={!canEdit} onClick={() => select(onEdit)}>
-        <Pencil className={iconClassName} aria-hidden="true" /><span>Edit</span>
-      </Button>
-      <Button type="button" variant="ghost" className={itemClassName} role="menuitem" disabled={!canDelete} onClick={() => select(onDelete)}>
-        <Trash2 className={iconClassName} aria-hidden="true" /><span>Delete</span>
-      </Button>
-      <Button type="button" variant="ghost" className={itemClassName} role="menuitem" onClick={() => select(onManage)}>
-        <UserRoundCog className={iconClassName} aria-hidden="true" /><span>Manage</span>
-      </Button>
-    </div>
+    <DropdownMenu open onOpenChange={(open) => { if (!open) onClose() }} modal={false}>
+      <DropdownMenuContent
+        className="channelContextMenu min-w-[170px] p-0"
+        aria-label={`Context menu for #${channel.name}`}
+        anchor={() => pointAnchor(x, y)}
+        positionMethod="fixed"
+        side="right"
+        align="start"
+        sideOffset={0}
+      >
+        <DropdownMenuItem className={itemClassName} disabled={!canEdit} onClick={() => select(onEdit)}>
+          <Pencil className={iconClassName} aria-hidden="true" /><span>Edit</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem className={itemClassName} disabled={!canDelete} onClick={() => select(onDelete)}>
+          <Trash2 className={iconClassName} aria-hidden="true" /><span>Delete</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem className={itemClassName} onClick={() => select(onManage)}>
+          <UserRoundCog className={iconClassName} aria-hidden="true" /><span>Manage</span>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -1439,28 +1455,29 @@ function CreateChannelDialog(props: {
           />
           <fieldset className="m-0 grid grid-cols-2 gap-1 rounded-control border border-border bg-surface-muted p-1" disabled={saving}>
             <legend className="sr-only">Channel visibility</legend>
-            {(["public", "private"] as const).map((option) => (
-              <label
-                key={option}
-                className={classNames(
-                  "cursor-pointer rounded-[5px] px-2.5 py-2 text-left text-xs text-foreground-subtle",
-                  visibility === option && "bg-surface-canvas font-bold text-foreground shadow-sm"
-                )}
-              >
-                <input
-                  type="radio"
-                  className="sr-only"
-                  name="channel-visibility"
-                  value={option}
-                  checked={visibility === option}
-                  onChange={() => onVisibilityChange(option)}
-                />
-                <span className="block capitalize">{option}</span>
-                <span className="mt-0.5 block font-normal leading-[1.35]">
-                  {option === "public" ? "Anyone in the workspace can join." : "Only invited members can find and open it."}
-                </span>
-              </label>
-            ))}
+            <RadioGroup
+              name="channel-visibility"
+              value={visibility}
+              disabled={saving}
+              className="contents"
+              onValueChange={onVisibilityChange}
+            >
+              {(["public", "private"] as const).map((option) => (
+                <label
+                  key={option}
+                  className={classNames(
+                    "cursor-pointer rounded-[5px] px-2.5 py-2 text-left text-xs text-foreground-subtle focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-1",
+                    visibility === option && "bg-surface-canvas font-bold text-foreground shadow-sm"
+                  )}
+                >
+                  <Radio value={option} className="sr-only" />
+                  <span className="block capitalize">{option}</span>
+                  <span className="mt-0.5 block font-normal leading-[1.35]">
+                    {option === "public" ? "Anyone in the workspace can join." : "Only invited members can find and open it."}
+                  </span>
+                </label>
+              ))}
+            </RadioGroup>
           </fieldset>
           {visibility === "private"
             ? (
@@ -1486,25 +1503,17 @@ function CreateChannelDialog(props: {
                         : visibleInviteCandidates?.map((candidate) => {
                             const selected = selectedInviteeIds.has(candidate.id)
                             return (
-                              <button
+                              <label
                                 key={candidate.id}
-                                type="button"
-                                role="checkbox"
-                                aria-checked={selected}
                                 className="flex w-full cursor-pointer items-center gap-2 rounded-[5px] border-0 bg-transparent px-2 py-1.5 text-left text-sm text-foreground hover:bg-surface-muted-hover focus-visible:bg-surface-muted-hover"
-                                disabled={saving}
-                                onClick={() => onToggleInvitee(candidate.id)}
-                                onKeyDown={(event) => {
-                                  if (event.key !== " ") return
-                                  event.preventDefault()
-                                  onToggleInvitee(candidate.id)
-                                }}
                               >
-                                {selected
-                                  ? <SquareCheck className="size-4 shrink-0 text-foreground" aria-hidden="true" />
-                                  : <Square className="size-4 shrink-0 text-foreground-subtle" aria-hidden="true" />}
+                                <Checkbox
+                                  checked={selected}
+                                  disabled={saving}
+                                  onCheckedChange={() => onToggleInvitee(candidate.id)}
+                                />
                                 <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{candidate.displayName}</span>
-                              </button>
+                              </label>
                             )
                           })}
                 </div>
@@ -1592,29 +1601,34 @@ function ChannelHeader(props: {
         <h2 className="m-0 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-lg leading-tight tracking-normal text-foreground">{channelName}</h2>
       </div>
       <div className="chatHeaderActions flex items-center justify-end gap-2 text-xs text-foreground-subtle" aria-label="Conversation actions">
-        <label className="inline-flex h-8 items-center gap-1.5 rounded-control border border-border-strong bg-surface-canvas px-2 text-foreground-subtle focus-within:border-ring focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-1" title={notificationPreferenceError ?? "Notification preference"}>
-          {notificationPreference?.mode === "off"
-            ? <BellOff className={iconClassName} aria-hidden="true" />
-            : <Bell className={iconClassName} aria-hidden="true" />}
-          <span className="sr-only">Notifications for {channelName}</span>
-          <select
-            className="max-w-28 cursor-pointer border-0 bg-transparent text-xs font-medium text-foreground outline-none disabled:cursor-default disabled:text-foreground-subtle"
+        <Select<ChatConversationNotificationMode>
+          value={notificationPreference?.mode ?? null}
+          disabled={notificationPreference === undefined || notificationPreferenceSaving || onNotificationPreferenceChange === undefined}
+          onValueChange={(mode) => { if (mode !== null) onNotificationPreferenceChange?.(mode) }}
+        >
+          <SelectTrigger
+            className="h-8 max-w-44 gap-1.5 bg-surface-canvas px-2 text-xs text-foreground-subtle"
             aria-label={`Notifications for ${channelName}`}
-            value={notificationPreference?.mode ?? ""}
-            disabled={notificationPreference === undefined || notificationPreferenceSaving || onNotificationPreferenceChange === undefined}
-            onChange={(event) => onNotificationPreferenceChange?.(event.currentTarget.value as ChatConversationNotificationMode)}
+            title={notificationPreferenceError ?? "Notification preference"}
           >
-            {notificationPreference === undefined ? <option value="">Loading...</option> : null}
+            {notificationPreference?.mode === "off"
+              ? <BellOff className={iconClassName} aria-hidden="true" />
+              : <Bell className={iconClassName} aria-hidden="true" />}
+            <SelectValue>{notificationPreference === undefined ? "Loading..." : notificationModeLabel(notificationPreference.mode)}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
             {notificationPreference?.options.map((mode) => (
-              <option key={mode} value={mode}>{notificationModeLabel(mode)}</option>
+              <SelectItem key={mode} value={mode}>{notificationModeLabel(mode)}</SelectItem>
             ))}
-          </select>
-        </label>
+          </SelectContent>
+        </Select>
         {notificationPreferenceError === null
           ? null
           : <span className="sr-only" role="alert">{notificationPreferenceError}</span>}
-        {direct ? null : <button
+        {direct ? null : <Button
           type="button"
+          variant="secondary"
+          size="icon"
           className={classNames(
             "searchToggle grid min-h-[30px] w-8 cursor-pointer place-items-center rounded-control border border-border-strong bg-surface-canvas p-0 font-[inherit] text-ring hover:border-ring hover:bg-surface-muted hover:text-foreground-subtle focus-visible:border-ring focus-visible:bg-surface-muted focus-visible:text-foreground-subtle",
             searchOpen && "active text-foreground hover:text-foreground focus-visible:text-foreground"
@@ -1625,9 +1639,11 @@ function ChannelHeader(props: {
           onClick={onToggleSearch}
         >
           <Search className={iconClassName} aria-hidden="true" />
-        </button>}
-        {direct ? null : <button
+        </Button>}
+        {direct ? null : <Button
           type="button"
+          variant="secondary"
+          size="icon"
           className={classNames(
             "membersToggle grid min-h-[30px] w-8 cursor-pointer place-items-center rounded-control border border-border-strong bg-surface-canvas p-0 font-[inherit] text-ring hover:border-ring hover:bg-surface-muted hover:text-foreground-subtle focus-visible:border-ring focus-visible:bg-surface-muted focus-visible:text-foreground-subtle",
             membersOpen && "active text-foreground hover:text-foreground focus-visible:text-foreground"
@@ -1638,7 +1654,7 @@ function ChannelHeader(props: {
           onClick={onToggleMembers}
         >
           <Users className={iconClassName} aria-hidden="true" />
-        </button>}
+        </Button>}
       </div>
     </header>
   )
@@ -2150,22 +2166,11 @@ function ChannelMessageRow(props: {
             )}
             onClick={(event) => event.stopPropagation()}
           >
-            <input
-              className="peer sr-only"
-              type="checkbox"
+            <Checkbox
               checked={selected}
               aria-label={`${selected ? "Deselect" : "Select"} message from ${message.authorDisplayName}`}
-              onChange={onToggle}
+              onCheckedChange={onToggle}
             />
-            <span
-              className={classNames(
-                "grid size-4 place-items-center rounded-[3px] border border-border-strong bg-surface-canvas text-foreground transition-colors peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-ring",
-                selected && "border-foreground bg-foreground text-foreground-inverse"
-              )}
-              aria-hidden="true"
-            >
-              {selected ? <Check className="size-3 [stroke-width:3]" /> : null}
-            </span>
           </label>
         )
         : null}
@@ -2280,8 +2285,9 @@ function MessageParentPreview(props: {
   const { parent, onFocusParent } = props
   if (parent.deleted) return <MessageParentUnavailable />
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       className="replyParentPreview mt-1.5 grid max-w-[min(520px,100%)] min-w-0 grid-cols-[3px_minmax(0,1fr)] gap-2 rounded-control border border-border bg-surface-muted px-2.5 py-1.5 text-left text-xs text-foreground-muted hover:border-border-strong hover:bg-surface-muted-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
       aria-label={`Reply to ${parent.authorDisplayName}: ${parent.bodyPreview}`}
       onClick={(event) => {
@@ -2294,7 +2300,7 @@ function MessageParentPreview(props: {
         <strong className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-foreground">{parent.authorDisplayName}</strong>
         <span className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{parent.bodyPreview}</span>
       </span>
-    </button>
+    </Button>
   )
 }
 
@@ -2408,9 +2414,10 @@ function MessageReactionPicker(props: {
   return (
     <div className="messageReactionPicker flex min-w-0 items-center" aria-label={`Add a reaction to message from ${message.authorDisplayName}`}>
       {reactionPalette.map((emoji) => (
-          <button
+          <Button
             key={emoji}
             type="button"
+            variant="ghost"
             className="messageReactionPickerButton inline-flex size-[34px] min-h-[30px] items-center justify-center rounded-none border-0 border-l border-surface-rail bg-surface-raised px-1.5 text-xs leading-none text-foreground-muted first:border-l-0 hover:bg-surface-muted hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
             aria-label={`Add ${emoji} reaction to message from ${message.authorDisplayName}`}
             onClick={(event) => {
@@ -2419,7 +2426,7 @@ function MessageReactionPicker(props: {
             }}
           >
             <span aria-hidden="true">{emoji}</span>
-          </button>
+          </Button>
       ))}
     </div>
   )
@@ -2471,9 +2478,10 @@ function MessageReactions(props: {
         return onToggleReaction === undefined
           ? <span key={emoji} className={className}>{content}</span>
           : (
-            <button
+            <Button
               key={emoji}
               type="button"
+              variant="ghost"
               className={className}
               aria-pressed={active}
               aria-label={`${active ? "Remove" : "Add"} ${emoji} reaction to message from ${message.authorDisplayName}`}
@@ -2491,7 +2499,7 @@ function MessageReactions(props: {
               }}
             >
               {content}
-            </button>
+            </Button>
           )
       })}
     </div>
@@ -2679,14 +2687,16 @@ function MessageComposer(props: {
               >
                 <Paperclip className="size-3.5 shrink-0" aria-hidden="true" />
                 <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{attachment.name}</span>
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon"
                   className="grid size-5 shrink-0 place-items-center rounded-control border-0 bg-transparent p-0 text-foreground-subtle hover:bg-surface-muted-hover hover:text-foreground"
                   aria-label={`Remove attachment ${attachment.name}`}
                   onClick={() => onRemoveAttachment(attachment.id)}
                 >
                   <X className="size-3.5" aria-hidden="true" />
-                </button>
+                </Button>
               </span>
             ))}
             {uploadingAttachment
@@ -2749,6 +2759,13 @@ function MessageComposer(props: {
               disabled={disabled}
               className="block max-h-[140px] min-h-11 resize-none overflow-hidden rounded-none border-0 bg-surface-canvas px-3 py-3 text-sm leading-5 focus-visible:border-transparent focus-visible:ring-0 focus-visible:ring-offset-0 disabled:bg-surface-sunken"
               placeholder={`Message ${channelName}`}
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={mentionMenuOpen}
+              aria-controls={mentionMenuOpen ? "mention-suggestions" : undefined}
+              aria-activedescendant={mentionMenuOpen && mentionSuggestions[activeMentionIndex] !== undefined
+                ? `mention-suggestion-${mentionSuggestions[activeMentionIndex].id}`
+                : undefined}
               onChange={(event) => updateDraft(event.target.value, event.currentTarget.selectionStart ?? event.target.value.length)}
               onClick={(event) => setCursorIndex(event.currentTarget.selectionStart ?? draft.length)}
               onKeyUp={(event) => setCursorIndex(event.currentTarget.selectionStart ?? draft.length)}
@@ -2813,6 +2830,7 @@ function MentionSuggestionMenu(props: {
 
   return (
     <div
+      id="mention-suggestions"
       className="mentionMenu absolute bottom-[calc(100%+6px)] left-12 z-20 w-[min(320px,calc(100vw-120px))] overflow-hidden rounded-panel border border-border-strong bg-surface-raised py-1 shadow-popover"
       role="listbox"
       aria-label="Mention suggestions"
@@ -2820,9 +2838,11 @@ function MentionSuggestionMenu(props: {
       {loading || members.length === 0
         ? <p className="m-0 px-3 py-2 text-[13px] leading-[1.35] text-foreground-subtle">{emptyMessage}</p>
         : members.map((member, index) => (
-          <button
+          <Button
             key={member.id}
+            id={`mention-suggestion-${member.id}`}
             type="button"
+            variant="ghost"
             className={classNames(
               "flex min-h-9 w-full cursor-pointer items-center gap-2 border-0 bg-transparent px-2.5 py-1.5 text-left font-[inherit] text-foreground hover:bg-surface-muted",
               index === activeIndex && "bg-surface-muted"
@@ -2835,7 +2855,7 @@ function MentionSuggestionMenu(props: {
           >
             <Avatar name={member.displayName} aria-hidden="true" className="size-7" />
             <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-sm font-bold">{member.displayName}</span>
-          </button>
+          </Button>
         ))}
     </div>
   )
@@ -3100,87 +3120,76 @@ function MessageContextMenu(props: {
   const itemClassName =
     "min-h-[34px] w-full justify-start rounded-none border-0 border-b border-surface-rail bg-surface-raised px-2.5 text-left text-foreground last:border-b-0 hover:bg-surface-muted"
   return (
-    <div
-      className="messageContextMenu fixed z-20 flex min-w-[170px] flex-col overflow-hidden rounded-panel border border-border-strong bg-surface-raised shadow-popover"
-      role="menu"
-      aria-label={`Context menu for message from ${message.authorDisplayName}`}
-      style={{ left: x, top: y }}
-      onClick={(event) => event.stopPropagation()}
-    >
-      <Button
-        type="button"
-        variant="ghost"
-        className={itemClassName}
-        role="menuitem"
-        onClick={() => {
-          onToggle()
-          onClose()
-        }}
+    <DropdownMenu open onOpenChange={(open) => { if (!open) onClose() }} modal={false}>
+      <DropdownMenuContent
+        className="messageContextMenu min-w-[170px] p-0"
+        aria-label={`Context menu for message from ${message.authorDisplayName}`}
+        anchor={() => pointAnchor(x, y)}
+        positionMethod="fixed"
+        side="right"
+        align="start"
+        sideOffset={0}
       >
-        <SelectIcon className={iconClassName} aria-hidden="true" />
-        <span>{selected ? "Deselect" : "Select"}</span>
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        className={itemClassName}
-        role="menuitem"
-        onClick={() => {
-          onCopy()
-          onClose()
-        }}
-      >
-        <Copy className={iconClassName} aria-hidden="true" />
-        <span>Copy message</span>
-      </Button>
-      {canEdit
-        ? (
-          <Button
-            type="button"
-            variant="ghost"
-            className={itemClassName}
-            role="menuitem"
-            onClick={() => {
-              onEdit()
-              onClose()
-            }}
-          >
-            <Pencil className={iconClassName} aria-hidden="true" />
-            <span>Edit message</span>
-          </Button>
-        )
-        : null}
-      <Button
-        type="button"
-        variant="ghost"
-        className={itemClassName}
-        role="menuitem"
-        onClick={() => {
-          onReply()
-          onClose()
-        }}
-      >
-        <Reply className={iconClassName} aria-hidden="true" />
-        <span>Reply</span>
-      </Button>
-      {canDelete
-        ? (
-          <Button
-            type="button"
-            variant="ghost"
-            className={itemClassName}
-            role="menuitem"
-            onClick={() => {
-              onDelete()
-              onClose()
-            }}
-          >
-            <Trash2 className={iconClassName} aria-hidden="true" />
-            <span>Delete message</span>
-          </Button>
-        )
-        : null}
-    </div>
+        <DropdownMenuItem
+          className={itemClassName}
+          onClick={() => {
+            onToggle()
+            onClose()
+          }}
+        >
+          <SelectIcon className={iconClassName} aria-hidden="true" />
+          <span>{selected ? "Deselect" : "Select"}</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className={itemClassName}
+          onClick={() => {
+            onCopy()
+            onClose()
+          }}
+        >
+          <Copy className={iconClassName} aria-hidden="true" />
+          <span>Copy message</span>
+        </DropdownMenuItem>
+        {canEdit
+          ? (
+            <DropdownMenuItem
+              className={itemClassName}
+              onClick={() => {
+                onEdit()
+                onClose()
+              }}
+            >
+              <Pencil className={iconClassName} aria-hidden="true" />
+              <span>Edit message</span>
+            </DropdownMenuItem>
+          )
+          : null}
+        <DropdownMenuItem
+          className={itemClassName}
+          onClick={() => {
+            onReply()
+            onClose()
+          }}
+        >
+          <Reply className={iconClassName} aria-hidden="true" />
+          <span>Reply</span>
+        </DropdownMenuItem>
+        {canDelete
+          ? (
+            <DropdownMenuItem
+              className={itemClassName}
+              onClick={() => {
+                onDelete()
+                onClose()
+              }}
+            >
+              <Trash2 className={iconClassName} aria-hidden="true" />
+              <span>Delete message</span>
+            </DropdownMenuItem>
+          )
+          : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 

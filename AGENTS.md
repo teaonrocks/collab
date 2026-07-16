@@ -31,6 +31,7 @@
 ## Key Conventions
 - Treat Convex validators and generated function types as the backend contract source of truth.
 - Keep shared UI code depending on the plain types in `src/renderer/chat-data.ts`; production mapping belongs in `src/renderer/dogfood-chat-adapter.ts`.
+- Build renderer controls from the source-owned shadcn-style component layer in `src/renderer/ui`, backed by Base UI; reuse or extend that layer instead of hand-rolling equivalent controls in feature components.
 - Keep local JSON and the retired Effect RPC transport out of production and tests; future agent work is Convex-native per `docs/agent-runtime-contract.md`.
 - Keep expected command errors as serializable plain data rather than `Error` instances.
 - Do not edit generated build output under `out/`; regenerate it with `pnpm build`.

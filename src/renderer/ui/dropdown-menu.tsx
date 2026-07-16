@@ -8,13 +8,25 @@ export const DropdownMenuPortal = BaseMenu.Portal
 export const DropdownMenuGroup = BaseMenu.Group
 
 export type DropdownMenuContentProps = ComponentProps<typeof BaseMenu.Popup> & {
+  readonly keepMounted?: ComponentProps<typeof BaseMenu.Portal>["keepMounted"]
   readonly sideOffset?: ComponentProps<typeof BaseMenu.Positioner>["sideOffset"]
+  readonly side?: ComponentProps<typeof BaseMenu.Positioner>["side"]
+  readonly align?: ComponentProps<typeof BaseMenu.Positioner>["align"]
+  readonly anchor?: ComponentProps<typeof BaseMenu.Positioner>["anchor"]
+  readonly positionMethod?: ComponentProps<typeof BaseMenu.Positioner>["positionMethod"]
 }
 
-export function DropdownMenuContent({ className, sideOffset = 6, ...props }: DropdownMenuContentProps) {
+export function DropdownMenuContent({ className, keepMounted, sideOffset = 6, side, align, anchor, positionMethod, ...props }: DropdownMenuContentProps) {
   return (
-    <DropdownMenuPortal>
-      <BaseMenu.Positioner sideOffset={sideOffset}>
+    <DropdownMenuPortal keepMounted={keepMounted}>
+      <BaseMenu.Positioner
+        sideOffset={sideOffset}
+        side={side}
+        align={align}
+        anchor={anchor}
+        positionMethod={positionMethod}
+        className="z-50 outline-none"
+      >
         <BaseMenu.Popup
           className={cn(
             "z-50 min-w-40 overflow-hidden rounded-panel border border-border-strong bg-surface-raised p-1 text-sm text-foreground shadow-popover focus-visible:outline-none",

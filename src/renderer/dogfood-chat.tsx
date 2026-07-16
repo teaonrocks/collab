@@ -30,6 +30,7 @@ import {
   updateWindowAccountProfile
 } from "./electron-shell"
 import { consumeNotificationFeedPage } from "./desktop-notification-feed"
+import { Button } from "./ui"
 import { WorkspaceChat, type ProfileMenuAction } from "./workspace-chat"
 
 export { dogfoodChatToChatData } from "./dogfood-chat-adapter"
@@ -61,13 +62,6 @@ const dogfoodPlainStateClassName =
   "dogfoodPlainState flex w-[min(420px,100%)] flex-col items-center gap-4 text-center [&_h1]:m-0 [&_h1]:text-lg [&_h1]:leading-tight [&_h1]:text-foreground"
 const dogfoodPlainContentClassName =
   "m-0 flex min-h-10 flex-col items-center justify-center gap-3 text-sm leading-[1.45] text-foreground-muted"
-const dogfoodPrimaryButtonClassName =
-  "dogfoodPrimaryButton min-h-9 cursor-pointer rounded-panel border border-foreground-strong bg-foreground-strong px-3.5 font-[inherit] font-bold text-foreground-inverse disabled:cursor-default disabled:border-foreground-subtle disabled:bg-foreground-subtle"
-const dogfoodSecondaryButtonClassName =
-  "dogfoodSecondaryButton min-h-9 cursor-pointer rounded-panel border border-border-strong bg-surface-canvas px-3.5 font-[inherit] font-bold text-foreground"
-const dogfoodLinkButtonClassName =
-  "dogfoodLinkButton cursor-pointer border-0 bg-transparent p-0 font-[inherit] text-xs font-normal text-foreground-muted underline decoration-foreground-subtle underline-offset-4 hover:text-foreground hover:decoration-foreground focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
-
 export function ConvexDogfoodApp() {
   return (
     <DogfoodErrorBoundary>
@@ -492,24 +486,25 @@ function ConvexDogfoodChat() {
     const previousAccount = accountContext?.accounts.find((account) => !account.current && account.displayName !== "Sign in")
     return (
       <DogfoodShell title="Welcome to Aether" variant="plain">
-        <button
+        <Button
           type="button"
-          className={dogfoodPrimaryButtonClassName}
+          className="dogfoodPrimaryButton min-h-9 rounded-panel"
           disabled={signInOpening || (window.aetherShell !== undefined && accountContext === null)}
           onClick={() => void signInInDefaultBrowser(auth, setSignInOpening, setError, accountContext)}
         >
           {signInOpening ? "Opening browser..." : accountContext === null && window.aetherShell !== undefined ? "Loading account..." : "Sign in"}
-        </button>
+        </Button>
         {previousAccount === undefined
           ? null
           : (
-            <button
+            <Button
               type="button"
-              className={dogfoodLinkButtonClassName}
+              variant="link"
+              className="dogfoodLinkButton text-xs font-normal focus-visible:rounded-sm"
               onClick={() => void switchWindowAccount(previousAccount.id)}
             >
               Back to {previousAccount.displayName}
-            </button>
+            </Button>
           )}
       </DogfoodShell>
     )
@@ -524,9 +519,9 @@ function ConvexDogfoodChat() {
       <DogfoodShell title="Could Not Join">
         <p className="errorText max-w-[min(720px,calc(100vw-48px))] [overflow-wrap:anywhere] text-destructive-text">{error.message}</p>
         {error.diagnostic === undefined ? null : <DogfoodDiagnosticDetails diagnostic={error.diagnostic} />}
-        <button
+        <Button
           type="button"
-          className={dogfoodPrimaryButtonClassName}
+          className="dogfoodPrimaryButton min-h-9 rounded-panel"
           onClick={() => {
             setError(null)
             setEnsuredUserId(null)
@@ -534,10 +529,10 @@ function ConvexDogfoodChat() {
           }}
         >
           Try again
-        </button>
-        <button type="button" className={dogfoodSecondaryButtonClassName} onClick={() => void signOutCurrentAccount(auth, accountContext)}>
+        </Button>
+        <Button type="button" variant="secondary" className="dogfoodSecondaryButton min-h-9 rounded-panel" onClick={() => void signOutCurrentAccount(auth, accountContext)}>
           Sign out
-        </button>
+        </Button>
       </DogfoodShell>
     )
   }
@@ -743,9 +738,9 @@ export class DogfoodErrorBoundary extends Component<
         <DogfoodShell title="Chat Failed">
           <p className="errorText max-w-[min(720px,calc(100vw-48px))] [overflow-wrap:anywhere] text-destructive-text">Something unexpected interrupted chat.</p>
           <DogfoodDiagnosticDetails diagnostic={dogfoodDiagnostic("render", "try-again", this.state.message)} />
-          <button className={dogfoodPrimaryButtonClassName} type="button" onClick={() => window.location.reload()}>
+          <Button className="dogfoodPrimaryButton min-h-9 rounded-panel" type="button" onClick={() => window.location.reload()}>
             Reload chat
-          </button>
+          </Button>
         </DogfoodShell>
       )
     }
