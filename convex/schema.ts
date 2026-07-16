@@ -6,6 +6,7 @@ const channelRole = v.union(v.literal("admin"), v.literal("member"), v.literal("
 const directMessagePreference = v.union(v.literal("all"), v.literal("mutuals"), v.literal("friends"))
 const friendRequestStatus = v.union(v.literal("pending"), v.literal("accepted"), v.literal("declined"))
 const messageAttachmentKind = v.union(v.literal("file"), v.literal("image"))
+const conversationNotificationMode = v.union(v.literal("all"), v.literal("mentions"), v.literal("off"))
 const messageAttachment = v.object({
   storageId: v.id("_storage"),
   name: v.string(),
@@ -119,6 +120,29 @@ export default defineSchema({
     messageCreatedAt: v.number()
   }).index("by_channel_user_created_at", ["channelId", "userId", "messageCreatedAt"])
     .index("by_message", ["messageId"]),
+
+  conversationNotificationPreferences: defineTable({
+    userId: v.id("users"),
+    channelId: v.id("channels"),
+    mode: conversationNotificationMode,
+    updatedAt: v.number()
+  }).index("by_user_and_channel", ["userId", "channelId"])
+    .index("by_user", ["userId"]),
+
+  messageNotificationEvents: defineTable({
+    recipientUserId: v.id("users"),
+    channelId: v.id("channels"),
+    messageId: v.id("messages"),
+    sequence: v.number(),
+    createdAt: v.number(),
+    expiresAt: v.number()
+  }).index("by_recipient_and_sequence", ["recipientUserId", "sequence"])
+    .index("by_message", ["messageId"]),
+
+  messageNotificationFeedStates: defineTable({
+    recipientUserId: v.id("users"),
+    latestSequence: v.number()
+  }).index("by_recipient", ["recipientUserId"]),
 
   attachmentUploads: defineTable({
     storageId: v.id("_storage"),

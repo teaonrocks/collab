@@ -15,6 +15,7 @@ export type DogfoodPrivateChannelInviteCandidateView = FunctionReturnType<typeof
 export type DogfoodChannelIndicatorView = FunctionReturnType<typeof api.chat.channelIndicators>[number]
 export type DogfoodDirectConversationView = FunctionReturnType<typeof api.direct_conversations.list>[number]
 export type DogfoodDirectConversationCandidateView = FunctionReturnType<typeof api.direct_conversations.candidates>[number]
+export type DogfoodNotificationPreferenceView = FunctionReturnType<typeof api.notification_preferences.preference>
 
 export type DogfoodActiveConversation =
   | { readonly kind: "channel"; readonly id: Id<"channels"> }
@@ -36,6 +37,7 @@ export type DogfoodChatAdapterInput = {
     readonly channelMemberInviteCandidates?: ReadonlyArray<DogfoodPrivateChannelInviteCandidateView>
     readonly createChannelInviteCandidates?: ReadonlyArray<DogfoodPrivateChannelInviteCandidateView>
     readonly channelIndicators?: ReadonlyArray<DogfoodChannelIndicatorView>
+    readonly notificationPreference?: DogfoodNotificationPreferenceView
   }
   readonly state?: {
     readonly messagesLoading?: boolean
@@ -78,6 +80,9 @@ export type DogfoodChatAdapterInput = {
     ) => Promise<FunctionReturnType<typeof api.chat.searchChannelMessages>>
     readonly loadOlderMessages?: () => void
     readonly operationErrorMessage?: ChatDataView["operationErrorMessage"]
+    readonly updateNotificationPreference?: (
+      input: FunctionArgs<typeof api.notification_preferences.updatePreference>
+    ) => Promise<FunctionReturnType<typeof api.notification_preferences.updatePreference>>
   }
 }
 
@@ -144,6 +149,7 @@ export const dogfoodChatToChatData = ({ data, state, commands }: DogfoodChatAdap
         channelId: String(indicator.channelId),
         indicator: indicator.indicator
       })),
+      notificationPreference: data.notificationPreference,
       channelMembersLoading: state?.membersLoading ?? false,
       channelMessagesLoading: state?.messagesLoading ?? false,
       channelMessagesHasMore: state?.messagesHasMore ?? false,
@@ -200,6 +206,12 @@ export const dogfoodChatToChatData = ({ data, state, commands }: DogfoodChatAdap
     respondToFriendRequest: commands.respondToFriendRequest === undefined
       ? undefined
       : ({ friendRequestId, accept }) => commands.respondToFriendRequest!({ friendRequestId: convexId<"friendRequests">(friendRequestId), accept }),
+    updateNotificationPreference: commands.updateNotificationPreference === undefined
+      ? undefined
+      : async ({ channelId, mode }) => commands.updateNotificationPreference!({
+          channelId: convexId<"channels">(channelId),
+          mode
+        }),
     addChannelMember: directActive || commands.addChannelMember === undefined
       ? undefined
       : ({ channelId, userId }) => commands.addChannelMember!({

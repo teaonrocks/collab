@@ -8,8 +8,11 @@ import {
   openNativeAuthUrl,
   removeCurrentWindowAccount,
   signOutAllWindowAccounts,
+  showDesktopNotification,
+  subscribeToDesktopNotificationActivation,
   subscribeToWindowAccountContext,
   switchWindowAccount,
+  updateDesktopNotificationContext,
   updateWindowAccountProfile
 } from "./electron-shell"
 
@@ -106,5 +109,35 @@ describe("electron shell URL gate", () => {
     expect(bridge.addAccount).toHaveBeenCalledTimes(1)
     expect(bridge.removeCurrentAccount).toHaveBeenCalledTimes(1)
     expect(bridge.signOutAllAccounts).toHaveBeenCalledTimes(1)
+  })
+
+  it("delegates desktop notification context, delivery, and activation", async () => {
+    const activation = { conversationId: "channel-1", conversationKind: "channel" as const }
+    const request = {
+      messageId: "message-1",
+      conversationId: "channel-1",
+      conversationKind: "channel" as const,
+      title: "#general",
+      body: "Maya: Hello"
+    }
+    const bridge = {
+      updateDesktopNotificationContext: vi.fn().mockResolvedValue(undefined),
+      showDesktopNotification: vi.fn().mockResolvedValue("shown" as const),
+      onDesktopNotificationActivated: vi.fn((listener: (value: typeof activation) => void) => {
+        listener(activation)
+        return vi.fn()
+      })
+    }
+    Object.defineProperty(window, "aetherShell", { configurable: true, value: bridge })
+
+    await updateDesktopNotificationContext("channel-1")
+    await expect(showDesktopNotification(request)).resolves.toBe("shown")
+    const listener = vi.fn()
+    const unsubscribe = subscribeToDesktopNotificationActivation(listener)
+
+    expect(bridge.updateDesktopNotificationContext).toHaveBeenCalledWith("channel-1")
+    expect(bridge.showDesktopNotification).toHaveBeenCalledWith(request)
+    expect(listener).toHaveBeenCalledWith(activation)
+    expect(typeof unsubscribe).toBe("function")
   })
 })

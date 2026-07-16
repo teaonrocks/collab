@@ -60,6 +60,13 @@ export type ChatChannelIndicatorState = {
   readonly indicator: ChatChannelIndicator
 }
 
+export type ChatConversationNotificationMode = "all" | "mentions" | "off"
+
+export type ChatConversationNotificationPreference = {
+  readonly mode: ChatConversationNotificationMode
+  readonly options: ReadonlyArray<ChatConversationNotificationMode>
+}
+
 export type ChatMessageReaction = {
   readonly emoji: string
   readonly count: number
@@ -115,6 +122,7 @@ export type ChatDataModel = {
   readonly channelMemberInviteCandidates?: ReadonlyArray<ChatChannelInviteCandidate>
   readonly createChannelInviteCandidates?: ReadonlyArray<ChatChannelInviteCandidate>
   readonly channelIndicators?: ReadonlyArray<ChatChannelIndicatorState>
+  readonly notificationPreference?: ChatConversationNotificationPreference
   readonly channelMembersLoading?: boolean
   readonly channelMessagesLoading?: boolean
   readonly channelMessagesHasMore?: boolean
@@ -134,6 +142,10 @@ export type SearchChatDirectConversationCandidates = (query: string) => Promise<
 export type SendChatFriendRequest = (recipientUserId: ChatChannelMember["id"]) => Promise<unknown>
 export type UpdateChatDirectMessageProfile = (input: ChatDirectMessageProfile) => Promise<ChatDirectMessageProfile>
 export type RespondToChatFriendRequest = (input: { readonly friendRequestId: string; readonly accept: boolean }) => Promise<unknown>
+export type UpdateChatConversationNotificationPreference = (input: {
+  readonly channelId: ChatChannelId
+  readonly mode: ChatConversationNotificationMode
+}) => Promise<ChatConversationNotificationPreference>
 
 export type EditChatChannel = (input: {
   readonly channelId: ChatChannelId
@@ -196,6 +208,7 @@ export type ChatDataView = {
   readonly sendFriendRequest?: SendChatFriendRequest
   readonly updateDirectMessageProfile?: UpdateChatDirectMessageProfile
   readonly respondToFriendRequest?: RespondToChatFriendRequest
+  readonly updateNotificationPreference?: UpdateChatConversationNotificationPreference
   readonly addChannelMember?: AddChatChannelMember
   readonly removeChannelMember?: RemoveChatChannelMember
   readonly createChannelMessage: CreateChatMessage

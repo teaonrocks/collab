@@ -21,11 +21,15 @@ import {
   openExternalUrl,
   openNativeAuthUrl,
   removeCurrentWindowAccount,
+  showDesktopNotification,
   signOutAllWindowAccounts,
+  subscribeToDesktopNotificationActivation,
   subscribeToWindowAccountContext,
   switchWindowAccount,
+  updateDesktopNotificationContext,
   updateWindowAccountProfile
 } from "./electron-shell"
+import { consumeNotificationFeedPage } from "./desktop-notification-feed"
 import { WorkspaceChat, type ProfileMenuAction } from "./workspace-chat"
 
 export { dogfoodChatToChatData } from "./dogfood-chat-adapter"
@@ -95,6 +99,8 @@ function ConvexDogfoodChat() {
   const sendFriendRequest = useMutation(api.social.sendFriendRequest)
   const updateDirectMessageProfile = useMutation(api.social.updateProfile)
   const respondToFriendRequest = useMutation(api.social.respondToFriendRequest)
+  const updateNotificationPreference = useMutation(api.notification_preferences.updatePreference)
+  const openNotificationFeed = useMutation(api.notification_preferences.openFeed)
   const [ensuredUserId, setEnsuredUserId] = useState<string | null>(null)
   const [selectedConversation, setSelectedConversation] = useState<DogfoodActiveConversation | null>(null)
   const [stableDirectConversations, setStableDirectConversations] = useState<ReadonlyArray<DogfoodDirectConversationView>>([])
@@ -105,6 +111,10 @@ function ConvexDogfoodChat() {
   const [accountContext, setAccountContext] = useState<WindowAccountContext | null>(null)
   const [ensureAttempt, setEnsureAttempt] = useState(0)
   const lastReadMarkerRef = useRef<string | null>(null)
+  const seenNotificationEventIdsRef = useRef(new Set<string>())
+  const [notificationCursor, setNotificationCursor] = useState<number | null>(null)
+  const [windowActive, setWindowActive] = useState(() =>
+    document.visibilityState === "visible" && document.hasFocus())
   const authUserId = auth.user?.id ?? null
   const sessionReady = authUserId !== null && convexAuth.isAuthenticated
   const viewerReady = sessionReady && ensuredUserId === authUserId && error === null
@@ -167,6 +177,79 @@ function ConvexDogfoodChat() {
     api.chat.channelIndicators,
     workspace === undefined || workspace === null ? "skip" : { workspaceId: workspace.workspace.id }
   )
+  const notificationPreference = useQuery(
+    api.notification_preferences.preference,
+    activeChannelId === undefined || (activeKind === "channel" && !activeChannelJoined)
+      ? "skip"
+      : { channelId: activeChannelId }
+  )
+  const notificationEvents = useQuery(
+    api.notification_preferences.feed,
+    viewerReady && notificationCursor !== null ? { cursor: notificationCursor } : "skip"
+  )
+
+  useEffect(() => {
+    if (!viewerReady) {
+      setNotificationCursor(null)
+      seenNotificationEventIdsRef.current.clear()
+      return
+    }
+    let cancelled = false
+    setNotificationCursor(null)
+    seenNotificationEventIdsRef.current.clear()
+    void openNotificationFeed({})
+      .then(({ cursor }) => {
+        if (!cancelled) setNotificationCursor(cursor)
+      })
+      .catch((cause: unknown) => {
+        console.warn("Could not open the desktop notification feed", cause)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [authUserId, openNotificationFeed, viewerReady])
+
+  useEffect(() => {
+    if (activeChannelId === undefined) return
+    void updateDesktopNotificationContext(String(activeChannelId)).catch((cause: unknown) => {
+      console.warn("Could not update the desktop notification context", cause)
+    })
+  }, [activeChannelId])
+
+  useEffect(() => subscribeToDesktopNotificationActivation((activation) => {
+    setSelectedConversation({ kind: activation.conversationKind, id: activation.conversationId as Id<"channels"> })
+  }), [])
+
+  useEffect(() => {
+    if (notificationEvents === undefined) return
+    const page = consumeNotificationFeedPage(notificationEvents, seenNotificationEventIdsRef.current)
+    for (const event of page.notifications) {
+      void showDesktopNotification({
+        messageId: String(event.messageId),
+        conversationId: String(event.channelId),
+        conversationKind: event.conversationKind,
+        title: event.title,
+        body: event.body
+      }).catch((cause: unknown) => {
+        console.warn("Could not show a desktop notification", cause)
+      })
+    }
+    setNotificationCursor((current) => current === null ? page.cursor : Math.max(current, page.cursor))
+  }, [notificationEvents])
+
+  useEffect(() => {
+    const updateWindowActivity = () => {
+      setWindowActive(document.visibilityState === "visible" && document.hasFocus())
+    }
+    window.addEventListener("focus", updateWindowActivity)
+    window.addEventListener("blur", updateWindowActivity)
+    document.addEventListener("visibilitychange", updateWindowActivity)
+    return () => {
+      window.removeEventListener("focus", updateWindowActivity)
+      window.removeEventListener("blur", updateWindowActivity)
+      document.removeEventListener("visibilitychange", updateWindowActivity)
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -250,7 +333,7 @@ function ConvexDogfoodChat() {
   }, [activeChannelId, activeChannelJoined, activeKind, ensureChannelMember, viewerReady])
 
   useEffect(() => {
-    if (!viewerReady || activeChannelId === undefined || (activeKind === "channel" && !activeChannelJoined) || messagePagination.status === "LoadingFirstPage") return
+    if (!viewerReady || !windowActive || activeChannelId === undefined || (activeKind === "channel" && !activeChannelJoined) || messagePagination.status === "LoadingFirstPage") return
     const readThroughMessageId = latestMessageId(messages)
     if (readThroughMessageId === null) return
     const readMarker = `${activeChannelId}:${readThroughMessageId}`
@@ -260,7 +343,7 @@ function ConvexDogfoodChat() {
     void markChannelRead({ channelId: activeChannelId, readThroughMessageId }).catch((cause: unknown) => {
       logDogfoodDiagnostic("read-marker", cause, dogfoodDiagnostic("mutation", "try-again", cause))
     })
-  }, [activeChannelId, activeChannelJoined, activeKind, markChannelRead, messagePagination.status, messages, viewerReady])
+  }, [activeChannelId, activeChannelJoined, activeKind, markChannelRead, messagePagination.status, messages, viewerReady, windowActive])
 
   useEffect(() => {
     if (workspace === undefined || workspace === null || channelList === undefined) return
@@ -322,7 +405,8 @@ function ConvexDogfoodChat() {
             channelMemberInviteCandidates,
             createChannelInviteCandidates,
             channelIndicators: Array.from(new Map([...(Array.isArray(channelIndicators) ? channelIndicators : []), ...(Array.isArray(directIndicators) ? directIndicators : [])]
-              .map((indicator) => [indicator.channelId, indicator])).values())
+              .map((indicator) => [indicator.channelId, indicator])).values()),
+            notificationPreference
           },
           state: {
             messagesLoading: messagePagination.status === "LoadingFirstPage",
@@ -357,6 +441,7 @@ function ConvexDogfoodChat() {
             sendFriendRequest,
             updateDirectMessageProfile,
             respondToFriendRequest,
+            updateNotificationPreference,
             editChannel,
             deleteChannel: async (input) => {
               await deleteChannel(input)
@@ -396,7 +481,7 @@ function ConvexDogfoodChat() {
             operationErrorMessage: dogfoodOperationErrorMessage
           }
         }),
-    [activeChannelId, activeKind, addPrivateChannelMember, channelIndicators, channelList, channelMemberInviteCandidates, convex, createChannel, createChannelInviteCandidates, deleteAttachmentUpload, deleteChannel, deleteMessage, directConversations, directIndicators, directMessageProfile, editChannel, editMessage, generateAttachmentUploadUrl, incomingFriendRequests, members, messagePagination, messages, registerAttachmentUpload, removePrivateChannelMember, respondToFriendRequest, selectedConversation, sendFriendRequest, sendMessage, stableDirectConversations, startOrReopenDirectConversation, toggleMessageReaction, updateDirectMessageProfile, workspace]
+    [activeChannelId, activeKind, addPrivateChannelMember, channelIndicators, channelList, channelMemberInviteCandidates, convex, createChannel, createChannelInviteCandidates, deleteAttachmentUpload, deleteChannel, deleteMessage, directConversations, directIndicators, directMessageProfile, editChannel, editMessage, generateAttachmentUploadUrl, incomingFriendRequests, members, messagePagination, messages, notificationPreference, registerAttachmentUpload, removePrivateChannelMember, respondToFriendRequest, selectedConversation, sendFriendRequest, sendMessage, stableDirectConversations, startOrReopenDirectConversation, toggleMessageReaction, updateDirectMessageProfile, updateNotificationPreference, workspace]
   )
 
   if (auth.isLoading) {

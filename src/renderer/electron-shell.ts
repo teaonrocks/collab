@@ -1,9 +1,16 @@
 import { isAllowedExternalAuthUrl } from "../shared/auth-redirect-policy"
 import type { AccountProfile, WindowAccountContext } from "../shared/account-session"
+import type {
+  DesktopNotificationActivation,
+  DesktopNotificationRequest
+} from "../shared/desktop-notifications"
 
 export type AetherShell = {
   readonly openExternal: (url: string) => Promise<void>
   readonly openNativeAuth: (url: string) => Promise<void>
+  readonly updateDesktopNotificationContext?: (conversationId: string) => Promise<void>
+  readonly showDesktopNotification?: (request: DesktopNotificationRequest) => Promise<"shown" | "duplicate" | "suppressed" | "unsupported">
+  readonly onDesktopNotificationActivated?: (listener: (activation: DesktopNotificationActivation) => void) => () => void
   readonly accountContext: () => Promise<WindowAccountContext>
   readonly onAccountContextChanged?: (listener: (context: WindowAccountContext) => void) => () => void
   readonly updateAccountProfile: (profile: AccountProfile) => Promise<WindowAccountContext>
@@ -36,6 +43,16 @@ export const openExternalUrl = (url: string): Promise<void> => {
 
 export const openNativeAuthUrl = (url: string): Promise<void> =>
   window.aetherShell?.openNativeAuth(url) ?? Promise.reject(new Error("Native account sign-in requires the Aether desktop app."))
+
+export const updateDesktopNotificationContext = (conversationId: string): Promise<void> =>
+  window.aetherShell?.updateDesktopNotificationContext?.(conversationId) ?? Promise.resolve()
+
+export const showDesktopNotification = (request: DesktopNotificationRequest): Promise<"shown" | "duplicate" | "suppressed" | "unsupported"> =>
+  window.aetherShell?.showDesktopNotification?.(request) ?? Promise.resolve("unsupported")
+
+export const subscribeToDesktopNotificationActivation = (
+  listener: (activation: DesktopNotificationActivation) => void
+): (() => void) => window.aetherShell?.onDesktopNotificationActivated?.(listener) ?? (() => {})
 
 export const getWindowAccountContext = (): Promise<WindowAccountContext | null> =>
   window.aetherShell?.accountContext() ?? Promise.resolve(null)

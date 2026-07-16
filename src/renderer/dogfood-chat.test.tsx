@@ -53,6 +53,8 @@ const mocks = vi.hoisted(() => ({
   sendFriendRequest: vi.fn(),
   updateDirectMessageProfile: vi.fn(),
   respondToFriendRequest: vi.fn(),
+  updateNotificationPreference: vi.fn(),
+  openNotificationFeed: vi.fn(),
   loadMore: vi.fn(),
   paginationStatus: undefined as "LoadingFirstPage" | "CanLoadMore" | "LoadingMore" | "Exhausted" | undefined,
   mutationCallCount: 0,
@@ -66,7 +68,21 @@ const mocks = vi.hoisted(() => ({
   membersByChannel: undefined as Record<string, ReadonlyArray<DogfoodChannelMemberView>> | undefined,
   inviteCandidates: undefined as ReadonlyArray<DogfoodPrivateChannelInviteCandidateView> | undefined,
   managementCandidates: undefined as ReadonlyArray<DogfoodPrivateChannelInviteCandidateView> | undefined,
-  channelIndicators: undefined as ReadonlyArray<{ readonly channelId: string; readonly indicator: "unread" | "mentioned" }> | undefined
+  channelIndicators: undefined as ReadonlyArray<{ readonly channelId: string; readonly indicator: "unread" | "mentioned" }> | undefined,
+  notificationPreference: undefined as { readonly mode: "all" | "mentions" | "off"; readonly options: ReadonlyArray<"all" | "mentions" | "off"> } | undefined,
+  notificationFeedArgs: [] as Array<{ readonly cursor: number }>,
+  notificationEvents: {
+    cursor: 0,
+    notifications: [] as ReadonlyArray<{
+      readonly id: string
+      readonly messageId: string
+      readonly channelId: string
+      readonly conversationKind: "channel" | "direct"
+      readonly title: string
+      readonly body: string
+      readonly createdAt: number
+    }>
+  }
 }))
 
 vi.mock("@workos-inc/authkit-react", () => ({
@@ -96,8 +112,10 @@ vi.mock("convex/react", () => ({
       mocks.startOrReopenDirectConversation,
       mocks.sendFriendRequest,
       mocks.updateDirectMessageProfile,
-      mocks.respondToFriendRequest
-    ][mocks.mutationCallCount % 18]
+      mocks.respondToFriendRequest,
+      mocks.updateNotificationPreference,
+      mocks.openNotificationFeed
+    ][mocks.mutationCallCount % 20]
     mocks.mutationCallCount += 1
     return mutation
   },
@@ -120,6 +138,11 @@ vi.mock("convex/react", () => ({
     if (functionName === "direct_conversations:indicators") return []
     if (functionName === "social:profile") return undefined
     if (functionName === "social:incomingFriendRequests") return undefined
+    if (functionName === "notification_preferences:preference") return mocks.notificationPreference
+    if (functionName === "notification_preferences:feed") {
+      mocks.notificationFeedArgs.push(args as { cursor: number })
+      return mocks.notificationEvents
+    }
     if (functionName === "chat:eligiblePrivateChannelMembers") {
       return typeof args === "object" && args !== null && "channelId" in args
         ? mocks.managementCandidates
@@ -345,9 +368,11 @@ afterEach(() => {
   vi.clearAllMocks()
   vi.unstubAllGlobals()
   Reflect.deleteProperty(window, "aetherShell")
+  vi.restoreAllMocks()
 })
 
 beforeEach(() => {
+  vi.spyOn(document, "hasFocus").mockReturnValue(true)
   mocks.auth.isLoading = false
   mocks.auth.user = null
   mocks.auth.getSignInUrl.mockResolvedValue("https://api.workos.com/user_management/authorize")
@@ -396,6 +421,11 @@ beforeEach(() => {
   mocks.inviteCandidates = undefined
   mocks.managementCandidates = undefined
   mocks.channelIndicators = undefined
+  mocks.notificationPreference = undefined
+  mocks.notificationFeedArgs = []
+  mocks.notificationEvents = { cursor: 0, notifications: [] }
+  mocks.updateNotificationPreference.mockResolvedValue({ mode: "mentions", options: ["all", "mentions", "off"] })
+  mocks.openNotificationFeed.mockResolvedValue({ cursor: 0 })
 })
 
 const workspace: DogfoodWorkspaceView = {
@@ -820,6 +850,38 @@ describe("dogfoodChatToChatData", () => {
     expect(chatData.model.channelIndicators).toEqual([{ channelId: channels[1]!.id, indicator: "mentioned" }])
   })
 
+  it("adapts and updates the active conversation notification preference", async () => {
+    const updateNotificationPreference = vi.fn().mockResolvedValue({
+      mode: "all" as const,
+      options: ["all", "mentions", "off"] as const
+    })
+    const chatData = dogfoodChatToChatData({
+      data: {
+        workspace,
+        channels,
+        selectedChannelId: workspace.channel.id,
+        messages,
+        notificationPreference: { mode: "mentions", options: ["all", "mentions", "off"] }
+      },
+      commands: {
+        sendMessage: mocks.sendMessage,
+        editMessage: mocks.editMessage,
+        deleteMessage: mocks.deleteMessage,
+        updateNotificationPreference
+      }
+    })
+
+    expect(chatData.model.notificationPreference).toEqual({
+      mode: "mentions",
+      options: ["all", "mentions", "off"]
+    })
+    await chatData.updateNotificationPreference?.({ channelId: workspace.channel.id, mode: "all" })
+    expect(updateNotificationPreference).toHaveBeenCalledWith({
+      channelId: workspace.channel.id,
+      mode: "all"
+    })
+  })
+
   it("uses Convex ids for chat commands without exposing snapshot-era fields", async () => {
     const chatData = dogfoodChatToChatData({
       data: { workspace, channels, selectedChannelId: workspace.channel.id, messages },
@@ -915,6 +977,44 @@ describe("ConvexDogfoodApp", () => {
 
     expect(screen.getByRole("heading", { name: "Welcome to Aether" })).toBeTruthy()
     expect(screen.getByRole("button", { name: "Sign in" })).toBeTruthy()
+  })
+
+  it("opens notifications from a server cursor and advances after consuming a page", async () => {
+    const showDesktopNotification = vi.fn().mockResolvedValue("shown")
+    Object.defineProperty(window, "aetherShell", {
+      configurable: true,
+      value: {
+        accountContext: vi.fn().mockResolvedValue(null),
+        updateDesktopNotificationContext: vi.fn().mockResolvedValue(undefined),
+        showDesktopNotification
+      }
+    })
+    mocks.openNotificationFeed.mockResolvedValue({ cursor: 41 })
+    mocks.notificationEvents = {
+      cursor: 42,
+      notifications: [{
+        id: "event-42",
+        messageId: "message-42",
+        channelId: "channel-1",
+        conversationKind: "channel",
+        title: "#general",
+        body: "Lee Chen: Cursor-backed notification",
+        createdAt: 1
+      }]
+    }
+    mocks.auth.user = { id: "user-1" }
+    mocks.convexAuth.isAuthenticated = true
+    mocks.workspace = workspace
+    mocks.channels = channels
+    mocks.messages = messages
+    const { ConvexDogfoodApp } = await import("./dogfood-chat")
+
+    render(<ConvexDogfoodApp />)
+
+    await waitFor(() => expect(mocks.openNotificationFeed).toHaveBeenCalledWith({}))
+    await waitFor(() => expect(mocks.notificationFeedArgs).toContainEqual({ cursor: 41 }))
+    await waitFor(() => expect(showDesktopNotification).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mocks.notificationFeedArgs).toContainEqual({ cursor: 42 }))
   })
 
   it("binds system-browser sign-in to the initiating account window", async () => {
@@ -1309,6 +1409,27 @@ describe("ConvexDogfoodApp", () => {
         readThroughMessageId: messages[0]!.id
       })
     )
+  })
+
+  it("does not mark a background conversation read until the window becomes active", async () => {
+    const { ConvexDogfoodApp } = await import("./dogfood-chat")
+    vi.mocked(document.hasFocus).mockReturnValue(false)
+    mocks.auth.user = { id: "user-1" }
+    mocks.convexAuth.isAuthenticated = true
+    mocks.workspace = workspace
+    mocks.channels = channels
+    mocks.messages = messages
+
+    render(<ConvexDogfoodApp />)
+    await screen.findByLabelText("mock workspace chat")
+    expect(mocks.markChannelRead).not.toHaveBeenCalled()
+
+    vi.mocked(document.hasFocus).mockReturnValue(true)
+    act(() => window.dispatchEvent(new Event("focus")))
+    await waitFor(() => expect(mocks.markChannelRead).toHaveBeenCalledWith({
+      channelId: workspace.channel.id,
+      readThroughMessageId: messages[0]!.id
+    }))
   })
 
   it("marks the active channel read through the newest loaded message without repeating the same marker", async () => {

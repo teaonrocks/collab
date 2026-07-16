@@ -1,5 +1,7 @@
 import {
   Check,
+  Bell,
+  BellOff,
   Copy,
   Ellipsis,
   File as FileIcon,
@@ -31,6 +33,7 @@ import type {
   ChatChannelMember,
   ChatDirectConversation,
   ChatDirectMessageProfile,
+  ChatConversationNotificationMode,
   ChatDataModel,
   ChatDataView,
   ChatMessage,
@@ -197,6 +200,7 @@ export function WorkspaceChat(props: {
   readonly sendFriendRequest?: ChatDataView["sendFriendRequest"]
   readonly updateDirectMessageProfile?: ChatDataView["updateDirectMessageProfile"]
   readonly respondToFriendRequest?: ChatDataView["respondToFriendRequest"]
+  readonly updateNotificationPreference?: ChatDataView["updateNotificationPreference"]
   readonly addChannelMember?: ChatDataView["addChannelMember"]
   readonly removeChannelMember?: ChatDataView["removeChannelMember"]
   readonly editChannelMessage?: ChatDataView["editChannelMessage"]
@@ -221,6 +225,7 @@ export function WorkspaceChat(props: {
     sendFriendRequest,
     updateDirectMessageProfile,
     respondToFriendRequest,
+    updateNotificationPreference,
     createChannelMessage,
     uploadMessageAttachment,
     discardMessageAttachment,
@@ -243,6 +248,8 @@ export function WorkspaceChat(props: {
   const activeId = activeConversationId(activeConversation)
   const activeName = activeConversationName(activeConversation)
   const activeChannel = activeConversation.kind === "channel" ? activeConversation.channel : null
+  const activeIdRef = useRef(activeId)
+  activeIdRef.current = activeId
   const [messageDraft, setMessageDraft] = useState("")
   const [operationError, setOperationError] = useState<string | null>(null)
   const [channelOperationError, setChannelOperationError] = useState<string | null>(null)
@@ -250,6 +257,8 @@ export function WorkspaceChat(props: {
   const [searchOpen, setSearchOpen] = useState(false)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [directMessageSettingsOpen, setDirectMessageSettingsOpen] = useState(false)
+  const [notificationPreferenceSaving, setNotificationPreferenceSaving] = useState(false)
+  const [notificationPreferenceError, setNotificationPreferenceError] = useState<string | null>(null)
   const [messageSearchQuery, setMessageSearchQuery] = useState("")
   const [activeSearchMessageId, setActiveSearchMessageId] = useState<ChatMessageId | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -337,6 +346,8 @@ export function WorkspaceChat(props: {
     setMessageSearchQuery("")
     setActiveSearchMessageId(null)
     setReplyParent(null)
+    setNotificationPreferenceSaving(false)
+    setNotificationPreferenceError(null)
   }, [activeId])
 
   useEffect(() => {
@@ -505,6 +516,25 @@ export function WorkspaceChat(props: {
       <ChannelHeader
         channelName={activeName}
         direct={activeConversation.kind === "direct"}
+        notificationPreference={model.notificationPreference}
+        notificationPreferenceSaving={notificationPreferenceSaving}
+        notificationPreferenceError={notificationPreferenceError}
+        onNotificationPreferenceChange={updateNotificationPreference === undefined
+          ? undefined
+          : (mode) => {
+              const channelId = activeId
+              setNotificationPreferenceSaving(true)
+              setNotificationPreferenceError(null)
+              void updateNotificationPreference({ channelId, mode })
+                .catch(() => {
+                  if (activeIdRef.current === channelId) {
+                    setNotificationPreferenceError("Could not save notification preference.")
+                  }
+                })
+                .finally(() => {
+                  if (activeIdRef.current === channelId) setNotificationPreferenceSaving(false)
+                })
+            }}
         searchOpen={searchOpen}
         membersOpen={membersOpen}
         onToggleSearch={() => {
@@ -1532,12 +1562,27 @@ function ChannelGlyph(props: { readonly visibility?: ChatChannel["visibility"] }
 function ChannelHeader(props: {
   readonly channelName: string
   readonly direct?: boolean
+  readonly notificationPreference?: ChatDataModel["notificationPreference"]
+  readonly notificationPreferenceSaving: boolean
+  readonly notificationPreferenceError: string | null
+  readonly onNotificationPreferenceChange?: (mode: ChatConversationNotificationMode) => void
   readonly searchOpen: boolean
   readonly membersOpen: boolean
   readonly onToggleSearch: () => void
   readonly onToggleMembers: () => void
 }) {
-  const { channelName, direct = false, searchOpen, membersOpen, onToggleSearch, onToggleMembers } = props
+  const {
+    channelName,
+    direct = false,
+    notificationPreference,
+    notificationPreferenceSaving,
+    notificationPreferenceError,
+    onNotificationPreferenceChange,
+    searchOpen,
+    membersOpen,
+    onToggleSearch,
+    onToggleMembers
+  } = props
   const searchToggleLabel = searchOpen ? "Hide search" : "Show search"
   const membersToggleLabel = membersOpen ? "Hide members" : "Show members"
   return (
@@ -1546,7 +1591,28 @@ function ChannelHeader(props: {
         {direct ? null : <Hash className={classNames("channelHashIcon shrink-0 text-foreground-subtle", iconClassName)} aria-hidden="true" />}
         <h2 className="m-0 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-lg leading-tight tracking-normal text-foreground">{channelName}</h2>
       </div>
-      <div className="chatHeaderActions flex items-center justify-end gap-2 text-xs text-foreground-subtle" aria-label="Channel actions">
+      <div className="chatHeaderActions flex items-center justify-end gap-2 text-xs text-foreground-subtle" aria-label="Conversation actions">
+        <label className="inline-flex h-8 items-center gap-1.5 rounded-control border border-border-strong bg-surface-canvas px-2 text-foreground-subtle focus-within:border-ring focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-1" title={notificationPreferenceError ?? "Notification preference"}>
+          {notificationPreference?.mode === "off"
+            ? <BellOff className={iconClassName} aria-hidden="true" />
+            : <Bell className={iconClassName} aria-hidden="true" />}
+          <span className="sr-only">Notifications for {channelName}</span>
+          <select
+            className="max-w-28 cursor-pointer border-0 bg-transparent text-xs font-medium text-foreground outline-none disabled:cursor-default disabled:text-foreground-subtle"
+            aria-label={`Notifications for ${channelName}`}
+            value={notificationPreference?.mode ?? ""}
+            disabled={notificationPreference === undefined || notificationPreferenceSaving || onNotificationPreferenceChange === undefined}
+            onChange={(event) => onNotificationPreferenceChange?.(event.currentTarget.value as ChatConversationNotificationMode)}
+          >
+            {notificationPreference === undefined ? <option value="">Loading...</option> : null}
+            {notificationPreference?.options.map((mode) => (
+              <option key={mode} value={mode}>{notificationModeLabel(mode)}</option>
+            ))}
+          </select>
+        </label>
+        {notificationPreferenceError === null
+          ? null
+          : <span className="sr-only" role="alert">{notificationPreferenceError}</span>}
         {direct ? null : <button
           type="button"
           className={classNames(
@@ -1560,7 +1626,7 @@ function ChannelHeader(props: {
         >
           <Search className={iconClassName} aria-hidden="true" />
         </button>}
-        <button
+        {direct ? null : <button
           type="button"
           className={classNames(
             "membersToggle grid min-h-[30px] w-8 cursor-pointer place-items-center rounded-control border border-border-strong bg-surface-canvas p-0 font-[inherit] text-ring hover:border-ring hover:bg-surface-muted hover:text-foreground-subtle focus-visible:border-ring focus-visible:bg-surface-muted focus-visible:text-foreground-subtle",
@@ -1572,10 +1638,18 @@ function ChannelHeader(props: {
           onClick={onToggleMembers}
         >
           <Users className={iconClassName} aria-hidden="true" />
-        </button>
+        </button>}
       </div>
     </header>
   )
+}
+
+const notificationModeLabel = (mode: ChatConversationNotificationMode): string => {
+  switch (mode) {
+    case "all": return "All messages"
+    case "mentions": return "Mentions only"
+    case "off": return "Muted"
+  }
 }
 
 function ChatPane(props: {

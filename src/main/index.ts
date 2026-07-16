@@ -3,6 +3,7 @@ import {
   BrowserWindow,
   ipcMain,
   Menu,
+  Notification as ElectronNotification,
   session,
   shell,
   type IpcMainInvokeEvent,
@@ -21,6 +22,7 @@ import {
   selectActiveWindowRecord
 } from "./account-window-lifecycle"
 import { createAuthCallbackCoordinator } from "./auth-callback"
+import { createDesktopNotificationCoordinator } from "./desktop-notifications"
 import {
   cancelNativeAuthSessions,
   nativeAuthHelperExecutable,
@@ -38,6 +40,11 @@ import {
   isAllowedExternalAuthUrl,
   rendererAuthCallbackUrl
 } from "../shared/auth-redirect-policy"
+import {
+  desktopNotificationContextChannel,
+  desktopNotificationShowChannel,
+  isDesktopNotificationRequest
+} from "../shared/desktop-notifications"
 import {
   createWillNavigateHandler,
   createWindowOpenHandler,
@@ -59,6 +66,11 @@ let lastFocusedWindowId: number | null = null
 let windowTransitionDepth = 0
 const retiringAccountIds = new Set<string>()
 const rendererLoadTimeoutMs = 30_000
+const desktopNotifications = createDesktopNotificationCoordinator({
+  records: () => windows.values(),
+  isSupported: () => ElectronNotification.isSupported(),
+  createNotification: (input) => new ElectronNotification(input)
+})
 
 const rendererLocationPolicy: RendererLocationPolicy = {
   rendererDevServerUrl: process.env.ELECTRON_RENDERER_URL,
@@ -178,6 +190,7 @@ const createWindow = (
     })
   })
   window.on("closed", () => {
+    desktopNotifications.removeWindow(window.id)
     windows.delete(window.id)
     if (lastFocusedWindowId === window.id) lastFocusedWindowId = null
     if (
@@ -285,6 +298,22 @@ const handleAuthCallback = (rawUrl: string): void => {
 }
 
 const registerIpc = (): void => {
+  ipcMain.handle(desktopNotificationContextChannel, (event, conversationId: unknown) => {
+    const record = recordForEvent(event)
+    if (typeof conversationId !== "string" || conversationId.trim().length === 0 || conversationId.length > 200) {
+      throw new Error("Refusing invalid desktop notification context.")
+    }
+    desktopNotifications.updateContext(record, conversationId)
+  })
+
+  ipcMain.handle(desktopNotificationShowChannel, (event, request: unknown) => {
+    const record = recordForEvent(event)
+    if (!isDesktopNotificationRequest(request)) {
+      throw new Error("Refusing invalid desktop notification data.")
+    }
+    return desktopNotifications.show(record, request)
+  })
+
   ipcMain.handle("aether:open-external", (event, rawUrl: unknown) => {
     recordForEvent(event)
     if (typeof rawUrl !== "string") {

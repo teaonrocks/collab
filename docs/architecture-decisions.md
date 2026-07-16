@@ -237,8 +237,8 @@ capabilities.
 
 The first networked surface supported only realtime send/read. Later milestones deliberately added
 channels and membership, edit/delete, local timeline search, mentions and unread indicators, shallow
-replies, reactions, and Convex-backed attachments. Notifications and agent workflows remain outside
-the active feature set.
+replies, reactions, Convex-backed attachments, and local desktop notifications. Agent workflows
+remain outside the active feature set.
 
 #### Treat Private Channels As Explicit Membership Boundaries
 
@@ -271,6 +271,36 @@ history pagination, search, reactions, edit/delete, read markers, member queries
 attachment URLs hydrated into message views. Unread state is user-scoped like channels but is shown
 in the global direct-message rail and survives channel switches. `@name` text in a direct message is
 plain text for this release; it does not produce channel-style mention indicators.
+
+#### Keep Notification Preferences Conversation-Scoped
+
+Each channel or direct conversation has a per-user Convex preference. Workspace channels default to
+`mentions` and offer all messages, mentions only, or muted. Direct conversations default to all
+messages and offer all messages or muted; mention-only is intentionally invalid because direct
+messages do not create mention records.
+
+The normal send transaction creates recipient-scoped notification events only for other members
+whose preference matches the new message. Direct database imports, historical backfills, edits, and
+the sender's own messages do not create events. Removing a channel membership prevents any retained
+event for that channel from being returned later.
+
+The renderer opens its feed with a one-shot server-issued session cursor, then advances through
+recipient-scoped event sequences in pages of 100. The sequence is assigned in the message transaction,
+so equal message timestamps and renderer/server clock skew cannot skip or replay events. The renderer
+remembers event IDs for reconnect replay while the Electron main process deduplicates message IDs across
+windows for the same account. A focused, visible window showing the conversation suppresses the native
+notification. Read markers use the same focused and visible rule, so a background subscription update
+is not treated as viewed. Clicking an alert focuses an account window and selects the channel or direct
+conversation.
+
+This is local desktop delivery, not push delivery: Aether must be running and the operating system
+must allow notifications. Reloading or starting a new app session establishes a new server cursor rather
+than alerting for existing history. During a long-running session, a reconnect may deliver genuinely
+new unseen events, but repeated subscription snapshots and reconnect replays of already-seen event IDs
+are suppressed. Each read is bounded to the next 100 events and acknowledges its returned cursor before
+reading another page, so consumed rows are not repeatedly hydrated. Events expire after seven days via
+scheduled cleanup because this feed is transient local delivery, not durable push storage. The feature
+currently has no per-device sound, preview-privacy, schedule, or rich-action settings.
 
 #### Display Names, Not Emails
 

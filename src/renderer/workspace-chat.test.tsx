@@ -98,6 +98,51 @@ const openMessageSearch = async () => {
 }
 
 describe("WorkspaceChat", () => {
+  it("offers channel notification modes and saves the selected preference", async () => {
+    const updates: Array<{ readonly channelId: string; readonly mode: "all" | "mentions" | "off" }> = []
+    render(
+      <WorkspaceChat
+        model={{
+          ...makeChatModel(),
+          notificationPreference: { mode: "mentions", options: ["all", "mentions", "off"] }
+        }}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+        updateNotificationPreference={(input) => {
+          updates.push(input)
+          return Promise.resolve({ mode: input.mode, options: ["all", "mentions", "off"] })
+        }}
+      />
+    )
+
+    const preference = await screen.findByRole("combobox", { name: "Notifications for origination" })
+    expect(within(preference).getByRole("option", { name: "Mentions only" })).toBeTruthy()
+    fireEvent.change(preference, { target: { value: "all" } })
+    await waitFor(() => expect(updates).toEqual([{ channelId, mode: "all" }]))
+  })
+
+  it("omits mention-only notification mode for direct conversations", async () => {
+    const directConversation = { id: "direct-1", otherUser: { id: "user-2", displayName: "Lee Chen" } }
+    render(
+      <WorkspaceChat
+        model={{
+          ...makeChatModel(),
+          activeConversation: { kind: "direct", directConversation },
+          directConversations: [directConversation],
+          notificationPreference: { mode: "all", options: ["all", "off"] }
+        }}
+        createChannelMessage={() => Promise.resolve()}
+        deleteChannelMessage={() => Promise.resolve()}
+        updateNotificationPreference={(input) => Promise.resolve({ mode: input.mode, options: ["all", "off"] })}
+      />
+    )
+
+    const preference = await screen.findByRole("combobox", { name: "Notifications for Lee Chen" })
+    expect(within(preference).getByRole("option", { name: "All messages" })).toBeTruthy()
+    expect(within(preference).getByRole("option", { name: "Muted" })).toBeTruthy()
+    expect(within(preference).queryByRole("option", { name: "Mentions only" })).toBeNull()
+  })
+
   it("presents explicit direct conversations in the global rail", async () => {
     const model = makeChatModel()
     render(

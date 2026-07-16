@@ -14,6 +14,7 @@ import type * as chat_message_projection from "../chat_message_projection.js";
 import type * as chat_message_transactions from "../chat_message_transactions.js";
 import type * as direct_conversations from "../direct_conversations.js";
 import type * as migrations from "../migrations.js";
+import type * as notification_preferences from "../notification_preferences.js";
 import type * as social from "../social.js";
 
 import type {
@@ -29,6 +30,7 @@ declare const fullApi: ApiFromModules<{
   chat_message_transactions: typeof chat_message_transactions;
   direct_conversations: typeof direct_conversations;
   migrations: typeof migrations;
+  notification_preferences: typeof notification_preferences;
   social: typeof social;
 }>;
 

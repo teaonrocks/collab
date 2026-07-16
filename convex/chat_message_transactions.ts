@@ -3,6 +3,7 @@ import type { MutationCtx } from "./_generated/server"
 import { isAcceptedAttachmentContentType, MESSAGE_ATTACHMENT_POLICY } from "../src/shared/attachment-policy"
 import { requireAllowedCurrentUser, requireChannelMember } from "./chat_access"
 import { toMessageView } from "./chat_message_projection"
+import { queueMessageNotifications } from "./notification_preferences"
 
 const MAX_MESSAGE_BODY_LENGTH = 8_000
 
@@ -69,16 +70,17 @@ const syncMessageMentions = async (
     readonly body: string
     readonly authorUserId: Id<"users">
   }
-) => {
+): Promise<ReadonlySet<Id<"users">>> => {
+  const mentionedUserIds = new Set<Id<"users">>()
   const existing = await ctx.db
     .query("messageMentions")
     .withIndex("by_message", (q) => q.eq("messageId", input.messageId))
     .collect()
   for (const mention of existing) await ctx.db.delete(mention._id)
 
-  if (input.body.length === 0) return
+  if (input.body.length === 0) return mentionedUserIds
   const channel = await ctx.db.get(input.channelId)
-  if (channel === null || channel.kind === "direct") return
+  if (channel === null || channel.kind === "direct") return mentionedUserIds
 
   const memberships = await ctx.db
     .query("channelMemberships")
@@ -94,7 +96,9 @@ const syncMessageMentions = async (
       userId: member._id,
       messageCreatedAt: input.messageCreatedAt
     })
+    mentionedUserIds.add(member._id)
   }
+  return mentionedUserIds
 }
 
 const validateMessageAttachments = async (
@@ -188,13 +192,14 @@ export const sendMessageTransaction = async (
   })
   const message = await ctx.db.get(messageId)
   if (message === null) throw new Error("Message not found after insert")
-  await syncMessageMentions(ctx, {
+  const mentionedUserIds = await syncMessageMentions(ctx, {
     channelId: message.channelId,
     messageId: message._id,
     messageCreatedAt: message.createdAt,
     body: message.body,
     authorUserId: message.authorUserId
   })
+  await queueMessageNotifications(ctx, { channel, message, mentionedUserIds })
   const senderMembership = await ctx.db
     .query("channelMemberships")
     .withIndex("by_channel_user", (q) =>
@@ -276,6 +281,12 @@ export const deleteMessageTransaction = async (
     .withIndex("by_message", (q) => q.eq("messageId", args.messageId))
     .collect()
   for (const mention of mentions) await ctx.db.delete(mention._id)
+
+  const notificationEvents = await ctx.db
+    .query("messageNotificationEvents")
+    .withIndex("by_message", (q) => q.eq("messageId", args.messageId))
+    .collect()
+  for (const event of notificationEvents) await ctx.db.delete(event._id)
 
   for (const attachment of message.attachments ?? []) {
     await ctx.storage.delete(attachment.storageId)

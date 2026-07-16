@@ -1,5 +1,13 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron"
 import { accountContextChangedChannel, type WindowAccountContext } from "../shared/account-session"
+import {
+  desktopNotificationActivatedChannel,
+  desktopNotificationContextChannel,
+  desktopNotificationShowChannel,
+  isDesktopNotificationActivation,
+  isDesktopNotificationRequest,
+  type DesktopNotificationActivation
+} from "../shared/desktop-notifications"
 
 contextBridge.exposeInMainWorld("aetherShell", {
   openExternal: (url: unknown) => {
@@ -13,6 +21,25 @@ contextBridge.exposeInMainWorld("aetherShell", {
       return Promise.reject(new TypeError("Expected external URL to be a string."))
     }
     return ipcRenderer.invoke("aether:open-native-auth", url)
+  },
+  updateDesktopNotificationContext: (conversationId: unknown) => {
+    if (typeof conversationId !== "string" || conversationId.trim().length === 0 || conversationId.length > 200) {
+      return Promise.reject(new TypeError("Expected a valid conversation id."))
+    }
+    return ipcRenderer.invoke(desktopNotificationContextChannel, conversationId)
+  },
+  showDesktopNotification: (request: unknown) => {
+    if (!isDesktopNotificationRequest(request)) {
+      return Promise.reject(new TypeError("Expected valid desktop notification data."))
+    }
+    return ipcRenderer.invoke(desktopNotificationShowChannel, request)
+  },
+  onDesktopNotificationActivated: (listener: (activation: DesktopNotificationActivation) => void) => {
+    const handler = (_event: IpcRendererEvent, activation: unknown) => {
+      if (isDesktopNotificationActivation(activation)) listener(activation)
+    }
+    ipcRenderer.on(desktopNotificationActivatedChannel, handler)
+    return () => ipcRenderer.removeListener(desktopNotificationActivatedChannel, handler)
   },
   accountContext: () => ipcRenderer.invoke("aether:accounts-context"),
   onAccountContextChanged: (listener: (context: WindowAccountContext) => void) => {

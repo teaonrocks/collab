@@ -51,13 +51,29 @@ For failure capture and recovery, see [`docs/dogfood-debugging.md`](dogfood-debu
 - Direct-message unread indicators live in the global rail, survive channel switching and loading
   states, and clear only after that direct message is read.
 - `@name` text inside a direct message stays plain message text for now. It does not create a
-  channel-style mention indicator or notification.
+  channel-style mention indicator or qualify for a mention-only mode; it may still alert because DMs
+  use the all-messages preference by default.
 - A non-participant cannot discover a direct message through channel lists, direct-message lists,
   unread indicators, search, member queries, diagnostics, guessed IDs, or fresh attachment URL
   hydration.
 - The first empty channel state invites the user to start the conversation.
 - Messages sent from one account appear in realtime for the other account.
 - Inactive channels show unread state, and a matching `@name` mention takes priority over unread.
+- The conversation header exposes a compact notification preference. Channels offer all messages,
+  mentions only, and muted; direct messages offer all messages and muted. The selection survives a
+  restart and is independent for each account and conversation.
+- With Aether focused on the conversation, a new eligible message from the other account advances the
+  read marker without showing a desktop notification. With the window blurred, the same message keeps
+  unread state and shows one native notification. The sender never receives an alert for their own send.
+- Channel defaults notify only for a matching mention. Switching to all messages enables ordinary
+  message alerts; muted disables both. Direct messages alert for ordinary messages by default and stop
+  after muting.
+- Repeating a Convex subscription snapshot, briefly disconnecting and reconnecting, or opening another
+  window for the same account does not duplicate an alert for the same message. Reloading does not alert
+  for existing history or a direct database backfill. A reconnect that has more than 100 queued events
+  drains subsequent pages without repeating the first page; events older than seven days may expire
+  because desktop notification delivery is intentionally transient.
+- Clicking a notification focuses an Aether window for the correct account and opens its channel or DM.
 - Channel search filters the current timeline and keyboard navigation focuses matching messages.
 - Reply mode preserves the draft, sends a shallow parent link, and renders a compact parent preview.
 - Reactions update in realtime and show whether the current user reacted.
@@ -96,6 +112,12 @@ Record this evidence without email addresses, tokens, keys, or environment-file 
   replies, search, and pending attachments, and never invoked public-channel auto-join.
 - Direct-message unread state appeared only for the recipient, survived unrelated channel switches,
   cleared when that DM was read, and did not become a mention indicator for `@name` text.
+- Tester B confirmed the channel defaults to mentions only, then exercised all messages and muted;
+  Tester B separately confirmed the DM defaults to all messages and offers no mention-only choice.
+- With Tester B viewing another conversation or with Aether blurred, one native desktop notification
+  appeared for an eligible new message from Tester A. No alert appeared for Tester B's own send, a muted
+  conversation, an already-viewed active conversation, a repeated subscription update, or a reload.
+- Clicking the native notification focused the correct account window and opened the source conversation.
 - A harmless direct-message attachment was readable by both participants through Aether, while a
   non-participant could not obtain a fresh attachment URL or discover the conversation.
 - Reload or reconnect preserved the same direct-message identity and history for the two
