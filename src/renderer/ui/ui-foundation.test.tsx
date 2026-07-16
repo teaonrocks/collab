@@ -43,6 +43,21 @@ describe("renderer UI foundation", () => {
     expect(cn("px-2", false, "px-4", "text-sm")).toBe("px-4 text-sm")
   })
 
+  it("preserves explicit icon sizes inside buttons", () => {
+    render(
+      <Button aria-label="Custom icon">
+        <span>
+          <svg className="size-[9px]" aria-hidden="true" />
+        </span>
+      </Button>
+    )
+
+    const button = screen.getByRole("button", { name: "Custom icon" })
+    expect(button.className).toContain("[&_svg:not([class*='size-'])]:size-4")
+    expect(button.className).not.toContain("[&_svg]:size-4")
+    expect(button.querySelector("svg")?.getAttribute("class")).toContain("size-[9px]")
+  })
+
   it("renders native app-owned primitives with accessible defaults", () => {
     render(
       <section>

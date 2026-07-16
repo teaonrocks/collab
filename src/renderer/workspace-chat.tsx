@@ -743,7 +743,7 @@ function WorkspaceRail(props: {
                 aria-current={conversation.id === activeConversationId ? "page" : undefined}
                 onClick={() => onSelectConversation?.(conversation.id)}
               >
-                <Avatar name={conversation.otherUser.displayName} aria-hidden="true" className="size-full rounded-full" />
+                {initials(conversation.otherUser.displayName)}
                 {indicator === undefined ? null : <span className="absolute right-0 top-0 size-2 rounded-full bg-accent" title={indicatorDescription} />}
               </TooltipTrigger>
               <TooltipContent side="right">{conversation.otherUser.displayName}</TooltipContent>
@@ -770,7 +770,7 @@ function WorkspaceRail(props: {
           disabled={!hasProfileActions}
           onClick={() => setProfileOpen((open) => !open)}
         >
-          <Avatar name={currentUserName} aria-hidden="true" className="size-full rounded-full" />
+          {initials(currentUserName)}
         </Button>
         <DropdownMenuContent
           sideOffset={10}
@@ -2288,30 +2288,26 @@ function MessageParentPreview(props: {
     <Button
       type="button"
       variant="ghost"
-      className="replyParentPreview mt-1.5 grid max-w-[min(520px,100%)] min-w-0 grid-cols-[3px_minmax(0,1fr)] gap-2 rounded-control border border-border bg-surface-muted px-2.5 py-1.5 text-left text-xs text-foreground-muted hover:border-border-strong hover:bg-surface-muted-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      className="replyParentPreview mt-1 inline-grid h-auto max-w-[min(520px,100%)] min-w-0 grid-cols-[2px_auto_minmax(0,1fr)] items-center justify-start gap-1.5 whitespace-normal rounded-none border-0 bg-transparent p-0 text-left text-xs font-normal leading-tight text-foreground-muted hover:bg-transparent hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
       aria-label={`Reply to ${parent.authorDisplayName}: ${parent.bodyPreview}`}
       onClick={(event) => {
         event.stopPropagation()
         onFocusParent(parent.id)
       }}
     >
-      <span className="rounded-full bg-border-strong" aria-hidden="true" />
-      <span className="min-w-0">
-        <strong className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-foreground">{parent.authorDisplayName}</strong>
-        <span className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{parent.bodyPreview}</span>
-      </span>
+      <span className="h-3.5 rounded-full bg-border-strong" aria-hidden="true" />
+      <strong className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-foreground">{parent.authorDisplayName}</strong>
+      <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{parent.bodyPreview}</span>
     </Button>
   )
 }
 
 function MessageParentUnavailable() {
   return (
-    <div className="replyParentPreview unavailable mt-1.5 grid max-w-[min(520px,100%)] min-w-0 grid-cols-[3px_minmax(0,1fr)] gap-2 rounded-control border border-border bg-surface-muted px-2.5 py-1.5 text-left text-xs text-foreground-subtle">
-      <span className="rounded-full bg-border-strong" aria-hidden="true" />
-      <span className="min-w-0">
-        <strong className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-foreground-muted">Original message unavailable</strong>
-        <span className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">The parent message was deleted or cannot be shown.</span>
-      </span>
+    <div className="replyParentPreview unavailable mt-1 inline-grid max-w-[min(520px,100%)] min-w-0 grid-cols-[2px_auto_minmax(0,1fr)] items-center gap-1.5 text-left text-xs leading-tight text-foreground-subtle">
+      <span className="h-3.5 rounded-full bg-border-strong" aria-hidden="true" />
+      <strong className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-foreground-muted">Original unavailable</strong>
+      <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">The parent message was deleted or cannot be shown.</span>
     </div>
   )
 }

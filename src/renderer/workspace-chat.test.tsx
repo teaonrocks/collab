@@ -98,6 +98,17 @@ const openMessageSearch = async () => {
 }
 
 describe("WorkspaceChat", () => {
+  it("keeps the compact lock badge in the private-channel glyph", async () => {
+    renderWorkspaceChat(makeChatModel())
+
+    const channels = within(await screen.findByLabelText("Workspace navigation")).getByRole("navigation", { name: "Channels" })
+    const privateChannel = within(channels).getByRole("button", { name: /origination/ })
+    const glyph = privateChannel.querySelector(".channelGlyph.private")
+
+    expect(glyph?.querySelector(".channelHashIcon")?.classList.contains("size-[18px]")).toBe(true)
+    expect(glyph?.querySelector(".channelLockBadge")?.classList.contains("size-[9px]")).toBe(true)
+  })
+
   it("offers channel notification modes and saves the selected preference", async () => {
     const updates: Array<{ readonly channelId: string; readonly mode: "all" | "mentions" | "off" }> = []
     render(
@@ -164,6 +175,9 @@ describe("WorkspaceChat", () => {
     expect(directMessages).toBeTruthy()
     const directMessageButton = within(directMessages).getByRole("button", { name: "Lee Chen" })
     expect(directMessageButton).toBeTruthy()
+    expect(directMessageButton.textContent).toBe("LC")
+    expect(directMessageButton.childElementCount).toBe(0)
+    expect(directMessageButton.className).toContain("rounded-full")
     expect(directMessageButton.hasAttribute("data-base-ui-tooltip-trigger")).toBe(true)
     expect(within(workspaceNavigation).queryByRole("navigation", { name: "Direct messages" })).toBeNull()
     expect(within(workspaceNavigation).queryByText("Maya Patel")).toBeNull()
@@ -758,6 +772,8 @@ describe("WorkspaceChat", () => {
 
     const profileRail = container.querySelector(".railProfile")
     expect(profileRail).toBeTruthy()
+    expect(profileRail?.textContent).toBe("MP")
+    expect(profileRail?.childElementCount).toBe(0)
     fireEvent.pointerDown(profileRail!, { pointerType: "mouse" })
     fireEvent.click(profileRail!)
 
@@ -1353,9 +1369,17 @@ describe("WorkspaceChat", () => {
       })
     ]))
 
-    expect(await screen.findByRole("button", { name: /Reply to Maya Patel/ })).toBeTruthy()
+    const parentPreview = await screen.findByRole("button", { name: /Reply to Maya Patel/ })
+    expect(parentPreview.className).toContain("h-auto")
+    expect(parentPreview.className).toContain("inline-grid")
+    expect(parentPreview.className).toContain("grid-cols-[2px_auto_minmax(0,1fr)]")
+    expect(parentPreview.className).toContain("bg-transparent")
+    expect(parentPreview.className).toContain("border-0")
+    expect(parentPreview.className).toContain("font-normal")
+    expect(parentPreview.children).toHaveLength(3)
+    expect(parentPreview.firstElementChild?.className).toContain("bg-border-strong")
     expect(screen.getByText("I will draft it.")).toBeTruthy()
-    expect(screen.getByText("Original message unavailable")).toBeTruthy()
+    expect(screen.getByText("Original unavailable")).toBeTruthy()
   })
 
   it("renders image thumbnails and file attachment links without trusting unsafe URLs", async () => {
