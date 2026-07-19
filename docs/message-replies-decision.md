@@ -26,9 +26,8 @@ conversation container or the agent/run domain.
 
 ## Data And API Shape
 
-`convex/schema.ts` stores `messages.parentMessageId?: Id<"messages">` and indexes it with
-`by_parent_message`. `chat.sendMessage` validates that the parent exists in the same workspace and
-channel before inserting the reply.
+`convex/schema.ts` stores `messages.parentMessageId?: Id<"messages">`. `chat.sendMessage` validates
+that the parent exists in the same conversation before inserting the reply.
 
 Message reads return a compact parent view with the parent id, author display name, body preview,
 and deleted state. This avoids a renderer-side query per reply. The renderer sends the relationship

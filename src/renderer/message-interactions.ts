@@ -13,7 +13,7 @@ export type EditingMessageState = {
   readonly saving: boolean
 } | null
 
-export type MessageRowState = {
+type MessageRowState = {
   readonly selected: boolean
   readonly selectionMode: boolean
   readonly actionsPinned: boolean
@@ -236,7 +236,7 @@ export const createMessageInteractionView = (
   }
 }
 
-export const isLiveMessage = (message: ChatMessage): boolean => message.deletedAt === null
+const isLiveMessage = (message: ChatMessage): boolean => message.deletedAt === null
 
 export const toggleMessageId = (
   messageIds: ReadonlyArray<ChatMessageId>,

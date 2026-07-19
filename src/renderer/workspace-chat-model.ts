@@ -71,19 +71,6 @@ export const mergeChannelMembers = (
   return changed ? Array.from(byId.values()) : members
 }
 
-export const filterDirectConversationCandidates = (
-  candidates: ReadonlyArray<ChatChannelMember>,
-  query: string
-): ReadonlyArray<ChatChannelMember> => {
-  const normalizedQuery = query.trim().toLocaleLowerCase()
-  return normalizedQuery.length === 0
-    ? candidates
-    : candidates.filter((candidate) =>
-      candidate.displayName.toLocaleLowerCase().includes(normalizedQuery) ||
-      candidate.username?.toLocaleLowerCase().includes(normalizedQuery) === true
-    )
-}
-
 export const searchChannelMessages = (
   messages: ReadonlyArray<ChatMessage>,
   query: string
@@ -179,6 +166,3 @@ export const groupConsecutiveMessages = (messages: ReadonlyArray<ChatMessage>): 
   }
   return groups
 }
-
-export const initials = (value: string): string =>
-  value.trim().split(/\s+/).map((part) => part.charAt(0)).join("").slice(0, 2).toUpperCase()

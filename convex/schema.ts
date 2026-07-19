@@ -21,9 +21,8 @@ export default defineSchema({
     authSubject: v.optional(v.string()),
     email: v.string(),
     displayName: v.string(),
-    // Optional during the rollout so existing accounts can be backfilled safely.
-    username: v.optional(v.string()),
-    directMessagePreference: v.optional(directMessagePreference),
+    username: v.string(),
+    directMessagePreference,
     createdAt: v.number(),
     updatedAt: v.number(),
     deletedAt: v.optional(v.number())
@@ -39,8 +38,7 @@ export default defineSchema({
     createdAt: v.number(),
     respondedAt: v.optional(v.number())
   }).index("by_pair_key", ["pairKey"])
-    .index("by_recipient_and_status", ["recipientUserId", "status"])
-    .index("by_requester_and_status", ["requesterUserId", "status"]),
+    .index("by_recipient_and_status", ["recipientUserId", "status"]),
 
   workspaces: defineTable({
     key: v.string(),
@@ -70,15 +68,12 @@ export default defineSchema({
     deletedAt: v.optional(v.number()),
     createdAt: v.number()
   }).index("by_workspace", ["workspaceId"])
-    .index("by_workspace_and_deleted_at", ["workspaceId", "deletedAt"])
     .index("by_workspace_kind_and_deleted_at", ["workspaceId", "kind", "deletedAt"])
     .index("by_workspace_key", ["workspaceId", "key"])
-    .index("by_workspace_and_direct_pair_key", ["workspaceId", "directPairKey"])
     .index("by_direct_pair_key", ["directPairKey"]),
 
   channelMemberships: defineTable({
     channelId: v.id("channels"),
-    workspaceId: v.optional(v.id("workspaces")),
     channelKind: v.optional(v.literal("direct")),
     userId: v.id("users"),
     role: channelRole,
@@ -86,8 +81,6 @@ export default defineSchema({
     lastReadAt: v.optional(v.number()),
     mentionTrackingStartedAt: v.optional(v.number())
   }).index("by_channel", ["channelId"]).index("by_user", ["userId"])
-    .index("by_user_and_workspace", ["userId", "workspaceId"])
-    .index("by_user_workspace_and_channel_kind", ["userId", "workspaceId", "channelKind"])
     .index("by_user_and_channel_kind", ["userId", "channelKind"])
     .index("by_channel_user", [
     "channelId",
@@ -105,10 +98,7 @@ export default defineSchema({
     reactionBatchReady: v.optional(v.boolean()),
     createdAt: v.number(),
     editedAt: v.optional(v.number())
-  }).index("by_channel_created_at", ["channelId", "createdAt"]).index("by_workspace_created_at", [
-    "workspaceId",
-    "createdAt"
-  ]).index("by_parent_message", ["parentMessageId"]).searchIndex("search_body", {
+  }).index("by_channel_created_at", ["channelId", "createdAt"]).searchIndex("search_body", {
     searchField: "body",
     filterFields: ["channelId"]
   }),
@@ -126,8 +116,7 @@ export default defineSchema({
     channelId: v.id("channels"),
     mode: conversationNotificationMode,
     updatedAt: v.number()
-  }).index("by_user_and_channel", ["userId", "channelId"])
-    .index("by_user", ["userId"]),
+  }).index("by_user_and_channel", ["userId", "channelId"]),
 
   messageNotificationEvents: defineTable({
     recipientUserId: v.id("users"),
@@ -150,15 +139,14 @@ export default defineSchema({
     contentType: v.string(),
     createdAt: v.number(),
     claimedMessageId: v.optional(v.id("messages"))
-  }).index("by_storage_id", ["storageId"]).index("by_uploader", ["uploaderUserId"]),
+  }).index("by_storage_id", ["storageId"]),
 
   attachmentUploadIntents: defineTable({
     uploaderUserId: v.id("users"),
     createdAt: v.number()
-  }).index("by_uploader", ["uploaderUserId"]),
+  }),
 
   messageReactions: defineTable({
-    workspaceId: v.optional(v.id("workspaces")),
     channelId: v.id("channels"),
     messageId: v.id("messages"),
     userId: v.id("users"),
@@ -169,9 +157,6 @@ export default defineSchema({
     "messageId",
     "userId",
     "emoji"
-  ]).index("by_channel_message", [
-    "channelId",
-    "messageId"
   ]).index("by_channel_and_message_created_at", [
     "channelId",
     "messageCreatedAt"
@@ -184,7 +169,7 @@ export default defineSchema({
     createdBy: v.string(),
     updatedAt: v.number(),
     updatedBy: v.string()
-  }).index("by_email", ["email"]).index("by_active", ["active"]),
+  }).index("by_email", ["email"]),
 
   dogfoodAllowlistAudit: defineTable({
     email: v.string(),
@@ -192,5 +177,5 @@ export default defineSchema({
     operator: v.string(),
     reason: v.optional(v.string()),
     createdAt: v.number()
-  }).index("by_email", ["email"]).index("by_created_at", ["createdAt"])
+  }).index("by_email", ["email"])
 })

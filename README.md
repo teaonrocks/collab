@@ -10,15 +10,15 @@ The dogfood app currently supports:
 - one shared workspace with public and private channels;
 - channel creation, membership-backed access, and member lists;
 - realtime messages, editing, deletion, search, and unread/mention indicators;
+- global direct conversations with username search and friendship/privacy controls;
 - shallow message replies with inline parent previews;
 - message reactions;
-- image and file attachments stored in Convex; and
+- image and file attachments stored in Convex;
+- per-conversation notification preferences and native desktop notifications;
 - system-browser sign-in with an `aether://auth/callback` deep link back to Electron; and
 - persistent multi-account sessions with independently switchable app windows.
 
-Direct-message navigation is present in the shared UI model, but Convex-backed direct-message
-conversations are not implemented. Agent workflows, notifications, installers, and automatic
-updates are also outside the current runtime.
+Agent workflows, installers, and automatic updates are outside the current runtime.
 
 ## Runtime Architecture
 
@@ -40,10 +40,13 @@ React renderer -> WorkOS AuthKit -> Convex
 - `src/shared/auth-redirect-policy.ts` validates AuthKit URLs and native callback URLs.
 - `src/renderer/main.tsx` selects the configured dogfood app or a configuration-required screen.
 - `src/renderer/convex-auth.tsx` connects AuthKit to Convex.
-- `src/renderer/dogfood-chat.tsx` owns AuthKit/Convex query orchestration and dogfood app states.
+- `src/renderer/dogfood-chat.tsx` owns AuthKit/Convex query orchestration; focused hooks own account
+  synchronization and desktop-notification feed state.
 - `src/renderer/dogfood-chat-adapter.ts` maps typed Convex results and mutations to the plain active-chat contract without snapshot-era schema objects.
 - `src/renderer/chat-data.ts` defines the renderer-owned active-chat view model and operations.
-- `src/renderer/workspace-chat.tsx` contains the shared `WorkspaceChat` surface, with pure presentation-model helpers in `workspace-chat-model.ts`.
+- `src/renderer/workspace-chat.tsx` contains the shared `WorkspaceChat` surface and its focused
+  conversation-search and preference controllers, with pure presentation-model helpers in
+  `workspace-chat-model.ts`.
 - `convex/schema.ts` and `convex/chat.ts` own the current data model and server behavior.
 
 Production reachability is rooted in `src/main/index.ts` and `src/renderer/main.tsx`, matching the
@@ -141,8 +144,8 @@ Tests are colocated with their source. The main coverage groups are:
 - `src/renderer/workspace-chat.test.tsx`: shared chat behavior using plain active-chat fixtures;
 - `src/renderer/dogfood-chat.test.tsx`: plain Convex-to-active-chat adaptation and authenticated app states;
 - `scripts/check-convex-bindings.test.ts`: offline stale Convex module-binding detection;
-- `src/renderer/dogfood-distribution.test.ts`: release command, frozen-install CI, revision handoff,
-  runtime documentation, and two-account smoke-contract checks;
+- `src/renderer/dogfood-distribution.test.ts`: structured checks for public friend-beta environment
+  values and the packaged app identity;
 - `src/main/auth-callback.test.ts` and the auth-policy tests: native callback handling and URL
   restrictions; and
 - `src/renderer/message-interactions.test.ts`: selection, editing, deletion, and context-menu state

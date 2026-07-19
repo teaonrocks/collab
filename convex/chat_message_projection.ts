@@ -1,7 +1,7 @@
 import type { Doc, Id } from "./_generated/dataModel"
 import type { MutationCtx, QueryCtx } from "./_generated/server"
+import { MESSAGE_REACTION_EMOJIS } from "../src/shared/reaction-policy"
 
-const MESSAGE_REACTION_EMOJIS = ["👍", "🎉", "👀"] as const
 const MESSAGE_PARENT_PREVIEW_MAX_LENGTH = 120
 const MAX_BATCHED_REACTION_ROWS = 5_000
 

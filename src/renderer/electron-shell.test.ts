@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   addWindowAccount,
   getWindowAccountContext,
-  isSafeExternalAuthUrl,
   openExternalUrl,
   openNativeAuthUrl,
   removeCurrentWindowAccount,
@@ -31,20 +30,6 @@ afterEach(() => {
 })
 
 describe("electron shell URL gate", () => {
-  it("allows AuthKit sign-in URLs on WorkOS, AuthKit, and local dev hosts", () => {
-    expect(isSafeExternalAuthUrl(signInUrl())).toBe(true)
-    expect(isSafeExternalAuthUrl(signInUrl("team.authkit.app"))).toBe(true)
-    expect(isSafeExternalAuthUrl(signInUrl("localhost", "http:"))).toBe(true)
-  })
-
-  it("rejects non-AuthKit external and malformed callback URLs", () => {
-    expect(isSafeExternalAuthUrl("https://example.com/user_management/authorize")).toBe(false)
-    expect(isSafeExternalAuthUrl(signInUrl("api.workos.com", "http:"))).toBe(false)
-    expect(isSafeExternalAuthUrl(signInUrl().replace("/user_management/authorize", "/docs"))).toBe(false)
-    expect(isSafeExternalAuthUrl(signInUrl().replace("aether%3A%2F%2Fauth%2Fcallback", "https%3A%2F%2Fevil.test"))).toBe(false)
-    expect(isSafeExternalAuthUrl("aether://auth/callback?code=abc")).toBe(false)
-  })
-
   it("delegates to the preload bridge when Electron exposes it", async () => {
     const openExternal = vi.fn().mockResolvedValue(undefined)
     const openNativeAuth = vi.fn().mockResolvedValue(undefined)

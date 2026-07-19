@@ -24,6 +24,7 @@ import {
 import { Fragment, type FormEvent, type RefObject, useEffect, useMemo, useRef, useState } from "react"
 import "./App.css"
 import { MESSAGE_ATTACHMENT_POLICY } from "../shared/attachment-policy"
+import { MESSAGE_REACTION_EMOJIS } from "../shared/reaction-policy"
 import { useAttachmentDraft } from "./attachment-draft"
 import type {
   ChatChannel,
@@ -40,28 +41,21 @@ import type {
   ChatMessageAttachment,
   ChatMessageGuard,
   ChatMessageId,
-  ChatOperationErrorMessage,
-  SearchChatMessages,
   SelectChatChannel
 } from "./chat-data"
 import { activeConversationId, activeConversationName } from "./chat-data"
-import {
-  type MessageRowState,
-  useMessageInteractions
-} from "./message-interactions"
+import { useMessageInteractions } from "./message-interactions"
 import {
   type ChannelMessageGroup,
   type ChannelMessageSearchResult,
   type ChannelMessageSearchState,
   createChannelViewModel,
-  filterDirectConversationCandidates,
   filterMentionMembers,
   formatClockPart,
   formatDatePart,
   formatTime,
   getMentionRequest,
   groupConsecutiveMessages,
-  initials,
   MESSAGE_SEARCH_MAX_QUERY_LENGTH,
   mergeChannelMembers,
   resizeTextarea,
@@ -69,6 +63,7 @@ import {
   toIso
 } from "./workspace-chat-model"
 import { cn } from "./lib/cn"
+import { initials } from "./lib/initials"
 import {
   Avatar,
   Button,
@@ -203,35 +198,11 @@ const directConversationButtonLabel = (
     ? recipientName
     : `${recipientName}, ${directConversationIndicatorDescription(indicator, recipientName)}`
 
-export function WorkspaceChat(props: {
-  readonly model: ChatDataModel
-  readonly createChannelMessage: ChatDataView["createChannelMessage"]
-  readonly uploadMessageAttachment?: ChatDataView["uploadMessageAttachment"]
-  readonly discardMessageAttachment?: ChatDataView["discardMessageAttachment"]
-  readonly deleteChannelMessage: ChatDataView["deleteChannelMessage"]
-  readonly createChannel?: ChatDataView["createChannel"]
-  readonly editChannel?: ChatDataView["editChannel"]
-  readonly deleteChannel?: ChatDataView["deleteChannel"]
-  readonly selectChannel?: SelectChatChannel
-  readonly selectDirectConversation?: ChatDataView["selectDirectConversation"]
-  readonly startDirectConversation?: ChatDataView["startDirectConversation"]
-  readonly searchDirectConversationCandidates?: ChatDataView["searchDirectConversationCandidates"]
-  readonly sendFriendRequest?: ChatDataView["sendFriendRequest"]
-  readonly updateDirectMessageProfile?: ChatDataView["updateDirectMessageProfile"]
-  readonly respondToFriendRequest?: ChatDataView["respondToFriendRequest"]
-  readonly updateNotificationPreference?: ChatDataView["updateNotificationPreference"]
-  readonly addChannelMember?: ChatDataView["addChannelMember"]
-  readonly removeChannelMember?: ChatDataView["removeChannelMember"]
-  readonly editChannelMessage?: ChatDataView["editChannelMessage"]
-  readonly toggleMessageReaction?: ChatDataView["toggleMessageReaction"]
-  readonly searchChannelMessages?: SearchChatMessages
-  readonly loadOlderChannelMessages?: ChatDataView["loadOlderChannelMessages"]
-  readonly canDeleteMessages?: boolean
-  readonly canDeleteMessage?: ChatMessageGuard
-  readonly canEditMessage?: ChatMessageGuard
-  readonly operationErrorMessage?: ChatOperationErrorMessage
+export type WorkspaceChatProps = ChatDataView & {
   readonly profileMenuActions?: ReadonlyArray<ProfileMenuAction>
-}) {
+}
+
+export function WorkspaceChat(props: WorkspaceChatProps) {
   const {
     model,
     createChannel,
@@ -267,19 +238,12 @@ export function WorkspaceChat(props: {
   const activeId = activeConversationId(activeConversation)
   const activeName = activeConversationName(activeConversation)
   const activeChannel = activeConversation.kind === "channel" ? activeConversation.channel : null
-  const activeIdRef = useRef(activeId)
-  activeIdRef.current = activeId
   const [messageDraft, setMessageDraft] = useState("")
   const [operationError, setOperationError] = useState<string | null>(null)
   const [channelOperationError, setChannelOperationError] = useState<string | null>(null)
   const [membersOpen, setMembersOpen] = useState(true)
-  const [searchOpen, setSearchOpen] = useState(false)
   const [directMessageSettingsOpen, setDirectMessageSettingsOpen] = useState(false)
-  const [notificationPreferenceSaving, setNotificationPreferenceSaving] = useState(false)
-  const [notificationPreferenceError, setNotificationPreferenceError] = useState<string | null>(null)
-  const [messageSearchQuery, setMessageSearchQuery] = useState("")
-  const [activeSearchMessageId, setActiveSearchMessageId] = useState<ChatMessageId | null>(null)
-  const searchInputRef = useRef<HTMLInputElement>(null)
+  const notificationPreference = useNotificationPreferenceController(activeId, updateNotificationPreference)
   const [replyParent, setReplyParent] = useState<ChatMessage | null>(null)
   const attachmentDraft = useAttachmentDraft({
     channelId: activeId,
@@ -289,21 +253,13 @@ export function WorkspaceChat(props: {
     reportError: setOperationError
   })
   const view = useMemo(() => createChannelViewModel(model), [model])
-  const localMessageSearchState = useMemo(
-    () => searchChannelMessages(model.channelMessages, messageSearchQuery),
-    [model.channelMessages, messageSearchQuery]
-  )
-  const [remoteMessageSearchState, setRemoteMessageSearchState] = useState<ChannelMessageSearchState>({ status: "idle" })
-  const messageSearchState = searchChannelHistory === undefined ? localMessageSearchState : remoteMessageSearchState
-  const activeSearchMessage = messageSearchState.status === "results"
-    ? messageSearchState.results.find((result) => result.message.id === activeSearchMessageId)?.message
-    : undefined
+  const messageSearch = useMessageSearchController(activeId, model.channelMessages, searchChannelHistory)
   const displayedMessages = useMemo(() => {
-    if (activeSearchMessage === undefined || model.channelMessages.some((message) => message.id === activeSearchMessage.id)) {
+    if (messageSearch.activeMessage === undefined || model.channelMessages.some((message) => message.id === messageSearch.activeMessage?.id)) {
       return model.channelMessages
     }
-    return [...model.channelMessages, activeSearchMessage].sort((left, right) => left.createdAt - right.createdAt)
-  }, [activeSearchMessage, model.channelMessages])
+    return [...model.channelMessages, messageSearch.activeMessage].sort((left, right) => left.createdAt - right.createdAt)
+  }, [messageSearch.activeMessage, model.channelMessages])
   const messageGroups = useMemo(() => groupConsecutiveMessages(displayedMessages), [displayedMessages])
   const channelMessagesLoading = model.channelMessagesLoading === true
   const channelMembersLoading = model.channelMembers === undefined
@@ -321,51 +277,10 @@ export function WorkspaceChat(props: {
   })
 
   useEffect(() => {
-    if (searchChannelHistory === undefined) return
-    const query = messageSearchQuery.trim()
-    if (query.length === 0) {
-      setRemoteMessageSearchState({ status: "idle" })
-      return
-    }
-    if (query.length > MESSAGE_SEARCH_MAX_QUERY_LENGTH) {
-      setRemoteMessageSearchState({
-        status: "error",
-        message: `Search is limited to ${MESSAGE_SEARCH_MAX_QUERY_LENGTH} characters.`
-      })
-      return
-    }
-
-    let cancelled = false
-    setRemoteMessageSearchState({ status: "loading" })
-    const timeout = window.setTimeout(() => {
-      void searchChannelHistory({ channelId: activeId, query })
-        .then((messages) => {
-          if (cancelled) return
-          setRemoteMessageSearchState(messages.length === 0
-            ? { status: "empty" }
-            : { status: "results", results: messages.map((message) => ({ message, bodyPreview: message.body })) })
-        })
-        .catch(() => {
-          if (!cancelled) setRemoteMessageSearchState({ status: "error", message: "Could not search messages." })
-        })
-    }, 250)
-
-    return () => {
-      cancelled = true
-      window.clearTimeout(timeout)
-    }
-  }, [activeId, messageSearchQuery, searchChannelHistory])
-
-  useEffect(() => {
     setMessageDraft("")
     setOperationError(null)
     setChannelOperationError(null)
-    setSearchOpen(false)
-    setMessageSearchQuery("")
-    setActiveSearchMessageId(null)
     setReplyParent(null)
-    setNotificationPreferenceSaving(false)
-    setNotificationPreferenceError(null)
   }, [activeId])
 
   useEffect(() => {
@@ -378,47 +293,6 @@ export function WorkspaceChat(props: {
     if (channelMessagesLoading) return
     setDirectMessageMembers((members) => mergeChannelMembers(members, view.members))
   }, [channelMessagesLoading, view.members])
-
-  useEffect(() => {
-    const openSearchOnHotkey = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() !== "f") return
-      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return
-      event.preventDefault()
-      if (!searchOpen) {
-        setSearchOpen(true)
-        return
-      }
-      if (document.activeElement === searchInputRef.current) {
-        setSearchOpen(false)
-        setActiveSearchMessageId(null)
-        return
-      }
-      searchInputRef.current?.focus()
-    }
-    window.addEventListener("keydown", openSearchOnHotkey)
-    return () => window.removeEventListener("keydown", openSearchOnHotkey)
-  }, [searchOpen])
-
-  useEffect(() => {
-    if (!searchOpen) return
-    const closeSearchOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return
-      event.preventDefault()
-      event.stopPropagation()
-      if (document.activeElement === searchInputRef.current) {
-        setSearchOpen(false)
-        setActiveSearchMessageId(null)
-        return
-      }
-      if (activeSearchMessageId !== null) {
-        searchInputRef.current?.focus()
-        return
-      }
-      setSearchOpen(false)
-    }
-    window.addEventListener("keydown", closeSearchOnEscape, true)
-    return () => window.removeEventListener("keydown", closeSearchOnEscape, true)
-  }, [searchOpen, activeSearchMessageId])
 
   const copyMessage = (message: ChatMessage) => {
     if (typeof navigator !== "undefined" && navigator.clipboard !== undefined) {
@@ -466,7 +340,7 @@ export function WorkspaceChat(props: {
 
   return (
     <TooltipProvider delay={500}>
-      <main className={classNames(
+      <main className={cn(
         appShellClassName,
         activeConversation.kind === "direct"
           ? appShellDirectConversationClassName
@@ -481,7 +355,6 @@ export function WorkspaceChat(props: {
         activeConversationId={activeConversation.kind === "direct" ? activeId : null}
         onSelectWorkspace={() => selectChannel?.(model.channel.id)}
         onSelectConversation={selectDirectConversation}
-        candidates={model.directConversationCandidates}
         conversationsLoading={model.directConversationsLoading === true}
         onStartConversation={startDirectConversation}
         onSearchConversationCandidates={searchDirectConversationCandidates}
@@ -524,32 +397,12 @@ export function WorkspaceChat(props: {
         channelName={activeName}
         direct={activeConversation.kind === "direct"}
         notificationPreference={model.notificationPreference}
-        notificationPreferenceSaving={notificationPreferenceSaving}
-        notificationPreferenceError={notificationPreferenceError}
-        onNotificationPreferenceChange={updateNotificationPreference === undefined
-          ? undefined
-          : (mode) => {
-              const channelId = activeId
-              setNotificationPreferenceSaving(true)
-              setNotificationPreferenceError(null)
-              void updateNotificationPreference({ channelId, mode })
-                .catch(() => {
-                  if (activeIdRef.current === channelId) {
-                    setNotificationPreferenceError("Could not save notification preference.")
-                  }
-                })
-                .finally(() => {
-                  if (activeIdRef.current === channelId) setNotificationPreferenceSaving(false)
-                })
-            }}
-        searchOpen={searchOpen}
+        notificationPreferenceSaving={notificationPreference.saving}
+        notificationPreferenceError={notificationPreference.error}
+        onNotificationPreferenceChange={notificationPreference.save}
+        searchOpen={messageSearch.open}
         membersOpen={membersOpen}
-        onToggleSearch={() => {
-          setSearchOpen((open) => {
-            if (open) setActiveSearchMessageId(null)
-            return !open
-          })
-        }}
+        onToggleSearch={messageSearch.toggle}
         onToggleMembers={() => { if (activeChannel !== null) setMembersOpen((open) => !open) }}
       />
 
@@ -558,51 +411,20 @@ export function WorkspaceChat(props: {
         messageGroups={messageGroups}
         loading={channelMessagesLoading}
         messageDraft={messageDraft}
-        searchOpen={searchOpen}
-        searchInputRef={searchInputRef}
-        searchQuery={messageSearchQuery}
-        searchState={messageSearchState}
-        activeSearchMessageId={activeSearchMessageId}
+        search={messageSearch}
         operationError={operationError}
         hasMoreMessages={model.channelMessagesHasMore === true}
         loadingMoreMessages={model.channelMessagesLoadingMore === true}
         onLoadOlderMessages={loadOlderChannelMessages}
         onMessageDraftChange={setMessageDraft}
-        onSearchQueryChange={(query) => {
-          setMessageSearchQuery(query)
-          setActiveSearchMessageId(null)
-        }}
-        onSelectSearchResult={(messageId) =>
-          setActiveSearchMessageId((active) => active === messageId ? null : messageId)
-        }
-        onNextSearchResult={() => {
-          if (messageSearchState.status !== "results" || messageSearchState.results.length === 0) return
-          const currentIndex = messageSearchState.results.findIndex((result) => result.message.id === activeSearchMessageId)
-          const nextResult = messageSearchState.results[(currentIndex + 1) % messageSearchState.results.length]
-          if (nextResult !== undefined) setActiveSearchMessageId(nextResult.message.id)
-        }}
         onSendMessage={sendChannelMessage}
-        onToggleMessage={messageInteractions.toggleMessageSelection}
-        onCopyMessage={copyMessage}
-        onStartEditMessage={messageInteractions.startEditingMessage}
-        onEditDraftChange={messageInteractions.setEditingDraft}
-        onCancelEditMessage={messageInteractions.cancelEditingMessage}
-        onSaveEditMessage={messageInteractions.saveEditingMessage}
-        onDeleteMessage={messageInteractions.requestDeleteMessage}
+        messageInteractions={messageInteractions}
         replyParent={replyParent}
-        attachments={attachmentDraft.attachments}
-        attachmentUploadAvailable={attachmentDraft.uploadAvailable}
-        uploadingAttachment={attachmentDraft.uploading}
+        attachmentDraft={attachmentDraft}
         onCancelReply={() => setReplyParent(null)}
-        onChooseAttachments={attachmentDraft.choose}
-        onRemoveAttachment={attachmentDraft.remove}
         onToggleReaction={toggleMessageReaction === undefined ? undefined : toggleReaction}
         mentionMembers={visibleMembers}
         mentionMembersLoading={channelMembersLoading}
-        canDeleteMessage={messageCanDelete}
-        canEditMessage={messageCanEdit}
-        getMessageRowState={messageInteractions.getRowState}
-        onOpenMessageMenu={messageInteractions.openMessageMenu}
       />
 
       {activeChannel === null ? null : <MembersPanel
@@ -650,6 +472,157 @@ export function WorkspaceChat(props: {
   )
 }
 
+function useNotificationPreferenceController(
+  activeId: ChatChannelId,
+  updatePreference: ChatDataView["updateNotificationPreference"]
+) {
+  const activeIdRef = useRef(activeId)
+  const [status, setStatus] = useState({ saving: false, error: null as string | null })
+  activeIdRef.current = activeId
+
+  useEffect(() => setStatus({ saving: false, error: null }), [activeId])
+
+  return {
+    ...status,
+    save: updatePreference === undefined
+      ? undefined
+      : (mode: ChatConversationNotificationMode) => {
+          const channelId = activeId
+          setStatus({ saving: true, error: null })
+          void updatePreference({ channelId, mode })
+            .then(() => {
+              if (activeIdRef.current === channelId) setStatus({ saving: false, error: null })
+            })
+            .catch(() => {
+              if (activeIdRef.current === channelId) {
+                setStatus({ saving: false, error: "Could not save notification preference." })
+              }
+            })
+        }
+  } as const
+}
+
+function useMessageSearchController(
+  activeId: ChatChannelId,
+  messages: ReadonlyArray<ChatMessage>,
+  searchHistory: ChatDataView["searchChannelMessages"]
+) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState("")
+  const [activeMessageId, setActiveMessageId] = useState<ChatMessageId | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const localState = useMemo(() => searchChannelMessages(messages, query), [messages, query])
+  const [remoteState, setRemoteState] = useState<ChannelMessageSearchState>({ status: "idle" })
+  const state = searchHistory === undefined ? localState : remoteState
+  const activeMessage = state.status === "results"
+    ? state.results.find((result) => result.message.id === activeMessageId)?.message
+    : undefined
+
+  useEffect(() => {
+    setOpen(false)
+    setQuery("")
+    setActiveMessageId(null)
+  }, [activeId])
+
+  useEffect(() => {
+    if (searchHistory === undefined) return
+    const normalizedQuery = query.trim()
+    if (normalizedQuery.length === 0) {
+      setRemoteState({ status: "idle" })
+      return
+    }
+    if (normalizedQuery.length > MESSAGE_SEARCH_MAX_QUERY_LENGTH) {
+      setRemoteState({
+        status: "error",
+        message: `Search is limited to ${MESSAGE_SEARCH_MAX_QUERY_LENGTH} characters.`
+      })
+      return
+    }
+
+    let cancelled = false
+    setRemoteState({ status: "loading" })
+    const timeout = window.setTimeout(() => {
+      void searchHistory({ channelId: activeId, query: normalizedQuery })
+        .then((results) => {
+          if (cancelled) return
+          setRemoteState(results.length === 0
+            ? { status: "empty" }
+            : { status: "results", results: results.map((message) => ({ message, bodyPreview: message.body })) })
+        })
+        .catch(() => {
+          if (!cancelled) setRemoteState({ status: "error", message: "Could not search messages." })
+        })
+    }, 250)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timeout)
+    }
+  }, [activeId, query, searchHistory])
+
+  useEffect(() => {
+    const openSearchOnHotkey = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== "f") return
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return
+      event.preventDefault()
+      if (!open) {
+        setOpen(true)
+      } else if (document.activeElement === inputRef.current) {
+        setOpen(false)
+        setActiveMessageId(null)
+      } else {
+        inputRef.current?.focus()
+      }
+    }
+    window.addEventListener("keydown", openSearchOnHotkey)
+    return () => window.removeEventListener("keydown", openSearchOnHotkey)
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const closeSearchOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return
+      event.preventDefault()
+      event.stopPropagation()
+      if (document.activeElement === inputRef.current) {
+        setOpen(false)
+        setActiveMessageId(null)
+      } else if (activeMessageId !== null) {
+        inputRef.current?.focus()
+      } else {
+        setOpen(false)
+      }
+    }
+    window.addEventListener("keydown", closeSearchOnEscape, true)
+    return () => window.removeEventListener("keydown", closeSearchOnEscape, true)
+  }, [activeMessageId, open])
+
+  return {
+    open,
+    inputRef,
+    query,
+    state,
+    activeMessageId,
+    activeMessage,
+    toggle: () => setOpen((current) => {
+      if (current) setActiveMessageId(null)
+      return !current
+    }),
+    setQuery: (nextQuery: string) => {
+      setQuery(nextQuery)
+      setActiveMessageId(null)
+    },
+    selectResult: (messageId: ChatMessageId) =>
+      setActiveMessageId((current) => current === messageId ? null : messageId),
+    nextResult: () => {
+      if (state.status !== "results" || state.results.length === 0) return
+      const currentIndex = state.results.findIndex((result) => result.message.id === activeMessageId)
+      const nextResult = state.results[(currentIndex + 1) % state.results.length]
+      if (nextResult !== undefined) setActiveMessageId(nextResult.message.id)
+    }
+  } as const
+}
+
 function WorkspaceRail(props: {
   readonly workspaceName: string
   readonly workspaceActive: boolean
@@ -659,7 +632,6 @@ function WorkspaceRail(props: {
   readonly activeConversationId: ChatChannelId | null
   readonly onSelectWorkspace: () => void
   readonly onSelectConversation?: ChatDataView["selectDirectConversation"]
-  readonly candidates?: ReadonlyArray<ChatChannelMember>
   readonly conversationsLoading: boolean
   readonly onStartConversation?: ChatDataView["startDirectConversation"]
   readonly onSearchConversationCandidates?: ChatDataView["searchDirectConversationCandidates"]
@@ -675,7 +647,6 @@ function WorkspaceRail(props: {
     activeConversationId,
     onSelectWorkspace,
     onSelectConversation,
-    candidates,
     conversationsLoading,
     onStartConversation,
     onSearchConversationCandidates,
@@ -693,7 +664,7 @@ function WorkspaceRail(props: {
         <Tooltip>
           <TooltipTrigger
             render={<Button variant="ghost" size="icon" />}
-            className={classNames(
+            className={cn(
               railItemClassName,
               workspaceActive && "active bg-surface-canvas outline-2 outline-border before:absolute before:-left-2 before:h-6 before:w-[3px] before:rounded-r-[3px] before:bg-foreground"
             )}
@@ -708,14 +679,14 @@ function WorkspaceRail(props: {
       </nav>
       <div className="railDivider h-px w-8 shrink-0 bg-border-strong" role="separator" aria-label="Direct messages" />
       <nav className="railGroup flex w-full flex-col items-center gap-2" aria-label="Direct messages">
-        {onStartConversation === undefined
+        {onStartConversation === undefined || onSearchConversationCandidates === undefined
           ? null
           : (
             <Tooltip>
               <TooltipTrigger
                 ref={addButtonRef}
                 render={<Button variant="ghost" size="icon" />}
-                className={classNames(railItemClassName, "rounded-full text-foreground-muted")}
+                className={cn(railItemClassName, "rounded-full text-foreground-muted")}
                 aria-label="Start direct message"
                 onClick={() => setStartOpen(true)}
               >
@@ -738,7 +709,7 @@ function WorkspaceRail(props: {
             <Tooltip key={conversation.id}>
               <TooltipTrigger
                 render={<Button variant="ghost" size="icon" />}
-                className={classNames(railItemClassName, "dmRailItem rounded-full", conversation.id === activeConversationId && "active bg-surface-canvas outline-2 outline-border")}
+                className={cn(railItemClassName, "dmRailItem rounded-full", conversation.id === activeConversationId && "active bg-surface-canvas outline-2 outline-border")}
                 aria-label={directConversationButtonLabel(conversation.otherUser.displayName, indicator)}
                 aria-current={conversation.id === activeConversationId ? "page" : undefined}
                 onClick={() => onSelectConversation?.(conversation.id)}
@@ -790,7 +761,7 @@ function WorkspaceRail(props: {
                 <Fragment key={action.id ?? action.label}>
                   {action.separatorBefore ? <DropdownMenuSeparator className="m-0" /> : null}
                   <DropdownMenuItem
-                    className={classNames(
+                    className={cn(
                       "relative grid min-h-9 w-full grid-cols-[18px_minmax(0,1fr)] items-center gap-1.5 rounded-none bg-surface-canvas px-2.5 py-2 text-left text-[13px] text-foreground",
                       action.tone === "destructive" && "text-destructive-text"
                     )}
@@ -812,9 +783,8 @@ function WorkspaceRail(props: {
           </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
-      {startOpen && onStartConversation !== undefined
+      {startOpen && onStartConversation !== undefined && onSearchConversationCandidates !== undefined
         ? <StartDirectMessageDialog
-            candidates={candidates}
             onStart={onStartConversation}
             onSearch={onSearchConversationCandidates}
             onSendFriendRequest={onSendFriendRequest}
@@ -905,77 +875,13 @@ function DirectMessageSettingsDialog(props: {
 }
 
 function StartDirectMessageDialog(props: {
-  readonly candidates?: ReadonlyArray<ChatChannelMember>
   readonly onStart: NonNullable<ChatDataView["startDirectConversation"]>
-  readonly onSearch?: ChatDataView["searchDirectConversationCandidates"]
+  readonly onSearch: NonNullable<ChatDataView["searchDirectConversationCandidates"]>
   readonly onSendFriendRequest?: ChatDataView["sendFriendRequest"]
   readonly onClose: () => void
 }) {
-  const { candidates, onStart, onSearch, onSendFriendRequest, onClose } = props
-  const [query, setQuery] = useState("")
-  const [searchResults, setSearchResults] = useState<ReadonlyArray<ChatChannelMember> | undefined>(candidates)
-  const [savingUserId, setSavingUserId] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const savingRef = useRef(false)
-  const visibleCandidates = onSearch === undefined
-    ? filterDirectConversationCandidates(candidates ?? [], query)
-    : searchResults ?? []
-  const candidateResults = onSearch === undefined ? candidates : searchResults
-
-  useEffect(() => {
-    if (onSearch === undefined) {
-      setSearchResults(candidates)
-      return
-    }
-    const normalizedQuery = query.trim()
-    if (normalizedQuery.length === 0) {
-      setSearchResults([])
-      return
-    }
-    let cancelled = false
-    void onSearch(normalizedQuery)
-      .then((results) => { if (!cancelled) setSearchResults(results) })
-      .catch(() => { if (!cancelled) setSearchResults([]) })
-    return () => { cancelled = true }
-  }, [candidates, onSearch, query])
-
-  const start = (candidate: ChatChannelMember) => {
-    if (savingRef.current) return
-    savingRef.current = true
-    setSavingUserId(candidate.id)
-    setError(null)
-    void onStart(candidate.id)
-      .then(onClose)
-      .catch(() => {
-        savingRef.current = false
-        setSavingUserId(null)
-        setError("Could not open this direct message. Check your connection and try again.")
-      })
-  }
-
-  const sendFriendRequest = (candidate: ChatChannelMember) => {
-    if (savingRef.current || onSendFriendRequest === undefined) return
-    savingRef.current = true
-    setSavingUserId(candidate.id)
-    setError(null)
-    void onSendFriendRequest(candidate.id)
-      .then(() => {
-        savingRef.current = false
-        setSavingUserId(null)
-        const normalizedQuery = query.trim()
-        if (onSearch !== undefined && normalizedQuery.length > 0) {
-          setSearchResults(undefined)
-          void onSearch(normalizedQuery)
-            .then(setSearchResults)
-            .catch(() => setSearchResults([]))
-        }
-      })
-      .catch(() => {
-        savingRef.current = false
-        setSavingUserId(null)
-        setError("Could not send the friend request. Check your connection and try again.")
-      })
-  }
+  const { onStart, onSearch, onSendFriendRequest, onClose } = props
+  const search = useConversationSearchController({ onStart, onSearch, onSendFriendRequest, onClose })
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
@@ -987,45 +893,110 @@ function StartDirectMessageDialog(props: {
           <Input
             id="direct-message-member-search"
             type="search"
-            value={query}
+            value={search.query}
             placeholder="Search usernames"
             autoFocus
-            disabled={savingUserId !== null}
-            onChange={(event) => {
-              const nextQuery = event.target.value
-              setQuery(nextQuery)
-              if (onSearch !== undefined) setSearchResults(nextQuery.trim().length === 0 ? [] : undefined)
-            }}
+            disabled={search.pendingUserId !== null}
+            onChange={(event) => search.setQuery(event.target.value)}
           />
           <div className="max-h-60 overflow-y-auto rounded-control border border-border bg-surface-canvas p-1" aria-label="Aether accounts">
-            {onSearch !== undefined && query.trim().length === 0
+            {search.query.trim().length === 0
               ? <p className="m-0 px-2 py-3 text-sm text-foreground-subtle">Search for a username to begin.</p>
-              : candidateResults === undefined
+              : search.results === undefined
                 ? <p className="m-0 px-2 py-3 text-sm text-foreground-subtle" role="status">Loading accounts...</p>
-              : candidateResults.length === 0
+              : search.results.length === 0
                 ? <p className="m-0 px-2 py-3 text-sm text-foreground-subtle">No accounts are available.</p>
-                : visibleCandidates.length === 0
-                  ? <p className="m-0 px-2 py-3 text-sm text-foreground-subtle">No matching accounts.</p>
-                  : visibleCandidates.map((candidate) => (
+                : search.results.map((candidate) => (
                       <div key={candidate.id} className="flex min-h-10 items-center gap-2 rounded-control px-2 text-sm text-foreground hover:bg-surface-muted">
                         <Avatar name={candidate.displayName} aria-hidden="true" className="size-8" />
                         <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap"><strong className="block">{candidate.displayName}</strong><span className="text-xs text-foreground-subtle">@{candidate.username}</span></span>
-                        {savingUserId === candidate.id ? <span className="text-xs text-foreground-subtle">Working...</span> : candidate.canStartDirectMessage !== false
-                          ? <Button size="sm" aria-label={candidate.displayName} onClick={() => start(candidate)}>Message</Button>
+                        {search.pendingUserId === candidate.id ? <span className="text-xs text-foreground-subtle">Working...</span> : candidate.canStartDirectMessage !== false
+                          ? <Button size="sm" aria-label={candidate.displayName} onClick={() => search.start(candidate)}>Message</Button>
                           : candidate.friendRequestDirection === "outgoing"
                             ? <span className="text-xs text-foreground-subtle">Request sent</span>
                             : candidate.friendship === "accepted"
                               ? <span className="text-xs text-foreground-subtle">Friends · DM restricted</span>
                               : onSendFriendRequest === undefined ? <span className="text-xs text-foreground-subtle">DM restricted</span>
-                                : <Button size="sm" variant="secondary" aria-label={candidate.friendRequestDirection === "incoming" ? `Accept friend request from ${candidate.displayName}` : undefined} onClick={() => sendFriendRequest(candidate)}>{candidate.friendRequestDirection === "incoming" ? "Accept request" : "Add friend"}</Button>}
+                                : <Button size="sm" variant="secondary" aria-label={candidate.friendRequestDirection === "incoming" ? `Accept friend request from ${candidate.displayName}` : undefined} onClick={() => search.sendFriendRequest(candidate)}>{candidate.friendRequestDirection === "incoming" ? "Accept request" : "Add friend"}</Button>}
                       </div>
                     ))}
           </div>
-          {error === null ? null : <p className="m-0 text-sm text-destructive-text" role="alert">{error}</p>}
+          {search.error === null ? null : <p className="m-0 text-sm text-destructive-text" role="alert">{search.error}</p>}
         </div>
       </DialogContent>
     </Dialog>
   )
+}
+
+function useConversationSearchController(props: {
+  readonly onStart: NonNullable<ChatDataView["startDirectConversation"]>
+  readonly onSearch: NonNullable<ChatDataView["searchDirectConversationCandidates"]>
+  readonly onSendFriendRequest?: ChatDataView["sendFriendRequest"]
+  readonly onClose: () => void
+}) {
+  const { onStart, onSearch, onSendFriendRequest, onClose } = props
+  const [state, setState] = useState({
+    query: "",
+    results: [] as ReadonlyArray<ChatChannelMember> | undefined,
+    pendingUserId: null as string | null,
+    error: null as string | null
+  })
+  const pendingRef = useRef(false)
+
+  useEffect(() => {
+    const query = state.query.trim()
+    if (query.length === 0) {
+      setState((current) => ({ ...current, results: [] }))
+      return
+    }
+    let cancelled = false
+    void onSearch(query)
+      .then((results) => {
+        if (!cancelled) setState((current) => ({ ...current, results }))
+      })
+      .catch(() => {
+        if (!cancelled) setState((current) => ({ ...current, results: [] }))
+      })
+    return () => { cancelled = true }
+  }, [onSearch, state.query])
+
+  const finish = (error: string | null) => {
+    pendingRef.current = false
+    setState((current) => ({ ...current, pendingUserId: null, error }))
+  }
+
+  return {
+    ...state,
+    setQuery: (query: string) => setState((current) => ({
+      ...current,
+      query,
+      results: query.trim().length === 0 ? [] : undefined
+    })),
+    start: (candidate: ChatChannelMember) => {
+      if (pendingRef.current) return
+      pendingRef.current = true
+      setState((current) => ({ ...current, pendingUserId: candidate.id, error: null }))
+      void onStart(candidate.id)
+        .then(onClose)
+        .catch(() => finish("Could not open this direct message. Check your connection and try again."))
+    },
+    sendFriendRequest: (candidate: ChatChannelMember) => {
+      if (pendingRef.current || onSendFriendRequest === undefined) return
+      pendingRef.current = true
+      setState((current) => ({ ...current, pendingUserId: candidate.id, error: null }))
+      void onSendFriendRequest(candidate.id)
+        .then(() => {
+          pendingRef.current = false
+          const query = state.query.trim()
+          setState((current) => ({ ...current, pendingUserId: null, results: undefined }))
+          if (query.length === 0) return
+          void onSearch(query)
+            .then((results) => setState((current) => current.query.trim() === query ? { ...current, results } : current))
+            .catch(() => setState((current) => current.query.trim() === query ? { ...current, results: [] } : current))
+        })
+        .catch(() => finish("Could not send the friend request. Check your connection and try again."))
+    }
+  } as const
 }
 
 function ChannelSidebar(props: {
@@ -1155,7 +1126,7 @@ function ChannelSidebar(props: {
                 key={channel.id}
                 type="button"
                 variant="ghost"
-                className={classNames(channelNavItemClassName, active && "active bg-surface-rail")}
+                className={cn(channelNavItemClassName, active && "active bg-surface-rail")}
                 aria-current={active ? "page" : undefined}
                 onClick={() => {
                   if (!active) onSelectChannel?.(channel.id)
@@ -1174,7 +1145,7 @@ function ChannelSidebar(props: {
                 {!active && channelIndicator !== null
                   ? (
                     <span
-                      className={classNames(
+                      className={cn(
                         "channelIndicator size-2 shrink-0 rounded-full",
                         channelIndicator === "mentioned" ? "mentioned bg-signal-mentioned" : "unread bg-signal-unread"
                       )}
@@ -1188,7 +1159,7 @@ function ChannelSidebar(props: {
           })}
           {channels.length === 0
             ? (
-              <Button type="button" variant="ghost" className={classNames(channelNavItemClassName, "active bg-surface-rail")} aria-current="page">
+              <Button type="button" variant="ghost" className={cn(channelNavItemClassName, "active bg-surface-rail")} aria-current="page">
                 <span className="channelNavMain min-w-0 flex flex-col gap-[3px]">
                   <span className="channelNavName flex min-w-0 items-center gap-1 overflow-hidden text-ellipsis whitespace-nowrap font-bold">
                     <ChannelGlyph visibility={channelVisibility} />
@@ -1465,7 +1436,7 @@ function CreateChannelDialog(props: {
               {(["public", "private"] as const).map((option) => (
                 <label
                   key={option}
-                  className={classNames(
+                  className={cn(
                     "cursor-pointer rounded-[5px] px-2.5 py-2 text-left text-xs text-foreground-subtle focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-1",
                     visibility === option && "bg-surface-canvas font-bold text-foreground shadow-sm"
                   )}
@@ -1529,7 +1500,7 @@ function CreateChannelDialog(props: {
             : null}
           <p
             id="create-channel-error"
-            className={classNames(
+            className={cn(
               "m-0 min-h-[17px] text-xs leading-[1.35] text-destructive-text",
               error === null && "invisible"
             )}
@@ -1554,7 +1525,7 @@ function CreateChannelDialog(props: {
 function ChannelGlyph(props: { readonly visibility?: ChatChannel["visibility"] }) {
   return (
     <span
-      className={classNames(
+      className={cn(
         "channelGlyph relative inline-flex size-[18px] shrink-0 items-center justify-center text-foreground-subtle",
         props.visibility === "private" && "private w-[21px]"
       )}
@@ -1597,7 +1568,7 @@ function ChannelHeader(props: {
   return (
     <header className="chatHeader flex min-h-0 min-w-0 items-center justify-between gap-3 border-b border-border bg-surface-canvas px-4 py-2 [grid-area:header]">
       <div className="channelTitle flex min-w-0 items-center gap-2">
-        {direct ? null : <Hash className={classNames("channelHashIcon shrink-0 text-foreground-subtle", iconClassName)} aria-hidden="true" />}
+        {direct ? null : <Hash className={cn("channelHashIcon shrink-0 text-foreground-subtle", iconClassName)} aria-hidden="true" />}
         <h2 className="m-0 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-lg leading-tight tracking-normal text-foreground">{channelName}</h2>
       </div>
       <div className="chatHeaderActions flex items-center justify-end gap-2 text-xs text-foreground-subtle" aria-label="Conversation actions">
@@ -1629,7 +1600,7 @@ function ChannelHeader(props: {
           type="button"
           variant="secondary"
           size="icon"
-          className={classNames(
+          className={cn(
             "searchToggle grid min-h-[30px] w-8 cursor-pointer place-items-center rounded-control border border-border-strong bg-surface-canvas p-0 font-[inherit] text-ring hover:border-ring hover:bg-surface-muted hover:text-foreground-subtle focus-visible:border-ring focus-visible:bg-surface-muted focus-visible:text-foreground-subtle",
             searchOpen && "active text-foreground hover:text-foreground focus-visible:text-foreground"
           )}
@@ -1644,7 +1615,7 @@ function ChannelHeader(props: {
           type="button"
           variant="secondary"
           size="icon"
-          className={classNames(
+          className={cn(
             "membersToggle grid min-h-[30px] w-8 cursor-pointer place-items-center rounded-control border border-border-strong bg-surface-canvas p-0 font-[inherit] text-ring hover:border-ring hover:bg-surface-muted hover:text-foreground-subtle focus-visible:border-ring focus-visible:bg-surface-muted focus-visible:text-foreground-subtle",
             membersOpen && "active text-foreground hover:text-foreground focus-visible:text-foreground"
           )}
@@ -1673,104 +1644,62 @@ function ChatPane(props: {
   readonly messageGroups: ReadonlyArray<ChannelMessageGroup>
   readonly loading: boolean
   readonly messageDraft: string
-  readonly searchOpen: boolean
-  readonly searchInputRef: RefObject<HTMLInputElement | null>
-  readonly searchQuery: string
-  readonly searchState: ChannelMessageSearchState
-  readonly activeSearchMessageId: ChatMessageId | null
+  readonly search: ReturnType<typeof useMessageSearchController>
   readonly operationError: string | null
   readonly hasMoreMessages: boolean
   readonly loadingMoreMessages: boolean
   readonly onLoadOlderMessages?: () => void
-  readonly attachments: ReadonlyArray<ChatMessageAttachment>
-  readonly attachmentUploadAvailable: boolean
-  readonly uploadingAttachment: boolean
+  readonly attachmentDraft: ReturnType<typeof useAttachmentDraft>
+  readonly messageInteractions: ReturnType<typeof useMessageInteractions>
   readonly onMessageDraftChange: (draft: string) => void
-  readonly onSearchQueryChange: (query: string) => void
-  readonly onSelectSearchResult: (messageId: ChatMessageId) => void
-  readonly onNextSearchResult: () => void
   readonly onSendMessage: () => void
-  readonly onToggleMessage: (messageId: ChatMessageId) => void
-  readonly onCopyMessage: (message: ChatMessage) => void
-  readonly onStartEditMessage: (message: ChatMessage) => void
-  readonly onEditDraftChange: (draft: string) => void
-  readonly onCancelEditMessage: () => void
-  readonly onSaveEditMessage: () => void
-  readonly onDeleteMessage: (messageId: ChatMessageId) => void
   readonly replyParent: ChatMessage | null
-  readonly onChooseAttachments: (files: ReadonlyArray<File>) => void
-  readonly onRemoveAttachment: (attachmentId: string) => void
   readonly onCancelReply: () => void
   readonly onToggleReaction?: (message: ChatMessage, emoji: string) => Promise<void>
   readonly mentionMembers: ReadonlyArray<ChatChannelMember>
   readonly mentionMembersLoading: boolean
-  readonly canDeleteMessage: ChatMessageGuard
-  readonly canEditMessage: ChatMessageGuard
-  readonly getMessageRowState: (message: ChatMessage) => MessageRowState
-  readonly onOpenMessageMenu: (messageId: ChatMessageId, x: number, y: number) => void
 }) {
   const {
     channelName,
     messageGroups,
     loading,
     messageDraft,
-    searchOpen,
-    searchInputRef,
-    searchQuery,
-    searchState,
-    activeSearchMessageId,
+    search,
     operationError,
     hasMoreMessages,
     loadingMoreMessages,
     onLoadOlderMessages,
-    attachments,
-    attachmentUploadAvailable,
-    uploadingAttachment,
+    attachmentDraft,
+    messageInteractions,
     onMessageDraftChange,
-    onSearchQueryChange,
-    onSelectSearchResult,
-    onNextSearchResult,
     onSendMessage,
-    onToggleMessage,
-    onCopyMessage,
-    onStartEditMessage,
-    onEditDraftChange,
-    onCancelEditMessage,
-    onSaveEditMessage,
-    onDeleteMessage,
     replyParent,
-    onChooseAttachments,
-    onRemoveAttachment,
     onCancelReply,
     onToggleReaction,
     mentionMembers,
-    mentionMembersLoading,
-    canDeleteMessage,
-    canEditMessage,
-    getMessageRowState,
-    onOpenMessageMenu
+    mentionMembersLoading
   } = props
   const messageRowRefs = useRef(new Map<ChatMessageId, HTMLElement>())
 
   useEffect(() => {
-    if (activeSearchMessageId === null) return
-    const row = messageRowRefs.current.get(activeSearchMessageId)
+    if (search.activeMessageId === null) return
+    const row = messageRowRefs.current.get(search.activeMessageId)
     row?.scrollIntoView?.({ block: "center" })
     row?.focus({ preventScroll: true })
-  }, [activeSearchMessageId])
+  }, [search.activeMessageId])
 
   return (
     <section className="chatPane grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-surface-canvas [grid-area:chat]" aria-label={`${channelName} chat`}>
       <ChannelMessageSearch
         channelName={channelName}
-        open={searchOpen}
-        inputRef={searchInputRef}
-        query={searchQuery}
-        state={searchState}
-        activeSearchMessageId={activeSearchMessageId}
+        open={search.open}
+        inputRef={search.inputRef}
+        query={search.query}
+        state={search.state}
+        activeSearchMessageId={search.activeMessageId}
         disabled={loading}
-        onQueryChange={onSearchQueryChange}
-        onSelectResult={onSelectSearchResult}
+        onQueryChange={search.setQuery}
+        onSelectResult={search.selectResult}
       />
       <ol className={chatTimelineClassName} aria-label="Channel messages" aria-busy={loading}>
         {loading
@@ -1782,7 +1711,7 @@ function ChatPane(props: {
               <strong className="text-[15px] text-foreground">No messages yet</strong>
               <span className="chatEmptyChannel inline-flex items-center justify-center gap-1">
                 Start the conversation in
-                <Hash className={classNames("channelHashIcon", iconClassName)} aria-hidden="true" />
+                <Hash className={cn("channelHashIcon", iconClassName)} aria-hidden="true" />
                 <span>{channelName}.</span>
               </span>
             </li>
@@ -1801,7 +1730,7 @@ function ChatPane(props: {
           <li key={group.id} className={channelMessageGroupClassName}>
             <div className="messageRun flex min-w-0 flex-col gap-0.5">
               {group.messages.map((message, index) => {
-                const rowState = getMessageRowState(message)
+                const rowState = messageInteractions.getRowState(message)
                 return (
                   <ChannelMessageRow
                     key={message.id}
@@ -1811,21 +1740,21 @@ function ChatPane(props: {
                     selectionMode={rowState.selectionMode}
                     actionsPinned={rowState.actionsPinned}
                     actionsAvailable={rowState.actionsAvailable}
-                    onToggle={() => onToggleMessage(message.id)}
-                    onEditDraftChange={onEditDraftChange}
-                    onCancelEdit={onCancelEditMessage}
-                    onSaveEdit={onSaveEditMessage}
+                    onToggle={() => messageInteractions.toggleMessageSelection(message.id)}
+                    onEditDraftChange={messageInteractions.setEditingDraft}
+                    onCancelEdit={messageInteractions.cancelEditingMessage}
+                    onSaveEdit={messageInteractions.saveEditingMessage}
                     editingDraft={rowState.editingDraft}
                     editSaving={rowState.editSaving}
-                    onOpenMenu={(x, y) => onOpenMessageMenu(message.id, x, y)}
+                    onOpenMenu={(x, y) => messageInteractions.openMessageMenu(message.id, x, y)}
                     onFocusParent={(messageId) => {
                       const row = messageRowRefs.current.get(messageId)
                       row?.scrollIntoView?.({ block: "center" })
                       row?.focus({ preventScroll: true })
                     }}
                     onToggleReaction={onToggleReaction === undefined ? undefined : (emoji) => onToggleReaction(message, emoji)}
-                    highlighted={activeSearchMessageId === message.id}
-                    onNextSearchResult={onNextSearchResult}
+                    highlighted={search.activeMessageId === message.id}
+                    onNextSearchResult={search.nextResult}
                     refCallback={(element) => {
                       if (element === null) {
                         messageRowRefs.current.delete(message.id)
@@ -1847,15 +1776,15 @@ function ChatPane(props: {
         operationError={operationError}
         disabled={loading}
         replyParent={replyParent}
-        attachments={attachments}
-        attachmentUploadAvailable={attachmentUploadAvailable}
-        uploadingAttachment={uploadingAttachment}
+        attachments={attachmentDraft.attachments}
+        attachmentUploadAvailable={attachmentDraft.uploadAvailable}
+        uploadingAttachment={attachmentDraft.uploading}
         members={mentionMembers}
         membersLoading={mentionMembersLoading}
         onDraftChange={onMessageDraftChange}
         onSend={onSendMessage}
-        onChooseAttachments={onChooseAttachments}
-        onRemoveAttachment={onRemoveAttachment}
+        onChooseAttachments={attachmentDraft.choose}
+        onRemoveAttachment={attachmentDraft.remove}
         onCancelReply={onCancelReply}
       />
     </section>
@@ -1938,7 +1867,7 @@ function ChannelMessageSearch(props: {
         if (eventDetails.reason === "input-change") onQueryChange(value)
       }}
     >
-      <div className={classNames("channelMessageSearch relative z-30 row-start-1 border-b border-border bg-surface-canvas px-4 py-2.5", !open && "hidden")}>
+      <div className={cn("channelMessageSearch relative z-30 row-start-1 border-b border-border bg-surface-canvas px-4 py-2.5", !open && "hidden")}>
         <label className="sr-only" htmlFor="channel-message-search">Search messages</label>
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-foreground-subtle" aria-hidden="true" />
@@ -2028,7 +1957,7 @@ function renderChannelMessageSearchState(
             key={result.message.id}
             id={`channel-message-search-option-${result.message.id}`}
             value={result}
-            className={classNames(
+            className={cn(
               "messageSearchResult grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-3 rounded-control border border-transparent bg-transparent px-2 py-1.5 text-left hover:border-border hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
               active && "border-border bg-surface-muted",
               highlighted && "border-border-strong"
@@ -2066,11 +1995,11 @@ function ChannelMessagesSkeleton() {
           className="channelMessageSkeleton grid min-w-0 grid-cols-[var(--message-avatar-column)_minmax(0,1fr)] items-start gap-[var(--message-column-gap)] px-[var(--message-group-x)] py-2"
           aria-hidden="true"
         >
-          <span className={classNames(skeletonBlockClassName, "mx-auto size-9 rounded-card")} />
+          <span className={cn(skeletonBlockClassName, "mx-auto size-9 rounded-card")} />
           <span className="flex min-w-0 flex-col gap-2 pt-[3px]">
-            <span className={classNames(skeletonBlockClassName, "h-3 w-[min(220px,45%)]")} />
+            <span className={cn(skeletonBlockClassName, "h-3 w-[min(220px,45%)]")} />
             <span
-              className={classNames(
+              className={cn(
                 skeletonBlockClassName,
                 "h-3.5 w-[min(680px,88%)]",
                 index % 3 === 0 && "w-[min(420px,58%)]",
@@ -2128,7 +2057,7 @@ function ChannelMessageRow(props: {
   const editing = editingDraft !== null
   const displayTimestamp = message.editedAt ?? message.createdAt
   const edited = message.editedAt !== null
-  const className = classNames(
+  const className = cn(
     channelMessageClassName,
     !startsAuthorRun && "compact items-center",
     deleted && "deleted text-foreground-placeholder",
@@ -2160,7 +2089,7 @@ function ChannelMessageRow(props: {
       {selectionMode && !deleted
         ? (
           <label
-            className={classNames(
+            className={cn(
               "messageCheckbox relative grid size-4 cursor-pointer place-items-center",
               startsAuthorRun ? "mt-2.5" : "mt-[5px]"
             )}
@@ -2227,7 +2156,7 @@ function ChannelMessageRow(props: {
             />
           )
           : deleted
-            ? <p className={classNames(messageBodyClassName, "text-foreground-placeholder italic")}>Message deleted</p>
+            ? <p className={cn(messageBodyClassName, "text-foreground-placeholder italic")}>Message deleted</p>
             : (
               <>
                 {message.body.trim().length === 0
@@ -2244,7 +2173,7 @@ function ChannelMessageRow(props: {
         ? null
         : (
           <div
-            className={classNames(
+            className={cn(
               "messageActions pointer-events-none absolute right-3 top-[-14px] z-10 flex overflow-hidden rounded-panel border border-border-strong bg-surface-raised opacity-0 shadow-floating group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-has-[:focus-visible]/message:pointer-events-auto group-has-[:focus-visible]/message:opacity-100",
               actionsPinned && "visible pointer-events-auto opacity-100"
             )}
@@ -2311,8 +2240,6 @@ function MessageParentUnavailable() {
     </div>
   )
 }
-
-const reactionPalette = ["👍", "🎉", "👀"] as const
 
 function MessageAttachmentList(props: {
   readonly attachments: ReadonlyArray<ChatMessageAttachment>
@@ -2409,7 +2336,7 @@ function MessageReactionPicker(props: {
 
   return (
     <div className="messageReactionPicker flex min-w-0 items-center" aria-label={`Add a reaction to message from ${message.authorDisplayName}`}>
-      {reactionPalette.map((emoji) => (
+      {MESSAGE_REACTION_EMOJIS.map((emoji) => (
           <Button
             key={emoji}
             type="button"
@@ -2466,7 +2393,7 @@ function MessageReactions(props: {
         const count = serverCount + (active === serverActive ? 0 : active ? 1 : -1)
         if (count <= 0 && !active) return null
         const content = <><span aria-hidden="true">{emoji}</span><span>{count}</span></>
-        const className = classNames(
+        const className = cn(
           "messageReaction inline-flex min-h-6 items-center justify-center gap-1 rounded-control border border-border bg-surface-muted px-2 py-0.5 text-xs leading-none text-foreground-muted",
           active && "border-border-strong bg-surface-muted-hover text-foreground",
           onToggleReaction !== undefined && "cursor-pointer hover:border-border-strong hover:bg-surface-rail hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
@@ -2714,7 +2641,7 @@ function MessageComposer(props: {
           )
           : null}
         <form
-          className={classNames(
+          className={cn(
             "composer grid min-h-11 grid-cols-[48px_minmax(0,1fr)_44px] items-center overflow-hidden rounded-panel border border-border bg-surface-canvas",
             disabled && "disabled bg-surface-sunken"
           )}
@@ -2839,7 +2766,7 @@ function MentionSuggestionMenu(props: {
             id={`mention-suggestion-${member.id}`}
             type="button"
             variant="ghost"
-            className={classNames(
+            className={cn(
               "flex min-h-9 w-full cursor-pointer items-center gap-2 border-0 bg-transparent px-2.5 py-1.5 text-left font-[inherit] text-foreground hover:bg-surface-muted",
               index === activeIndex && "bg-surface-muted"
             )}
@@ -2874,7 +2801,7 @@ function MembersPanel(props: {
     addChannelMember !== undefined && removeChannelMember !== undefined
   return (
     <>
-      <aside className={classNames("membersPanel h-full min-h-0 min-w-0 overflow-hidden border-l border-border bg-surface-canvas [grid-area:members] max-[920px]:hidden", !open && "hidden")} aria-label="Channel members">
+      <aside className={cn("membersPanel h-full min-h-0 min-w-0 overflow-hidden border-l border-border bg-surface-canvas [grid-area:members] max-[920px]:hidden", !open && "hidden")} aria-label="Channel members">
         <div className="membersContent flex h-full min-h-0 flex-col gap-2.5 overflow-auto p-3.5" aria-busy={loading}>
           <div className="flex min-h-7 items-center justify-between gap-2">
             <p className="m-0 text-xs font-bold leading-tight text-foreground-subtle">Online -- {loading ? "" : members.length}</p>
@@ -3086,10 +3013,10 @@ function MembersSkeleton() {
     <ol className={memberListClassName} aria-hidden="true">
       {Array.from({ length: 4 }, (_, index) => (
         <li key={index} className={memberItemClassName}>
-          <span className={classNames(skeletonBlockClassName, "size-9 rounded-card")} />
+          <span className={cn(skeletonBlockClassName, "size-9 rounded-card")} />
           <span className="flex min-w-0 flex-col gap-1.5">
-            <span className={classNames(skeletonBlockClassName, "h-[13px] w-[min(130px,80%)]")} />
-            <span className={classNames(skeletonBlockClassName, "h-[11px] w-[min(74px,55%)]")} />
+            <span className={cn(skeletonBlockClassName, "h-[13px] w-[min(130px,80%)]")} />
+            <span className={cn(skeletonBlockClassName, "h-[11px] w-[min(74px,55%)]")} />
           </span>
         </li>
       ))}
@@ -3217,5 +3144,3 @@ function DeleteMessageDialog(props: {
     </Dialog>
   )
 }
-
-const classNames = cn

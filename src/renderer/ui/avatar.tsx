@@ -1,6 +1,7 @@
 import { Avatar as BaseAvatar } from "@base-ui/react/avatar"
 import { type ComponentPropsWithoutRef } from "react"
 import { cn } from "../lib/cn"
+import { initials } from "../lib/initials"
 
 export type AvatarProps = Omit<ComponentPropsWithoutRef<typeof BaseAvatar.Root>, "children"> & {
   readonly name: string
@@ -24,12 +25,3 @@ export function Avatar({ name, src, alt, className, ...props }: AvatarProps) {
     </BaseAvatar.Root>
   )
 }
-
-const initials = (value: string): string =>
-  value
-    .trim()
-    .split(/\s+/)
-    .map((part) => part.charAt(0))
-    .join("")
-    .slice(0, 2)
-    .toUpperCase()

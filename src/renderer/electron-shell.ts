@@ -5,7 +5,7 @@ import type {
   DesktopNotificationRequest
 } from "../shared/desktop-notifications"
 
-export type AetherShell = {
+type AetherShell = {
   readonly openExternal: (url: string) => Promise<void>
   readonly openNativeAuth: (url: string) => Promise<void>
   readonly updateDesktopNotificationContext?: (conversationId: string) => Promise<void>
@@ -26,14 +26,12 @@ declare global {
   }
 }
 
-export const isSafeExternalAuthUrl = isAllowedExternalAuthUrl
-
 export const openExternalUrl = (url: string): Promise<void> => {
   if (window.aetherShell !== undefined) {
     return window.aetherShell.openExternal(url)
   }
 
-  if (!isSafeExternalAuthUrl(url)) {
+  if (!isAllowedExternalAuthUrl(url)) {
     return Promise.reject(new Error("Refusing to navigate to unsupported external URL."))
   }
 

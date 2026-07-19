@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { Doc, Id } from "./_generated/dataModel"
 import { aggregateReactionRows, trimParentPreview } from "./chat_message_projection"
 
-const id = <TableName extends "workspaces" | "channels" | "messages" | "users" | "messageReactions">(
+const id = <TableName extends "channels" | "messages" | "users" | "messageReactions">(
   value: string
 ): Id<TableName> => value as Id<TableName>
 
@@ -13,7 +13,6 @@ const reaction = (
 ): Doc<"messageReactions"> => ({
   _id: id<"messageReactions">(reactionId),
   _creationTime: 1,
-  workspaceId: id<"workspaces">("workspace"),
   channelId: id<"channels">("channel"),
   messageId: id<"messages">("message"),
   userId,

@@ -38,8 +38,8 @@ export const seededUsername = async (ctx: QueryCtx | MutationCtx, email: string)
   throw new Error("Could not allocate a username")
 }
 
-export const effectiveDirectMessagePreference = (user: Doc<"users">): DirectMessagePreference =>
-  user.directMessagePreference ?? "mutuals"
+const effectiveDirectMessagePreference = (user: Doc<"users">): DirectMessagePreference =>
+  user.directMessagePreference
 
 export const areFriends = async (
   ctx: QueryCtx | MutationCtx,
@@ -84,7 +84,7 @@ export const canStartDirectMessage = async (
 const toUserView = (user: Doc<"users">) => ({
   id: user._id,
   displayName: user.displayName,
-  username: user.username ?? null
+  username: user.username
 })
 
 export const profile = query({

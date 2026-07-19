@@ -3,8 +3,8 @@ import { forwardRef, type ComponentProps } from "react"
 import { cn } from "../lib/cn"
 
 export const Combobox = BaseCombobox.Root
-export const ComboboxPortal = BaseCombobox.Portal
-export const ComboboxPositioner = BaseCombobox.Positioner
+const ComboboxPortal = BaseCombobox.Portal
+const ComboboxPositioner = BaseCombobox.Positioner
 
 export type ComboboxInputProps = ComponentProps<typeof BaseCombobox.Input>
 

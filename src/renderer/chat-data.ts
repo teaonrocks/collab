@@ -1,12 +1,12 @@
 export type ChatChannelId = string
 export type ChatMessageId = string
 
-export type ChatCurrentUser = {
+type ChatCurrentUser = {
   readonly id: string
   readonly displayName: string
 }
 
-export type ChatWorkspace = {
+type ChatWorkspace = {
   readonly name: string
 }
 
@@ -26,7 +26,7 @@ export type ChatDirectMessageProfile = {
   readonly directMessagePreference: "all" | "mutuals" | "friends"
 }
 
-export type ChatIncomingFriendRequest = {
+type ChatIncomingFriendRequest = {
   readonly id: string
   readonly requester: { readonly id: string; readonly displayName: string; readonly username: string | null }
 }
@@ -55,19 +55,19 @@ export type ChatChannelInviteCandidate = ChatChannelMember
 
 export type ChatChannelIndicator = "unread" | "mentioned"
 
-export type ChatChannelIndicatorState = {
+type ChatChannelIndicatorState = {
   readonly channelId: ChatChannelId
   readonly indicator: ChatChannelIndicator
 }
 
 export type ChatConversationNotificationMode = "all" | "mentions" | "off"
 
-export type ChatConversationNotificationPreference = {
+type ChatConversationNotificationPreference = {
   readonly mode: ChatConversationNotificationMode
   readonly options: ReadonlyArray<ChatConversationNotificationMode>
 }
 
-export type ChatMessageReaction = {
+type ChatMessageReaction = {
   readonly emoji: string
   readonly count: number
   readonly reactedByCurrentUser: boolean
@@ -83,7 +83,7 @@ export type ChatMessageAttachment = {
   readonly url: string | null
 }
 
-export type ChatMessageParent = {
+type ChatMessageParent = {
   readonly id: ChatMessageId
   readonly authorDisplayName: string
   readonly bodyPreview: string
@@ -113,7 +113,6 @@ export type ChatDataModel = {
   readonly activeConversation: ChatActiveConversation
   readonly channels: ReadonlyArray<ChatChannel>
   readonly directConversations: ReadonlyArray<ChatDirectConversation>
-  readonly directConversationCandidates?: ReadonlyArray<ChatChannelMember>
   readonly directConversationsLoading?: boolean
   readonly directMessageProfile?: ChatDirectMessageProfile
   readonly incomingFriendRequests?: ReadonlyArray<ChatIncomingFriendRequest>
@@ -129,39 +128,39 @@ export type ChatDataModel = {
   readonly channelMessagesLoadingMore?: boolean
 }
 
-export type CreateChatChannel = (input: {
+type CreateChatChannel = (input: {
   readonly name: string
   readonly visibility?: ChatChannel["visibility"]
   readonly initialMemberIds?: ReadonlyArray<ChatChannelInviteCandidate["id"]>
 }) => Promise<ChatChannel>
 
 export type SelectChatChannel = (channelId: ChatChannelId) => void
-export type SelectChatDirectConversation = (conversationId: ChatChannelId) => void
-export type StartChatDirectConversation = (recipientUserId: ChatChannelMember["id"]) => Promise<ChatDirectConversation>
-export type SearchChatDirectConversationCandidates = (query: string) => Promise<ReadonlyArray<ChatChannelMember>>
-export type SendChatFriendRequest = (recipientUserId: ChatChannelMember["id"]) => Promise<unknown>
-export type UpdateChatDirectMessageProfile = (input: ChatDirectMessageProfile) => Promise<ChatDirectMessageProfile>
-export type RespondToChatFriendRequest = (input: { readonly friendRequestId: string; readonly accept: boolean }) => Promise<unknown>
-export type UpdateChatConversationNotificationPreference = (input: {
+type SelectChatDirectConversation = (conversationId: ChatChannelId) => void
+type StartChatDirectConversation = (recipientUserId: ChatChannelMember["id"]) => Promise<ChatDirectConversation>
+type SearchChatDirectConversationCandidates = (query: string) => Promise<ReadonlyArray<ChatChannelMember>>
+type SendChatFriendRequest = (recipientUserId: ChatChannelMember["id"]) => Promise<unknown>
+type UpdateChatDirectMessageProfile = (input: ChatDirectMessageProfile) => Promise<ChatDirectMessageProfile>
+type RespondToChatFriendRequest = (input: { readonly friendRequestId: string; readonly accept: boolean }) => Promise<unknown>
+type UpdateChatConversationNotificationPreference = (input: {
   readonly channelId: ChatChannelId
   readonly mode: ChatConversationNotificationMode
 }) => Promise<ChatConversationNotificationPreference>
 
-export type EditChatChannel = (input: {
+type EditChatChannel = (input: {
   readonly channelId: ChatChannelId
   readonly name: string
 }) => Promise<ChatChannel>
 
-export type DeleteChatChannel = (input: { readonly channelId: ChatChannelId }) => Promise<unknown>
+type DeleteChatChannel = (input: { readonly channelId: ChatChannelId }) => Promise<unknown>
 
-export type AddChatChannelMember = (input: {
+type AddChatChannelMember = (input: {
   readonly channelId: ChatChannelId
   readonly userId: ChatChannelMember["id"]
 }) => Promise<unknown>
 
-export type RemoveChatChannelMember = AddChatChannelMember
+type RemoveChatChannelMember = AddChatChannelMember
 
-export type CreateChatMessage = (input: {
+type CreateChatMessage = (input: {
   readonly channelId: ChatChannelId
   readonly body: string
   readonly parentMessageId?: ChatMessageId | null
@@ -170,30 +169,30 @@ export type CreateChatMessage = (input: {
 
 export type UploadChatMessageAttachment = (file: File) => Promise<ChatMessageAttachment>
 
-export type EditChatMessage = (input: {
+type EditChatMessage = (input: {
   readonly channelId: ChatChannelId
   readonly messageId: ChatMessageId
   readonly body: string
 }) => Promise<unknown>
 
-export type DeleteChatMessage = (input: {
+type DeleteChatMessage = (input: {
   readonly channelId: ChatChannelId
   readonly messageId: ChatMessageId
 }) => Promise<unknown>
 
-export type ToggleChatMessageReaction = (input: {
+type ToggleChatMessageReaction = (input: {
   readonly channelId: ChatChannelId
   readonly messageId: ChatMessageId
   readonly emoji: string
 }) => Promise<unknown>
 
-export type SearchChatMessages = (input: {
+type SearchChatMessages = (input: {
   readonly channelId: ChatChannelId
   readonly query: string
 }) => Promise<ReadonlyArray<ChatMessage>>
 
 export type ChatMessageGuard = (message: ChatMessage) => boolean
-export type ChatOperation = "send" | "edit" | "delete" | "react" | "attach"
+type ChatOperation = "send" | "edit" | "delete" | "react" | "attach"
 export type ChatOperationErrorMessage = (operation: ChatOperation, cause: unknown) => string
 
 export type ChatDataView = {

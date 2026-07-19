@@ -9,7 +9,33 @@ import {
 import { canStartDirectMessage, canonicalPairKey } from "./social"
 
 const MAX_DIRECT_CONVERSATIONS = 100
-const MAX_DIRECT_CANDIDATES = 100
+
+export const listDirectConversationRecords = async (
+  ctx: QueryCtx,
+  actorId: Id<"users">
+) => {
+  const memberships = await ctx.db
+    .query("channelMemberships")
+    .withIndex("by_user_and_channel_kind", (q) => q.eq("userId", actorId).eq("channelKind", "direct"))
+    .take(MAX_DIRECT_CONVERSATIONS)
+  const conversations: Array<{
+    readonly channel: Doc<"channels">
+    readonly membership: Doc<"channelMemberships">
+    readonly otherUser: Doc<"users">
+  }> = []
+  for (const membership of memberships) {
+    const channel = await ctx.db.get(membership.channelId)
+    if (channel === null || channel.kind !== "direct" || channel.deletedAt !== undefined) continue
+    const participants = await directParticipants(ctx, channel._id)
+    if (participants.length !== 2) throw new Error("Direct conversation must have exactly two participants")
+    const otherMembership = participants.find((candidate) => candidate.userId !== actorId)
+    if (otherMembership === undefined) throw new Error("Direct conversation participant invariant failed")
+    const otherEligibility = await directEligibility(ctx, { userId: otherMembership.userId })
+    if (otherEligibility === null) continue
+    conversations.push({ channel, membership, otherUser: otherEligibility.user })
+  }
+  return conversations.sort((a, b) => b.channel.createdAt - a.channel.createdAt)
+}
 
 const directConversationView = (
   channel: Doc<"channels">,
@@ -69,66 +95,8 @@ export const list = query({
   args: {},
   handler: async (ctx) => {
     const actor = await requireAllowedCurrentUser(ctx)
-    const memberships = await ctx.db
-      .query("channelMemberships")
-      .withIndex("by_user_and_channel_kind", (q) => q.eq("userId", actor._id).eq("channelKind", "direct"))
-      .take(MAX_DIRECT_CONVERSATIONS)
-    const conversations = []
-    for (const membership of memberships) {
-      const channel = await ctx.db.get(membership.channelId)
-      if (channel === null || channel.kind !== "direct" || channel.deletedAt !== undefined) continue
-      const participants = await directParticipants(ctx, channel._id)
-      if (participants.length !== 2) throw new Error("Direct conversation must have exactly two participants")
-      const otherMembership = participants.find((candidate) => candidate.userId !== actor._id)
-      if (otherMembership === undefined) throw new Error("Direct conversation participant invariant failed")
-      const otherEligibility = await directEligibility(ctx, { userId: otherMembership.userId })
-      if (otherEligibility === null) continue
-      conversations.push(directConversationView(channel, otherEligibility.user))
-    }
-    return conversations.sort((a, b) => b.createdAt - a.createdAt)
-  }
-})
-
-export const indicators = query({
-  args: {},
-  handler: async (ctx) => {
-    const actor = await requireAllowedCurrentUser(ctx)
-    const memberships = await ctx.db.query("channelMemberships")
-      .withIndex("by_user_and_channel_kind", (q) => q.eq("userId", actor._id).eq("channelKind", "direct"))
-      .take(MAX_DIRECT_CONVERSATIONS)
-    const indicators: Array<{ readonly channelId: Id<"channels">; readonly indicator: "unread" | "mentioned" }> = []
-    for (const membership of memberships) {
-      const channel = await ctx.db.get(membership.channelId)
-      if (channel === null || channel.kind !== "direct" || channel.deletedAt !== undefined) continue
-      const lastReadAt = membership.lastReadAt ?? membership.createdAt
-      const newestUnread = await ctx.db.query("messages")
-        .withIndex("by_channel_created_at", (q) => q.eq("channelId", channel._id).gt("createdAt", lastReadAt))
-        .order("desc")
-        .first()
-      if (newestUnread === null) continue
-      indicators.push({ channelId: channel._id, indicator: "unread" })
-    }
-    return indicators
-  }
-})
-
-export const candidates = query({
-  args: {},
-  handler: async (ctx) => {
-    const actor = await requireAllowedCurrentUser(ctx)
-    const users = await ctx.db.query("users").take(MAX_DIRECT_CANDIDATES)
-    const candidates = []
-    for (const candidate of users) {
-      if (candidate._id === actor._id || candidate.deletedAt !== undefined || !(await isEmailAllowlisted(ctx, candidate.email))) continue
-      const canStart = await canStartDirectMessage(ctx, actor._id, candidate)
-      candidates.push({
-        id: candidate._id,
-        displayName: candidate.displayName,
-        ...(candidate.username === undefined ? {} : { username: candidate.username }),
-        ...(canStart ? {} : { canStartDirectMessage: false })
-      })
-    }
-    return candidates
+    const conversations = await listDirectConversationRecords(ctx, actor._id)
+    return conversations.map(({ channel, otherUser }) => directConversationView(channel, otherUser))
   }
 })
 
@@ -181,8 +149,7 @@ export const startOrReopen = mutation({
         userId,
         role: "member",
         createdAt: now,
-        lastReadAt: now,
-        mentionTrackingStartedAt: now
+        lastReadAt: now
       })
     }
     const channel = await requireChannelMember(ctx, { channelId, userId: actor._id })

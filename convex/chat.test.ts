@@ -4,6 +4,7 @@ import { convexTest } from "convex-test"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { api, internal } from "./_generated/api"
 import type { Id } from "./_generated/dataModel"
+import { MESSAGE_REACTION_EMOJIS } from "../src/shared/reaction-policy"
 import schema from "./schema"
 
 const modules = import.meta.glob("./**/*.ts")
@@ -30,6 +31,37 @@ const diegoIdentity = {
   name: "Diego Rivera"
 }
 
+type ChatIdentity = typeof mayaIdentity
+const createChatScenario = () => convexTest(schema, modules)
+type ChatScenario = ReturnType<typeof createChatScenario>
+
+const ensureViewer = (scenario: ChatScenario, identity: ChatIdentity) =>
+  scenario.mutation(internal.chat.ensureViewerForIdentity, {
+    tokenIdentifier: identity.tokenIdentifier,
+    email: identity.email,
+    displayName: identity.name
+  })
+
+const ensureViewers = (scenario: ChatScenario, ...identities: ReadonlyArray<ChatIdentity>) =>
+  Promise.all(identities.map((identity) => ensureViewer(scenario, identity)))
+
+const requireSeededUser = (scenario: ChatScenario, email: string) => scenario.run(async (ctx) => {
+  const user = await ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", email)).unique()
+  if (user === null) throw new Error(`Expected seeded user ${email}`)
+  return user
+})
+
+const requireDogfoodWorkspace = (scenario: ChatScenario) => scenario.run(async (ctx) => {
+  const workspace = await ctx.db.query("workspaces")
+    .withIndex("by_key", (q) => q.eq("key", "aether-dogfood"))
+    .unique()
+  if (workspace === null) throw new Error("Expected dogfood workspace")
+  return workspace
+})
+
+const silenceExpectedDogfoodDiagnostics = () =>
+  vi.spyOn(console, "error").mockImplementation(() => {})
+
 beforeEach(() => {
   vi.stubEnv("AETHER_ALLOWED_EMAILS", "maya@example.com,lee@example.com")
 })
@@ -41,7 +73,7 @@ afterEach(() => {
 
 describe("dogfood channel memberships", () => {
   it("adds dogfood allowlist entries through deployment-scoped tooling and audits the operator", async () => {
-    const t = convexTest(schema, modules)
+    const t = createChatScenario()
     const diegoIdentity = {
       tokenIdentifier: "https://issuer.example|diego",
       email: "DIEGO@EXAMPLE.COM",
@@ -97,12 +129,9 @@ describe("dogfood channel memberships", () => {
   })
 
   it("removes dogfood users, overrides bootstrap env entries, and keeps removed users blocked", async () => {
-    const t = convexTest(schema, modules)
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: leeIdentity.tokenIdentifier,
-      email: leeIdentity.email,
-      displayName: leeIdentity.name
-    })
+    silenceExpectedDogfoodDiagnostics()
+    const t = createChatScenario()
+    await ensureViewer(t, leeIdentity)
 
     await expect(t.mutation(internal.chat.administerDogfoodAllowlist, {
       operator: "Archer Chua",
@@ -111,7 +140,7 @@ describe("dogfood channel memberships", () => {
       reason: "offboarded"
     })).resolves.toEqual({ email: "lee@example.com", active: false })
 
-    await expect(t.withIdentity(leeIdentity).query(api.chat.viewer))
+    await expect(t.withIdentity(leeIdentity).query(api.chat.defaultWorkspace))
       .rejects.toThrow("This email is not on the Aether dogfood allowlist")
     await expect(t.mutation(internal.chat.ensureViewerForIdentity, {
       tokenIdentifier: leeIdentity.tokenIdentifier,
@@ -135,7 +164,7 @@ describe("dogfood channel memberships", () => {
   })
 
   it("rejects allowlist management without an attributable operator and logs no credentials", async () => {
-    const t = convexTest(schema, modules)
+    const t = createChatScenario()
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
     await expect(t.mutation(internal.chat.administerDogfoodAllowlist, {
@@ -159,12 +188,8 @@ describe("dogfood channel memberships", () => {
 
   it("logs sanitized Convex diagnostic context when a dogfood function fails", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
-    const t = convexTest(schema, modules)
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: mayaIdentity.tokenIdentifier,
-      email: mayaIdentity.email,
-      displayName: mayaIdentity.name
-    })
+    const t = createChatScenario()
+    await ensureViewer(t, mayaIdentity)
 
     const unsafeInput = "https://private.example/friend@example.com?token=secret&api_key=oops"
     await expect(t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: unsafeInput }))
@@ -190,12 +215,9 @@ describe("dogfood channel memberships", () => {
   })
 
   it("normalizes channel names and rejects empty, duplicate, and unsupported names", async () => {
-    const t = convexTest(schema, modules)
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: mayaIdentity.tokenIdentifier,
-      email: mayaIdentity.email,
-      displayName: mayaIdentity.name
-    })
+    silenceExpectedDogfoodDiagnostics()
+    const t = createChatScenario()
+    await ensureViewer(t, mayaIdentity)
 
     await expect(t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "   ###   " }))
       .rejects.toThrow("Channel name is required")
@@ -219,12 +241,9 @@ describe("dogfood channel memberships", () => {
   })
 
   it("lets a channel creator rename and soft-delete their channel", async () => {
-    const t = convexTest(schema, modules)
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: mayaIdentity.tokenIdentifier,
-      email: mayaIdentity.email,
-      displayName: mayaIdentity.name
-    })
+    silenceExpectedDogfoodDiagnostics()
+    const t = createChatScenario()
+    await ensureViewer(t, mayaIdentity)
     const channel = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design" })
 
     await expect(t.withIdentity(mayaIdentity).mutation(api.chat.editChannel, {
@@ -240,11 +259,7 @@ describe("dogfood channel memberships", () => {
       body: "This channel is deleted"
     })).rejects.toThrow("Channel not found")
 
-    const workspaceId = await t.run(async (ctx) => {
-      const workspace = await ctx.db.query("workspaces").withIndex("by_key", (q) => q.eq("key", "aether-dogfood")).unique()
-      if (workspace === null) throw new Error("Workspace not found")
-      return workspace._id
-    })
+    const workspaceId = (await requireDogfoodWorkspace(t))._id
     const visible = await t.withIdentity(mayaIdentity).query(api.chat.channels, { workspaceId })
     expect(visible.some((candidate) => candidate.id === channel.id)).toBe(false)
     await expect(t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "product-team" }))
@@ -275,29 +290,18 @@ describe("dogfood channel memberships", () => {
   })
 
   it("lets allowlisted users idempotently join created shared channels before reading messages", async () => {
-    const t = convexTest(schema, modules)
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: mayaIdentity.tokenIdentifier,
-      email: mayaIdentity.email,
-      displayName: mayaIdentity.name
-    })
+    silenceExpectedDogfoodDiagnostics()
+    const t = createChatScenario()
+    await ensureViewer(t, mayaIdentity)
 
     const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design" })
     await expect(t.withIdentity(leeIdentity).query(api.chat.channelMessages, messagePageArgs(design.id)))
       .rejects.toThrow("Current user has not been initialized")
 
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: leeIdentity.tokenIdentifier,
-      email: leeIdentity.email,
-      displayName: leeIdentity.name
-    })
+    await ensureViewer(t, leeIdentity)
 
     const visibleChannels = await t.withIdentity(leeIdentity).query(api.chat.channels, {
-      workspaceId: await t.run(async (ctx) => {
-        const workspace = await ctx.db.query("workspaces").withIndex("by_key", (q) => q.eq("key", "aether-dogfood")).unique()
-        if (workspace === null) throw new Error("Workspace not found")
-        return workspace._id
-      })
+      workspaceId: (await requireDogfoodWorkspace(t))._id
     })
     expect(visibleChannels.map((channel) => channel.name)).toContain("design")
 
@@ -313,29 +317,20 @@ describe("dogfood channel memberships", () => {
     await t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: design.id })
     await t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: design.id })
 
-    const leeDesignMemberships = await t.run(async (ctx) => {
-      const lee = await ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", leeIdentity.email)).unique()
-      if (lee === null) throw new Error("Lee not found")
-      return ctx.db
+    const lee = await requireSeededUser(t, leeIdentity.email)
+    const leeDesignMemberships = await t.run((ctx) =>
+      ctx.db
         .query("channelMemberships")
         .withIndex("by_channel_user", (q) => q.eq("channelId", design.id).eq("userId", lee._id))
         .collect()
-    })
+    )
     expect(leeDesignMemberships).toHaveLength(1)
   })
 
   it("keeps non-members isolated from private-channel discovery, reads, and mutations", async () => {
-    const t = convexTest(schema, modules)
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: mayaIdentity.tokenIdentifier,
-      email: mayaIdentity.email,
-      displayName: mayaIdentity.name
-    })
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: leeIdentity.tokenIdentifier,
-      email: leeIdentity.email,
-      displayName: leeIdentity.name
-    })
+    silenceExpectedDogfoodDiagnostics()
+    const t = createChatScenario()
+    await ensureViewers(t, mayaIdentity, leeIdentity)
 
     const { workspaceId, privateChannelId, mayaId } = await t.run(async (ctx) => {
       const workspace = await ctx.db.query("workspaces").withIndex("by_key", (q) => q.eq("key", "aether-dogfood")).unique()
@@ -353,8 +348,7 @@ describe("dogfood channel memberships", () => {
         userId: maya._id,
         role: "admin",
         createdAt: 100,
-        lastReadAt: 100,
-        mentionTrackingStartedAt: 100
+        lastReadAt: 100
       })
       return { workspaceId: workspace._id, privateChannelId, mayaId: maya._id }
     })
@@ -379,7 +373,7 @@ describe("dogfood channel memberships", () => {
 
     const visibleChannels = await t.withIdentity(leeIdentity).query(api.chat.channels, { workspaceId })
     expect(visibleChannels.map((channel) => channel.name)).not.toContain("strategy")
-    await expect(t.withIdentity(leeIdentity).query(api.chat.channelIndicators, { workspaceId }))
+    await expect(t.withIdentity(leeIdentity).query(api.chat.conversationIndicators, { workspaceId }))
       .resolves.not.toEqual(expect.arrayContaining([expect.objectContaining({ channelId: privateChannelId })]))
     await expect(t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: privateChannelId }))
       .rejects.toThrow("Current user is not a member of this channel")
@@ -424,7 +418,8 @@ describe("dogfood channel memberships", () => {
   })
 
   it("creates private channels atomically with an admin creator and eligible initial members", async () => {
-    const t = convexTest(schema, modules)
+    silenceExpectedDogfoodDiagnostics()
+    const t = createChatScenario()
     vi.stubEnv("AETHER_ALLOWED_EMAILS", "maya@example.com,lee@example.com,diego@example.com")
     for (const identity of [mayaIdentity, leeIdentity, diegoIdentity]) {
       await t.mutation(internal.chat.ensureViewerForIdentity, {
@@ -474,6 +469,8 @@ describe("dogfood channel memberships", () => {
     const invalidUserId = await t.run((ctx) => ctx.db.insert("users", {
       email: "outside@example.com",
       displayName: "Outside User",
+      username: "outside",
+      directMessagePreference: "all",
       createdAt: 1,
       updatedAt: 1
     }))
@@ -492,7 +489,8 @@ describe("dogfood channel memberships", () => {
   })
 
   it("lets only private-channel admins idempotently add and remove eligible members, revoking channel access", async () => {
-    const t = convexTest(schema, modules)
+    silenceExpectedDogfoodDiagnostics()
+    const t = createChatScenario()
     await t.mutation(internal.chat.administerDogfoodAllowlist, {
       operator: "Test operator",
       email: diegoIdentity.email,
@@ -515,6 +513,8 @@ describe("dogfood channel memberships", () => {
       const blockedId = await ctx.db.insert("users", {
         email: "blocked@example.com",
         displayName: "Blocked User",
+        username: "blocked",
+        directMessagePreference: "all",
         createdAt: 1,
         updatedAt: 1
       })
@@ -568,12 +568,11 @@ describe("dogfood channel memberships", () => {
       .unique())
     expect(addedMembership).toMatchObject({
       role: "member",
-      lastReadAt: addedMembership?.createdAt,
-      mentionTrackingStartedAt: addedMembership?.createdAt
+      lastReadAt: addedMembership?.createdAt
     })
     await expect(t.withIdentity(leeIdentity).query(api.chat.channels, { workspaceId }))
       .resolves.toEqual(expect.arrayContaining([expect.objectContaining({ id: strategy.id })]))
-    await expect(t.withIdentity(leeIdentity).query(api.chat.channelIndicators, { workspaceId }))
+    await expect(t.withIdentity(leeIdentity).query(api.chat.conversationIndicators, { workspaceId }))
       .resolves.not.toEqual(expect.arrayContaining([expect.objectContaining({ channelId: strategy.id })]))
 
     const storageId = await t.run((ctx) => ctx.storage.store(new Blob(["secret"], { type: "text/plain" })))
@@ -610,7 +609,7 @@ describe("dogfood channel memberships", () => {
         messageCreatedAt: addedMembership.createdAt + 1
       })
     })
-    await expect(t.withIdentity(leeIdentity).query(api.chat.channelIndicators, { workspaceId }))
+    await expect(t.withIdentity(leeIdentity).query(api.chat.conversationIndicators, { workspaceId }))
       .resolves.toEqual(expect.arrayContaining([{ channelId: strategy.id, indicator: "mentioned" }]))
 
     await expect(t.withIdentity(mayaIdentity).mutation(api.chat.removePrivateChannelMember, {
@@ -666,17 +665,8 @@ describe("dogfood channel memberships", () => {
   })
 
   it("tracks unread and mention state per channel and clears read channels", async () => {
-    const t = convexTest(schema, modules)
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: mayaIdentity.tokenIdentifier,
-      email: mayaIdentity.email,
-      displayName: mayaIdentity.name
-    })
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: leeIdentity.tokenIdentifier,
-      email: leeIdentity.email,
-      displayName: leeIdentity.name
-    })
+    const t = createChatScenario()
+    await ensureViewers(t, mayaIdentity, leeIdentity)
 
     const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design" })
     const product = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "product" })
@@ -725,7 +715,7 @@ describe("dogfood channel memberships", () => {
       readThroughMessageId: productMessageId
     })
 
-    expect(await t.withIdentity(leeIdentity).query(api.chat.channelIndicators, { workspaceId }))
+    expect(await t.withIdentity(leeIdentity).query(api.chat.conversationIndicators, { workspaceId }))
       .toEqual([{ channelId: design.id, indicator: "mentioned" }])
 
     await t.withIdentity(leeIdentity).mutation(api.chat.markChannelRead, {
@@ -733,22 +723,13 @@ describe("dogfood channel memberships", () => {
       readThroughMessageId: designMessageId
     })
 
-    expect(await t.withIdentity(leeIdentity).query(api.chat.channelIndicators, { workspaceId }))
+    expect(await t.withIdentity(leeIdentity).query(api.chat.conversationIndicators, { workspaceId }))
       .toEqual([])
   })
 
   it("marks a channel read only through the loaded message timestamp", async () => {
-    const t = convexTest(schema, modules)
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: mayaIdentity.tokenIdentifier,
-      email: mayaIdentity.email,
-      displayName: mayaIdentity.name
-    })
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: leeIdentity.tokenIdentifier,
-      email: leeIdentity.email,
-      displayName: leeIdentity.name
-    })
+    const t = createChatScenario()
+    await ensureViewers(t, mayaIdentity, leeIdentity)
 
     const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design" })
     await t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: design.id })
@@ -788,7 +769,7 @@ describe("dogfood channel memberships", () => {
       readThroughMessageId: loadedMessageId
     })
 
-    await expect(t.withIdentity(leeIdentity).query(api.chat.channelIndicators, { workspaceId }))
+    await expect(t.withIdentity(leeIdentity).query(api.chat.conversationIndicators, { workspaceId }))
       .resolves.toEqual([{ channelId: design.id, indicator: "unread" }])
 
     await t.run(async (ctx) => {
@@ -803,17 +784,8 @@ describe("dogfood channel memberships", () => {
   })
 
   it("detects mentions after the first 50 unread messages", async () => {
-    const t = convexTest(schema, modules)
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: mayaIdentity.tokenIdentifier,
-      email: mayaIdentity.email,
-      displayName: mayaIdentity.name
-    })
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: leeIdentity.tokenIdentifier,
-      email: leeIdentity.email,
-      displayName: leeIdentity.name
-    })
+    const t = createChatScenario()
+    await ensureViewers(t, mayaIdentity, leeIdentity)
 
     const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design" })
     await t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: design.id })
@@ -828,7 +800,7 @@ describe("dogfood channel memberships", () => {
         .withIndex("by_channel_user", (q) => q.eq("channelId", design.id).eq("userId", lee._id))
         .unique()
       if (membership === null) throw new Error("Membership not found")
-      await ctx.db.patch(membership._id, { lastReadAt: 1, mentionTrackingStartedAt: 1 })
+      await ctx.db.patch(membership._id, { lastReadAt: 1 })
 
       await ctx.db.insert("messages", {
         workspaceId: workspace._id,
@@ -864,22 +836,13 @@ describe("dogfood channel memberships", () => {
       return workspace._id
     })
 
-    await expect(t.withIdentity(leeIdentity).query(api.chat.channelIndicators, { workspaceId }))
+    await expect(t.withIdentity(leeIdentity).query(api.chat.conversationIndicators, { workspaceId }))
       .resolves.toEqual([{ channelId: design.id, indicator: "mentioned" }])
   })
 
   it("keeps near-match mention text as unread instead of mentioned", async () => {
-    const t = convexTest(schema, modules)
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: mayaIdentity.tokenIdentifier,
-      email: mayaIdentity.email,
-      displayName: mayaIdentity.name
-    })
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: leeIdentity.tokenIdentifier,
-      email: leeIdentity.email,
-      displayName: leeIdentity.name
-    })
+    const t = createChatScenario()
+    await ensureViewers(t, mayaIdentity, leeIdentity)
 
     const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design" })
     await t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: design.id })
@@ -908,22 +871,13 @@ describe("dogfood channel memberships", () => {
       return workspace._id
     })
 
-    await expect(t.withIdentity(leeIdentity).query(api.chat.channelIndicators, { workspaceId }))
+    await expect(t.withIdentity(leeIdentity).query(api.chat.conversationIndicators, { workspaceId }))
       .resolves.toEqual([{ channelId: design.id, indicator: "unread" }])
   })
 
   it("keeps legacy pre-index mentions bounded as unread", async () => {
-    const t = convexTest(schema, modules)
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: mayaIdentity.tokenIdentifier,
-      email: mayaIdentity.email,
-      displayName: mayaIdentity.name
-    })
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: leeIdentity.tokenIdentifier,
-      email: leeIdentity.email,
-      displayName: leeIdentity.name
-    })
+    const t = createChatScenario()
+    await ensureViewers(t, mayaIdentity, leeIdentity)
     const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "legacy-mentions" })
     await t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: design.id })
 
@@ -947,22 +901,13 @@ describe("dogfood channel memberships", () => {
       return workspace._id
     })
 
-    await expect(t.withIdentity(leeIdentity).query(api.chat.channelIndicators, { workspaceId }))
+    await expect(t.withIdentity(leeIdentity).query(api.chat.conversationIndicators, { workspaceId }))
       .resolves.toEqual([{ channelId: design.id, indicator: "unread" }])
   })
 
   it("lists every workspace member for public channels and only channel members for private channels", async () => {
-    const t = convexTest(schema, modules)
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: mayaIdentity.tokenIdentifier,
-      email: mayaIdentity.email,
-      displayName: mayaIdentity.name
-    })
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: leeIdentity.tokenIdentifier,
-      email: leeIdentity.email,
-      displayName: leeIdentity.name
-    })
+    const t = createChatScenario()
+    await ensureViewers(t, mayaIdentity, leeIdentity)
 
     const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design" })
     const leadership = await t.run(async (ctx) => {
@@ -1000,18 +945,9 @@ describe("dogfood channel memberships", () => {
       .resolves.toEqual([expect.objectContaining({ displayName: "Maya Patel" })])
   })
 
-  it("adds, removes, and broadcasts message reactions with current-user state", async () => {
-    const t = convexTest(schema, modules)
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: mayaIdentity.tokenIdentifier,
-      email: mayaIdentity.email,
-      displayName: mayaIdentity.name
-    })
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: leeIdentity.tokenIdentifier,
-      email: leeIdentity.email,
-      displayName: leeIdentity.name
-    })
+  it("accepts the shared reaction policy and broadcasts current-user state", async () => {
+    const t = createChatScenario()
+    await ensureViewers(t, mayaIdentity, leeIdentity)
 
     const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design" })
     await t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: design.id })
@@ -1049,20 +985,24 @@ describe("dogfood channel memberships", () => {
 
     await expect(t.withIdentity(leeIdentity).query(api.chat.channelMessages, messagePageArgs(design.id)).then((result) => result.page))
       .resolves.toEqual([expect.objectContaining({ id: message.id, reactions: [] })])
+
+    for (const emoji of MESSAGE_REACTION_EMOJIS) {
+      await t.withIdentity(leeIdentity).mutation(api.chat.toggleMessageReaction, {
+        channelId: design.id,
+        messageId: message.id,
+        emoji
+      })
+    }
+    await expect(t.withIdentity(leeIdentity).query(api.chat.channelMessages, messagePageArgs(design.id)).then((result) => result.page))
+      .resolves.toEqual([expect.objectContaining({
+        id: message.id,
+        reactions: MESSAGE_REACTION_EMOJIS.map((emoji) => ({ emoji, count: 1, reactedByCurrentUser: true }))
+      })])
   })
 
   it("creates message replies with compact parent previews", async () => {
-    const t = convexTest(schema, modules)
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: mayaIdentity.tokenIdentifier,
-      email: mayaIdentity.email,
-      displayName: mayaIdentity.name
-    })
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: leeIdentity.tokenIdentifier,
-      email: leeIdentity.email,
-      displayName: leeIdentity.name
-    })
+    const t = createChatScenario()
+    await ensureViewers(t, mayaIdentity, leeIdentity)
 
     const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design" })
     await t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: design.id })
@@ -1102,12 +1042,8 @@ describe("dogfood channel memberships", () => {
   })
 
   it("stores attachment metadata from Convex storage and hydrates signed URLs", async () => {
-    const t = convexTest(schema, modules)
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: mayaIdentity.tokenIdentifier,
-      email: mayaIdentity.email,
-      displayName: mayaIdentity.name
-    })
+    const t = createChatScenario()
+    await ensureViewer(t, mayaIdentity)
 
     const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design" })
     const storageId = await t.run((ctx) => ctx.storage.store(new Blob(["image"], { type: "image/png" })))
@@ -1144,7 +1080,8 @@ describe("dogfood channel memberships", () => {
   })
 
   it("enforces attachment policy and ownership, then deletes claimed storage with its message", async () => {
-    const t = convexTest(schema, modules)
+    silenceExpectedDogfoodDiagnostics()
+    const t = createChatScenario()
     await t.mutation(internal.chat.ensureViewerForIdentity, {
       tokenIdentifier: mayaIdentity.tokenIdentifier, email: mayaIdentity.email, displayName: mayaIdentity.name
     })
@@ -1222,17 +1159,9 @@ describe("dogfood channel memberships", () => {
   })
 
   it("rejects reply parents from another channel and keeps replies visible after parent deletion", async () => {
-    const t = convexTest(schema, modules)
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: mayaIdentity.tokenIdentifier,
-      email: mayaIdentity.email,
-      displayName: mayaIdentity.name
-    })
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: leeIdentity.tokenIdentifier,
-      email: leeIdentity.email,
-      displayName: leeIdentity.name
-    })
+    silenceExpectedDogfoodDiagnostics()
+    const t = createChatScenario()
+    await ensureViewers(t, mayaIdentity, leeIdentity)
 
     const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design" })
     const product = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "product" })
@@ -1276,12 +1205,9 @@ describe("dogfood channel memberships", () => {
   })
 
   it("paginates through complete channel history with an explicit page-size limit", async () => {
-    const t = convexTest(schema, modules)
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: mayaIdentity.tokenIdentifier,
-      email: mayaIdentity.email,
-      displayName: mayaIdentity.name
-    })
+    silenceExpectedDogfoodDiagnostics()
+    const t = createChatScenario()
+    await ensureViewer(t, mayaIdentity)
     const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design" })
 
     await t.run(async (ctx) => {
@@ -1323,17 +1249,9 @@ describe("dogfood channel memberships", () => {
   })
 
   it("searches the full authorized channel history with a bounded query", async () => {
-    const t = convexTest(schema, modules)
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: mayaIdentity.tokenIdentifier,
-      email: mayaIdentity.email,
-      displayName: mayaIdentity.name
-    })
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: leeIdentity.tokenIdentifier,
-      email: leeIdentity.email,
-      displayName: leeIdentity.name
-    })
+    silenceExpectedDogfoodDiagnostics()
+    const t = createChatScenario()
+    await ensureViewers(t, mayaIdentity, leeIdentity)
     const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design-search" })
     const product = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "product-search" })
     await t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: design.id })
@@ -1382,12 +1300,9 @@ describe("dogfood channel memberships", () => {
   })
 
   it("enforces exact channel, message, edit, and attachment metadata limits", async () => {
-    const t = convexTest(schema, modules)
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: mayaIdentity.tokenIdentifier,
-      email: mayaIdentity.email,
-      displayName: mayaIdentity.name
-    })
+    silenceExpectedDogfoodDiagnostics()
+    const t = createChatScenario()
+    await ensureViewer(t, mayaIdentity)
 
     const boundaryChannel = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "c".repeat(80) })
     await expect(t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "c".repeat(81) }))
@@ -1442,12 +1357,9 @@ describe("dogfood channel memberships", () => {
   })
 
   it("enforces the maximum channel count instead of hiding excess channels", async () => {
-    const t = convexTest(schema, modules)
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: mayaIdentity.tokenIdentifier,
-      email: mayaIdentity.email,
-      displayName: mayaIdentity.name
-    })
+    silenceExpectedDogfoodDiagnostics()
+    const t = createChatScenario()
+    await ensureViewer(t, mayaIdentity)
     await t.run(async (ctx) => {
       const workspace = await ctx.db.query("workspaces").withIndex("by_key", (q) => q.eq("key", "aether-dogfood")).unique()
       if (workspace === null) throw new Error("Workspace not found")
@@ -1479,7 +1391,8 @@ describe("dogfood channel memberships", () => {
   })
 
   it("validates read markers against a real message in the selected channel", async () => {
-    const t = convexTest(schema, modules)
+    silenceExpectedDogfoodDiagnostics()
+    const t = createChatScenario()
     for (const identity of [mayaIdentity, leeIdentity]) {
       await t.mutation(internal.chat.ensureViewerForIdentity, {
         tokenIdentifier: identity.tokenIdentifier,
@@ -1502,7 +1415,7 @@ describe("dogfood channel memberships", () => {
   })
 
   it("keeps unread and mention work bounded across a dense multi-channel dataset", async () => {
-    const t = convexTest(schema, modules)
+    const t = createChatScenario()
     for (const identity of [mayaIdentity, leeIdentity]) {
       await t.mutation(internal.chat.ensureViewerForIdentity, {
         tokenIdentifier: identity.tokenIdentifier,
@@ -1556,24 +1469,15 @@ describe("dogfood channel memberships", () => {
       return workspace._id
     })
 
-    const indicators = await t.withIdentity(leeIdentity).query(api.chat.channelIndicators, { workspaceId })
+    const indicators = await t.withIdentity(leeIdentity).query(api.chat.conversationIndicators, { workspaceId })
     expect(indicators).toHaveLength(10)
     expect(indicators.find((indicator) => indicator.channelId === channels[0]!.id)?.indicator).toBe("mentioned")
     expect(indicators.find((indicator) => indicator.channelId === channels[1]!.id)?.indicator).toBe("mentioned")
   })
 
   it("collapses duplicate reaction rows from the same user", async () => {
-    const t = convexTest(schema, modules)
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: mayaIdentity.tokenIdentifier,
-      email: mayaIdentity.email,
-      displayName: mayaIdentity.name
-    })
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: leeIdentity.tokenIdentifier,
-      email: leeIdentity.email,
-      displayName: leeIdentity.name
-    })
+    const t = createChatScenario()
+    await ensureViewers(t, mayaIdentity, leeIdentity)
 
     const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "design" })
     await t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: design.id })
@@ -1583,11 +1487,9 @@ describe("dogfood channel memberships", () => {
     })
 
     await t.run(async (ctx) => {
-      const workspace = await ctx.db.query("workspaces").withIndex("by_key", (q) => q.eq("key", "aether-dogfood")).unique()
       const lee = await ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", leeIdentity.email)).unique()
-      if (workspace === null || lee === null) throw new Error("Seed records not found")
+      if (lee === null) throw new Error("Seed user not found")
       await ctx.db.insert("messageReactions", {
-        workspaceId: workspace._id,
         channelId: design.id,
         messageId: message.id,
         userId: lee._id,
@@ -1595,7 +1497,6 @@ describe("dogfood channel memberships", () => {
         createdAt: 10
       })
       await ctx.db.insert("messageReactions", {
-        workspaceId: workspace._id,
         channelId: design.id,
         messageId: message.id,
         userId: lee._id,
@@ -1628,17 +1529,8 @@ describe("dogfood channel memberships", () => {
   })
 
   it("batches reactions for new messages while preserving legacy fallback rows", async () => {
-    const t = convexTest(schema, modules)
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: mayaIdentity.tokenIdentifier,
-      email: mayaIdentity.email,
-      displayName: mayaIdentity.name
-    })
-    await t.mutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: leeIdentity.tokenIdentifier,
-      email: leeIdentity.email,
-      displayName: leeIdentity.name
-    })
+    const t = createChatScenario()
+    await ensureViewers(t, mayaIdentity, leeIdentity)
     const design = await t.withIdentity(mayaIdentity).mutation(api.chat.createChannel, { name: "reaction-batch" })
     await t.withIdentity(leeIdentity).mutation(api.chat.ensureChannelMember, { channelId: design.id })
     const current = await t.withIdentity(mayaIdentity).mutation(api.chat.sendMessage, {
@@ -1659,7 +1551,6 @@ describe("dogfood channel memberships", () => {
         createdAt: current.createdAt - 1
       })
       await ctx.db.insert("messageReactions", {
-        workspaceId: workspace._id,
         channelId: design.id,
         messageId: legacyId,
         userId: lee._id,

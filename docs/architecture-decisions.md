@@ -165,9 +165,9 @@ agent/run/audit inventory in that document.
 ### Status
 
 Accepted and implemented. The original narrow send/read cutline has since expanded to multiple
-channels, edits, deletion, search, replies, reactions, attachments, unread state, and mentions. The
-decisions below record the foundation of the active runtime and call out where later work superseded
-the initial scope.
+channels, direct conversations, edits, deletion, search, replies, reactions, attachments, unread
+state, mentions, and desktop notifications. The decisions below record the foundation of the active
+runtime and call out where later work superseded the initial scope.
 
 ### Context
 
@@ -249,8 +249,8 @@ later add or remove members; public channels continue to use workspace-backed me
 Channel membership gates discovery, unread/mention indicators, history and search, member data,
 message and reaction mutations, read markers, and the attachment URLs hydrated into message views.
 Adding a member is visible through Convex subscriptions without an application restart. The new
-membership initializes `lastReadAt` and `mentionTrackingStartedAt` to its grant time, so earlier
-history is readable but does not arrive as unread or mentioned; later messages and mentions do.
+membership initializes `lastReadAt` to its grant time, so earlier history is readable but does not
+arrive as unread or mentioned; later messages and mentions do.
 
 Removing a membership immediately removes subsequent channel-scoped access while leaving messages,
 reactions, and stored attachments intact for remaining members. Attachment URLs already issued by
@@ -301,6 +301,36 @@ are suppressed. Each read is bounded to the next 100 events and acknowledges its
 reading another page, so consumed rows are not repeatedly hydrated. Events expire after seven days via
 scheduled cleanup because this feed is transient local delivery, not durable push storage. The feature
 currently has no per-device sound, preview-privacy, schedule, or rich-action settings.
+
+#### Keep Renderer State Machines At Their Owning Seams
+
+The plain `ChatDataView` contract is the renderer boundary. `WorkspaceChat` consumes that contract
+directly instead of repeating its fields, and owns UI-only controllers for conversation search and
+conversation notification preferences. The Convex adapter owns transport mapping, while focused
+hooks in the dogfood root own window-account synchronization and the desktop notification feed.
+There is no parallel viewer query or local candidate snapshot.
+
+Unread and mention state comes from one `chat.conversationIndicators` subscription. It walks the
+viewer's memberships for workspace channels and global direct conversations; direct conversations
+can be unread but never mentioned. This avoids two subscriptions implementing the same read-marker
+policy.
+
+#### Retain Only Live Schema Compatibility
+
+The schema closeout on 2026-07-19 checked the configured development deployment, the public
+friend-beta deployment, and the default production target before narrowing validators. Usernames
+and direct-message preferences were complete, the old membership workspace field was absent, and
+the configured reaction tables were empty. Those validators were narrowed, the redundant reaction
+workspace field was removed, and the one-time migration module was retired.
+
+Three compatibility fields remain because the configured development deployment still contains
+legacy rows: one of three users has `authSubject`, 13 of 15 channel memberships have
+`mentionTrackingStartedAt`, and 17 of 21 messages do not have `reactionBatchReady === true`.
+Existing messages also still carry the redundant workspace field. New code no longer writes
+`authSubject`, `mentionTrackingStartedAt`, or message/reaction workspace duplication; new messages
+are reaction-batch ready. Remove the remaining optional validators and reaction fallback only after
+a deployment migration has removed or backfilled those rows and the same read-only checks return
+zero legacy records.
 
 #### Display Names, Not Emails
 

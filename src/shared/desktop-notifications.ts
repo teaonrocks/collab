@@ -2,7 +2,7 @@ export const desktopNotificationShowChannel = "aether:desktop-notifications-show
 export const desktopNotificationContextChannel = "aether:desktop-notifications-context"
 export const desktopNotificationActivatedChannel = "aether:desktop-notifications-activated"
 
-export type DesktopNotificationConversationKind = "channel" | "direct"
+type DesktopNotificationConversationKind = "channel" | "direct"
 
 export type DesktopNotificationRequest = {
   readonly messageId: string

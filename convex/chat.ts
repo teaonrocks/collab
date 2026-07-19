@@ -3,7 +3,8 @@ import { paginationOptsValidator } from "convex/server"
 import { internal } from "./_generated/api"
 import type { Doc, Id } from "./_generated/dataModel"
 import { action, internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server"
-import { isAcceptedAttachmentContentType, MESSAGE_ATTACHMENT_POLICY } from "../src/shared/attachment-policy"
+import { validateAttachmentMetadata } from "../src/shared/attachment-policy"
+import { MESSAGE_REACTION_EMOJIS } from "../src/shared/reaction-policy"
 import {
   getUserByEmail,
   getUserByTokenIdentifier,
@@ -23,6 +24,7 @@ import {
   sendMessageTransaction,
   toggleMessageReactionTransaction
 } from "./chat_message_transactions"
+import { listDirectConversationRecords } from "./direct_conversations"
 import { seededUsername } from "./social"
 
 const DOGFOOD_WORKSPACE_KEY = "aether-dogfood"
@@ -39,29 +41,26 @@ const MAX_MESSAGE_SEARCH_QUERY_LENGTH = 120
 const MAX_MESSAGE_SEARCH_RESULTS = 20
 const ATTACHMENT_UPLOAD_TTL_MS = 24 * 60 * 60 * 1000
 const MAX_ALLOWLIST_REASON_LENGTH = 240
-const MESSAGE_REACTION_EMOJIS = ["👍", "🎉", "👀"] as const
-
+// Keep Convex's literal-union type while making additions to the shared policy
+// fail typechecking until this validator covers them too.
+const [
+  thumbsUpReactionEmoji,
+  celebrationReactionEmoji,
+  eyesReactionEmoji,
+  ...unvalidatedReactionEmojis
+] = MESSAGE_REACTION_EMOJIS
+const noUnvalidatedReactionEmojis: readonly [] = unvalidatedReactionEmojis
+void noUnvalidatedReactionEmojis
 const messageReactionEmoji = v.union(
-  v.literal(MESSAGE_REACTION_EMOJIS[0]),
-  v.literal(MESSAGE_REACTION_EMOJIS[1]),
-  v.literal(MESSAGE_REACTION_EMOJIS[2])
+  v.literal(thumbsUpReactionEmoji),
+  v.literal(celebrationReactionEmoji),
+  v.literal(eyesReactionEmoji)
 )
 
 const messageAttachmentInput = v.object({
   storageId: v.id("_storage"),
   name: v.string()
 })
-
-const validateAttachmentMetadata = (metadata: { readonly size: number }, declaredContentType?: string) => {
-  if (metadata.size > MESSAGE_ATTACHMENT_POLICY.maxSizeBytes) {
-    throw new Error("Attachments can be at most 25 MB")
-  }
-  const contentType = declaredContentType?.toLowerCase()
-  if (contentType === undefined || !isAcceptedAttachmentContentType(contentType)) {
-    throw new Error("Attachments must be a PNG, JPEG, GIF, WebP, PDF, or plain-text file")
-  }
-  return contentType
-}
 
 const allowlistReason = (reason: string | undefined): string | undefined => {
   const normalized = reason?.trim().replace(/\s+/g, " ").slice(0, MAX_ALLOWLIST_REASON_LENGTH)
@@ -281,8 +280,7 @@ const ensureMemberships = async (
       userId: input.userId,
       role: "member",
       createdAt: input.now,
-      lastReadAt: input.now,
-      mentionTrackingStartedAt: input.now
+      lastReadAt: input.now
     })
   }
 }
@@ -307,8 +305,7 @@ const ensureChannelMembership = async (
     userId: input.userId,
     role: "member",
     createdAt: input.now,
-    lastReadAt: input.now,
-    mentionTrackingStartedAt: input.now
+    lastReadAt: input.now
   })
 
   const membership = await ctx.db.get(membershipId)
@@ -601,9 +598,7 @@ export const ensureViewerForIdentity = internalMutation({
         tokenIdentifier: args.tokenIdentifier,
         email,
         displayName: args.displayName,
-        updatedAt: now,
-        ...(existingUser.username === undefined ? { username } : {}),
-        ...(existingUser.directMessagePreference === undefined ? { directMessagePreference: "mutuals" as const } : {})
+        updatedAt: now
       })
     }
 
@@ -613,14 +608,6 @@ export const ensureViewerForIdentity = internalMutation({
 
     return { userId, workspaceId, channelId, displayName: args.displayName }
   }
-})
-
-export const viewer = query({
-  args: {},
-  handler: (ctx) => withDogfoodDiagnostics("viewer", {}, async () => {
-    const user = await requireAllowedCurrentUser(ctx)
-    return { userId: user._id, displayName: user.displayName }
-  })
 })
 
 export const defaultWorkspace = query({
@@ -658,61 +645,57 @@ export const channels = query({
   })
 })
 
-export const channelIndicators = query({
+export const conversationIndicators = query({
   args: {
     workspaceId: v.id("workspaces")
   },
-  handler: (ctx, args) => withDogfoodDiagnostics("channelIndicators", { workspaceId: args.workspaceId }, async () => {
+  handler: (ctx, args) => withDogfoodDiagnostics("conversationIndicators", { workspaceId: args.workspaceId }, async () => {
     const user = await requireAllowedCurrentUser(ctx)
     const workspace = await ctx.db.get(args.workspaceId)
     if (workspace === null) return []
 
     await requireWorkspaceMember(ctx, { workspaceId: workspace._id, userId: user._id })
-    const memberships = await ctx.db
-      .query("channelMemberships")
-      .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .collect()
-    const membershipsByChannelId = new Map(memberships.map((membership) => [membership.channelId, membership]))
-    const visibleChannels = await listVisibleWorkspaceChannels(ctx, { workspaceId: workspace._id, userId: user._id })
-    const visibleChannelIds = new Set(visibleChannels.map((channel) => channel.id))
-    const channels = [...visibleChannels]
-    for (const membership of memberships) {
-      if (visibleChannelIds.has(membership.channelId)) continue
-      const channel = await ctx.db.get(membership.channelId)
-      if (
-        channel === null ||
-        channel.workspaceId !== workspace._id ||
-        channel.kind !== "direct" ||
-        channel.deletedAt !== undefined
-      ) continue
-      channels.push(toChannelView(channel))
-      visibleChannelIds.add(channel._id)
+    const workspaceChannels = await listWorkspaceChannels(ctx, workspace._id)
+    const conversations: Array<{
+      readonly channelId: Id<"channels">
+      readonly membership: Doc<"channelMemberships">
+      readonly kind: "workspace" | "direct"
+    }> = []
+    for (const channel of workspaceChannels) {
+      const membership = await ctx.db
+        .query("channelMemberships")
+        .withIndex("by_channel_user", (q) => q.eq("channelId", channel.id).eq("userId", user._id))
+        .unique()
+      if (membership !== null) conversations.push({ channelId: channel.id, membership, kind: "workspace" })
     }
+    const directConversations = await listDirectConversationRecords(ctx, user._id)
+    conversations.push(...directConversations.map(({ channel, membership }) => ({
+      channelId: channel._id,
+      membership,
+      kind: "direct" as const
+    })))
     const indicators: Array<{
       readonly channelId: Id<"channels">
       readonly indicator: "unread" | "mentioned"
     }> = []
 
-    for (const channel of channels) {
-      const membership = membershipsByChannelId.get(channel.id)
-      if (membership === undefined) continue
-
+    for (const { channelId, membership, kind } of conversations) {
       const lastReadAt = membership.lastReadAt ?? membership.createdAt
       const newestUnread = await ctx.db
         .query("messages")
-        .withIndex("by_channel_created_at", (q) => q.eq("channelId", channel.id).gt("createdAt", lastReadAt))
+        .withIndex("by_channel_created_at", (q) => q.eq("channelId", channelId).gt("createdAt", lastReadAt))
         .order("desc")
         .first()
       if (newestUnread === null) continue
 
       // Pre-index history intentionally degrades to `unread` rather than scanning an
       // unbounded message range. New mentions are maintained in messageMentions.
-      const mentioned = await ctx.db
+      const mentioned = kind === "workspace" && await ctx.db
         .query("messageMentions")
         .withIndex("by_channel_user_created_at", (q) =>
-          q.eq("channelId", channel.id).eq("userId", user._id).gt("messageCreatedAt", lastReadAt))
+          q.eq("channelId", channelId).eq("userId", user._id).gt("messageCreatedAt", lastReadAt))
         .first() !== null
-      indicators.push({ channelId: channel.id, indicator: mentioned ? "mentioned" : "unread" })
+      indicators.push({ channelId, indicator: mentioned ? "mentioned" : "unread" })
     }
 
     return indicators
@@ -774,18 +757,8 @@ export const markChannelRead = mutation({
       throw new Error("Read-through message not found in this channel")
     }
 
-    if ((membership.lastReadAt ?? membership.createdAt) >= readThroughMessage.createdAt) {
-      if (membership.mentionTrackingStartedAt === undefined) {
-        await ctx.db.patch(membership._id, { mentionTrackingStartedAt: readThroughMessage.createdAt })
-      }
-      return toChannelView(channel)
-    }
-    await ctx.db.patch(membership._id, {
-      lastReadAt: readThroughMessage.createdAt,
-      ...(membership.mentionTrackingStartedAt === undefined
-        ? { mentionTrackingStartedAt: readThroughMessage.createdAt }
-        : {})
-    })
+    if ((membership.lastReadAt ?? membership.createdAt) >= readThroughMessage.createdAt) return toChannelView(channel)
+    await ctx.db.patch(membership._id, { lastReadAt: readThroughMessage.createdAt })
     return toChannelView(channel)
   })
 })
@@ -853,8 +826,7 @@ export const createChannel = mutation({
       userId: user._id,
       role: visibility === "private" ? "admin" : "member",
       createdAt: now,
-      lastReadAt: now,
-      mentionTrackingStartedAt: now
+      lastReadAt: now
     })
 
     if (visibility === "private") {
@@ -865,8 +837,7 @@ export const createChannel = mutation({
           userId,
           role: "member",
           createdAt: now,
-          lastReadAt: now,
-          mentionTrackingStartedAt: now
+          lastReadAt: now
         })
       }
     }
@@ -987,8 +958,7 @@ export const addPrivateChannelMember = mutation({
       userId: args.userId,
       role: "member",
       createdAt: now,
-      lastReadAt: now,
-      mentionTrackingStartedAt: now
+      lastReadAt: now
     })
     return { channelId: channel._id, userId: args.userId, member: true }
   })

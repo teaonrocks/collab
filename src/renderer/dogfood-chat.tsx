@@ -1,6 +1,6 @@
 import { useAuth } from "@workos-inc/authkit-react"
 import { useAction, useConvex, useConvexAuth, useMutation, usePaginatedQuery, useQuery } from "convex/react"
-import { Component, type ErrorInfo, type ReactNode, useEffect, useMemo, useRef, useState } from "react"
+import { Component, type Dispatch, type ErrorInfo, type ReactNode, type SetStateAction, useEffect, useMemo, useRef, useState } from "react"
 import { api } from "../../convex/_generated/api"
 import type { Id } from "../../convex/_generated/dataModel"
 import type { WindowAccountContext } from "../shared/account-session"
@@ -32,15 +32,6 @@ import {
 import { consumeNotificationFeedPage } from "./desktop-notification-feed"
 import { Button } from "./ui"
 import { WorkspaceChat, type ProfileMenuAction } from "./workspace-chat"
-
-export { dogfoodChatToChatData } from "./dogfood-chat-adapter"
-export type {
-  DogfoodChannelMemberView,
-  DogfoodChannelMessageView,
-  DogfoodChannelView,
-  DogfoodMessageAttachmentView,
-  DogfoodWorkspaceView
-} from "./dogfood-chat-adapter"
 
 type ConvexDogfoodError = {
   readonly message: string
@@ -94,7 +85,6 @@ function ConvexDogfoodChat() {
   const updateDirectMessageProfile = useMutation(api.social.updateProfile)
   const respondToFriendRequest = useMutation(api.social.respondToFriendRequest)
   const updateNotificationPreference = useMutation(api.notification_preferences.updatePreference)
-  const openNotificationFeed = useMutation(api.notification_preferences.openFeed)
   const [ensuredUserId, setEnsuredUserId] = useState<string | null>(null)
   const [selectedConversation, setSelectedConversation] = useState<DogfoodActiveConversation | null>(null)
   const [stableDirectConversations, setStableDirectConversations] = useState<ReadonlyArray<DogfoodDirectConversationView>>([])
@@ -102,14 +92,12 @@ function ConvexDogfoodChat() {
   const [createdChannels, setCreatedChannels] = useState<ReadonlyArray<DogfoodChannelView>>([])
   const [error, setError] = useState<ConvexDogfoodError | null>(null)
   const [signInOpening, setSignInOpening] = useState(false)
-  const [accountContext, setAccountContext] = useState<WindowAccountContext | null>(null)
   const [ensureAttempt, setEnsureAttempt] = useState(0)
   const lastReadMarkerRef = useRef<string | null>(null)
-  const seenNotificationEventIdsRef = useRef(new Set<string>())
-  const [notificationCursor, setNotificationCursor] = useState<number | null>(null)
   const [windowActive, setWindowActive] = useState(() =>
     document.visibilityState === "visible" && document.hasFocus())
   const authUserId = auth.user?.id ?? null
+  const accountContext = useWindowAccountContext(auth.user)
   const sessionReady = authUserId !== null && convexAuth.isAuthenticated
   const viewerReady = sessionReady && ensuredUserId === authUserId && error === null
   const workspace = useQuery(api.chat.defaultWorkspace, viewerReady ? {} : "skip")
@@ -125,7 +113,6 @@ function ConvexDogfoodChat() {
     api.direct_conversations.list,
     viewerReady ? {} : "skip"
   )
-  const directIndicators = useQuery(api.direct_conversations.indicators, viewerReady ? {} : "skip")
   const directMessageProfile = useQuery(api.social.profile, viewerReady ? {} : "skip")
   const incomingFriendRequests = useQuery(api.social.incomingFriendRequests, viewerReady ? {} : "skip")
   useEffect(() => {
@@ -167,8 +154,8 @@ function ConvexDogfoodChat() {
     api.chat.eligiblePrivateChannelMembers,
     workspace === undefined || workspace === null ? "skip" : {}
   )
-  const channelIndicators = useQuery(
-    api.chat.channelIndicators,
+  const conversationIndicators = useQuery(
+    api.chat.conversationIndicators,
     workspace === undefined || workspace === null ? "skip" : { workspaceId: workspace.workspace.id }
   )
   const notificationPreference = useQuery(
@@ -177,59 +164,7 @@ function ConvexDogfoodChat() {
       ? "skip"
       : { channelId: activeChannelId }
   )
-  const notificationEvents = useQuery(
-    api.notification_preferences.feed,
-    viewerReady && notificationCursor !== null ? { cursor: notificationCursor } : "skip"
-  )
-
-  useEffect(() => {
-    if (!viewerReady) {
-      setNotificationCursor(null)
-      seenNotificationEventIdsRef.current.clear()
-      return
-    }
-    let cancelled = false
-    setNotificationCursor(null)
-    seenNotificationEventIdsRef.current.clear()
-    void openNotificationFeed({})
-      .then(({ cursor }) => {
-        if (!cancelled) setNotificationCursor(cursor)
-      })
-      .catch((cause: unknown) => {
-        console.warn("Could not open the desktop notification feed", cause)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [authUserId, openNotificationFeed, viewerReady])
-
-  useEffect(() => {
-    if (activeChannelId === undefined) return
-    void updateDesktopNotificationContext(String(activeChannelId)).catch((cause: unknown) => {
-      console.warn("Could not update the desktop notification context", cause)
-    })
-  }, [activeChannelId])
-
-  useEffect(() => subscribeToDesktopNotificationActivation((activation) => {
-    setSelectedConversation({ kind: activation.conversationKind, id: activation.conversationId as Id<"channels"> })
-  }), [])
-
-  useEffect(() => {
-    if (notificationEvents === undefined) return
-    const page = consumeNotificationFeedPage(notificationEvents, seenNotificationEventIdsRef.current)
-    for (const event of page.notifications) {
-      void showDesktopNotification({
-        messageId: String(event.messageId),
-        conversationId: String(event.channelId),
-        conversationKind: event.conversationKind,
-        title: event.title,
-        body: event.body
-      }).catch((cause: unknown) => {
-        console.warn("Could not show a desktop notification", cause)
-      })
-    }
-    setNotificationCursor((current) => current === null ? page.cursor : Math.max(current, page.cursor))
-  }, [notificationEvents])
+  useDesktopNotificationFeed(viewerReady, authUserId, activeChannelId, setSelectedConversation)
 
   useEffect(() => {
     const updateWindowActivity = () => {
@@ -244,54 +179,6 @@ function ConvexDogfoodChat() {
       document.removeEventListener("visibilitychange", updateWindowActivity)
     }
   }, [])
-
-  useEffect(() => {
-    let cancelled = false
-    let receivedUpdate = false
-    const unsubscribe = subscribeToWindowAccountContext((context) => {
-      receivedUpdate = true
-      if (!cancelled) setAccountContext(context)
-    })
-    void getWindowAccountContext()
-      .then((context) => {
-        if (!cancelled && !receivedUpdate) setAccountContext(context)
-      })
-      .catch((cause: unknown) => {
-        console.warn("Could not load the Aether account list", cause)
-      })
-    return () => {
-      cancelled = true
-      unsubscribe()
-    }
-  }, [])
-
-  useEffect(() => {
-    const user = auth.user
-    if (
-      user === null ||
-      typeof user.email !== "string" ||
-      user.email.length === 0
-    ) {
-      return
-    }
-    const displayName = [user.firstName, user.lastName]
-      .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
-      .join(" ") || user.email
-    let cancelled = false
-    void updateWindowAccountProfile({
-      userId: user.id,
-      displayName,
-      email: user.email,
-      avatarUrl: user.profilePictureUrl
-    }).then((context) => {
-      if (!cancelled && context !== null) setAccountContext(context)
-    }).catch((cause: unknown) => {
-      console.warn("Could not remember the signed-in Aether account", cause)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [auth.user])
 
   useEffect(() => {
     if (workspace === undefined || workspace === null) return
@@ -381,10 +268,9 @@ function ConvexDogfoodChat() {
     }
   }, [auth.isLoading, auth.user, convexAuth.isAuthenticated, convexAuth.isLoading, ensureAttempt, ensureViewer, ensuredUserId])
 
-  const model = useMemo(
-    () => workspace === undefined || workspace === null || channelList === undefined || activeChannelId === undefined
-      ? null
-      : dogfoodChatToChatData({
+  const model = workspace === undefined || workspace === null || channelList === undefined || activeChannelId === undefined
+    ? null
+    : dogfoodChatToChatData({
           data: {
             workspace,
             channels: channelList,
@@ -398,8 +284,7 @@ function ConvexDogfoodChat() {
             members: members ?? [],
             channelMemberInviteCandidates,
             createChannelInviteCandidates,
-            channelIndicators: Array.from(new Map([...(Array.isArray(channelIndicators) ? channelIndicators : []), ...(Array.isArray(directIndicators) ? directIndicators : [])]
-              .map((indicator) => [indicator.channelId, indicator])).values()),
+            channelIndicators: conversationIndicators,
             notificationPreference
           },
           state: {
@@ -474,9 +359,7 @@ function ConvexDogfoodChat() {
             searchMessages: (input) => convex.query(api.chat.searchChannelMessages, input),
             operationErrorMessage: dogfoodOperationErrorMessage
           }
-        }),
-    [activeChannelId, activeKind, addPrivateChannelMember, channelIndicators, channelList, channelMemberInviteCandidates, convex, createChannel, createChannelInviteCandidates, deleteAttachmentUpload, deleteChannel, deleteMessage, directConversations, directIndicators, directMessageProfile, editChannel, editMessage, generateAttachmentUploadUrl, incomingFriendRequests, members, messagePagination, messages, notificationPreference, registerAttachmentUpload, removePrivateChannelMember, respondToFriendRequest, selectedConversation, sendFriendRequest, sendMessage, stableDirectConversations, startOrReopenDirectConversation, toggleMessageReaction, updateDirectMessageProfile, updateNotificationPreference, workspace]
-  )
+        })
 
   if (auth.isLoading) {
     return <DogfoodShell title="Checking Session" variant="plain">Loading your Aether session...</DogfoodShell>
@@ -561,6 +444,117 @@ function ConvexDogfoodChat() {
       profileMenuActions={profileMenuActions(auth, accountContext, setError)}
     />
   )
+}
+
+function useWindowAccountContext(user: ReturnType<typeof useAuth>["user"]): WindowAccountContext | null {
+  const [accountContext, setAccountContext] = useState<WindowAccountContext | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    let receivedUpdate = false
+    const unsubscribe = subscribeToWindowAccountContext((context) => {
+      receivedUpdate = true
+      if (!cancelled) setAccountContext(context)
+    })
+    void getWindowAccountContext()
+      .then((context) => {
+        if (!cancelled && !receivedUpdate) setAccountContext(context)
+      })
+      .catch((cause: unknown) => {
+        console.warn("Could not load the Aether account list", cause)
+      })
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (user === null || typeof user.email !== "string" || user.email.length === 0) return
+    const displayName = [user.firstName, user.lastName]
+      .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
+      .join(" ") || user.email
+    let cancelled = false
+    void updateWindowAccountProfile({
+      userId: user.id,
+      displayName,
+      email: user.email,
+      avatarUrl: user.profilePictureUrl
+    }).then((context) => {
+      if (!cancelled && context !== null) setAccountContext(context)
+    }).catch((cause: unknown) => {
+      console.warn("Could not remember the signed-in Aether account", cause)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [user])
+
+  return accountContext
+}
+
+function useDesktopNotificationFeed(
+  viewerReady: boolean,
+  authUserId: string | null,
+  activeChannelId: Id<"channels"> | undefined,
+  setSelectedConversation: Dispatch<SetStateAction<DogfoodActiveConversation | null>>
+): void {
+  const openFeed = useMutation(api.notification_preferences.openFeed)
+  const seenEventIdsRef = useRef(new Set<string>())
+  const [cursor, setCursor] = useState<number | null>(null)
+  const events = useQuery(
+    api.notification_preferences.feed,
+    viewerReady && cursor !== null ? { cursor } : "skip"
+  )
+
+  useEffect(() => {
+    if (!viewerReady) {
+      setCursor(null)
+      seenEventIdsRef.current.clear()
+      return
+    }
+    let cancelled = false
+    setCursor(null)
+    seenEventIdsRef.current.clear()
+    void openFeed({})
+      .then(({ cursor: openedCursor }) => {
+        if (!cancelled) setCursor(openedCursor)
+      })
+      .catch((cause: unknown) => {
+        console.warn("Could not open the desktop notification feed", cause)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [authUserId, openFeed, viewerReady])
+
+  useEffect(() => {
+    if (activeChannelId === undefined) return
+    void updateDesktopNotificationContext(String(activeChannelId)).catch((cause: unknown) => {
+      console.warn("Could not update the desktop notification context", cause)
+    })
+  }, [activeChannelId])
+
+  useEffect(() => subscribeToDesktopNotificationActivation((activation) => {
+    setSelectedConversation({ kind: activation.conversationKind, id: activation.conversationId as Id<"channels"> })
+  }), [setSelectedConversation])
+
+  useEffect(() => {
+    if (events === undefined) return
+    const page = consumeNotificationFeedPage(events, seenEventIdsRef.current)
+    for (const event of page.notifications) {
+      void showDesktopNotification({
+        messageId: String(event.messageId),
+        conversationId: String(event.channelId),
+        conversationKind: event.conversationKind,
+        title: event.title,
+        body: event.body
+      }).catch((cause: unknown) => {
+        console.warn("Could not show a desktop notification", cause)
+      })
+    }
+    setCursor((current) => current === null ? page.cursor : Math.max(current, page.cursor))
+  }, [events])
 }
 
 const signInInDefaultBrowser = async (

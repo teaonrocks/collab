@@ -4,7 +4,7 @@ import { cn } from "../lib/cn"
 
 export const DropdownMenu = BaseMenu.Root
 export const DropdownMenuTrigger = BaseMenu.Trigger
-export const DropdownMenuPortal = BaseMenu.Portal
+const DropdownMenuPortal = BaseMenu.Portal
 export const DropdownMenuGroup = BaseMenu.Group
 
 export type DropdownMenuContentProps = ComponentProps<typeof BaseMenu.Popup> & {

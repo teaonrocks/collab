@@ -1,6 +1,7 @@
 import type { FunctionArgs, FunctionReturnType } from "convex/server"
 import { api } from "../../convex/_generated/api"
 import type { Id, TableNames } from "../../convex/_generated/dataModel"
+import { isMessageReactionEmoji } from "../shared/reaction-policy"
 import type {
   ChatDataView,
   ChatMessageAttachment
@@ -9,13 +10,12 @@ import type {
 export type DogfoodWorkspaceView = NonNullable<FunctionReturnType<typeof api.chat.defaultWorkspace>>
 export type DogfoodChannelView = FunctionReturnType<typeof api.chat.channels>[number]
 export type DogfoodChannelMessageView = FunctionReturnType<typeof api.chat.channelMessages>["page"][number]
-export type DogfoodMessageAttachmentView = DogfoodChannelMessageView["attachments"][number]
+type DogfoodMessageAttachmentView = DogfoodChannelMessageView["attachments"][number]
 export type DogfoodChannelMemberView = FunctionReturnType<typeof api.chat.channelMembers>[number]
 export type DogfoodPrivateChannelInviteCandidateView = FunctionReturnType<typeof api.chat.eligiblePrivateChannelMembers>[number]
-export type DogfoodChannelIndicatorView = FunctionReturnType<typeof api.chat.channelIndicators>[number]
+type DogfoodChannelIndicatorView = FunctionReturnType<typeof api.chat.conversationIndicators>[number]
 export type DogfoodDirectConversationView = FunctionReturnType<typeof api.direct_conversations.list>[number]
-export type DogfoodDirectConversationCandidateView = FunctionReturnType<typeof api.direct_conversations.candidates>[number]
-export type DogfoodNotificationPreferenceView = FunctionReturnType<typeof api.notification_preferences.preference>
+type DogfoodNotificationPreferenceView = FunctionReturnType<typeof api.notification_preferences.preference>
 
 export type DogfoodActiveConversation =
   | { readonly kind: "channel"; readonly id: Id<"channels"> }
@@ -26,12 +26,9 @@ export type DogfoodChatAdapterInput = {
     readonly workspace: DogfoodWorkspaceView
     readonly channels: ReadonlyArray<DogfoodChannelView>
     readonly directConversations?: ReadonlyArray<DogfoodDirectConversationView>
-    readonly directConversationCandidates?: ReadonlyArray<DogfoodDirectConversationCandidateView>
     readonly directMessageProfile?: FunctionReturnType<typeof api.social.profile>
     readonly incomingFriendRequests?: FunctionReturnType<typeof api.social.incomingFriendRequests>
-    readonly selectedConversation?: DogfoodActiveConversation
-    /** Compatibility for plain adapter callers that have not selected a DM. */
-    readonly selectedChannelId?: Id<"channels">
+    readonly selectedConversation: DogfoodActiveConversation
     readonly messages: ReadonlyArray<DogfoodChannelMessageView>
     readonly members?: ReadonlyArray<DogfoodChannelMemberView>
     readonly channelMemberInviteCandidates?: ReadonlyArray<DogfoodPrivateChannelInviteCandidateView>
@@ -87,10 +84,7 @@ export type DogfoodChatAdapterInput = {
 }
 
 export const dogfoodChatToChatData = ({ data, state, commands }: DogfoodChatAdapterInput): ChatDataView => {
-  const requestedConversation = data.selectedConversation ?? {
-    kind: "channel" as const,
-    id: data.selectedChannelId ?? data.workspace.channel.id
-  }
+  const requestedConversation = data.selectedConversation
   const selectedDirectConversation = requestedConversation.kind === "direct"
     ? data.directConversations?.find((conversation) => conversation.id === requestedConversation.id)
     : undefined
@@ -116,12 +110,6 @@ export const dogfoodChatToChatData = ({ data, state, commands }: DogfoodChatAdap
       activeConversation,
       channels: data.channels.map(toChatChannel),
       directConversations: data.directConversations?.map(toChatDirectConversation) ?? [],
-      directConversationCandidates: data.directConversationCandidates?.map((candidate) => ({
-        id: String(candidate.id),
-        displayName: candidate.displayName,
-        username: candidate.username,
-        canStartDirectMessage: candidate.canStartDirectMessage
-      })),
       directConversationsLoading: state?.directConversationsLoading ?? data.directConversations === undefined,
       directMessageProfile: data.directMessageProfile === undefined ? undefined : {
         username: data.directMessageProfile.username,
@@ -273,14 +261,8 @@ const convexId = <TableName extends TableNames | "_storage">(id: string): Id<Tab
 const toReactionEmoji = (
   emoji: string
 ): FunctionArgs<typeof api.chat.toggleMessageReaction>["emoji"] => {
-  switch (emoji) {
-    case "👍":
-    case "🎉":
-    case "👀":
-      return emoji
-    default:
-      throw new Error("Unsupported reaction emoji")
-  }
+  if (!isMessageReactionEmoji(emoji)) throw new Error("Unsupported reaction emoji")
+  return emoji
 }
 
 const toChatChannel = (channel: Pick<DogfoodChannelView, "id" | "name" | "visibility">) => ({

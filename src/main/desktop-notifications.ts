@@ -6,7 +6,7 @@ import {
 
 const MAX_DEDUPLICATION_KEYS = 1_000
 
-export type DesktopNotificationWindow = {
+type DesktopNotificationWindow = {
   readonly id: number
   readonly webContents: { readonly send: (channel: string, payload: DesktopNotificationActivation) => void }
   readonly isDestroyed: () => boolean

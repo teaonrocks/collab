@@ -84,45 +84,36 @@ describe("global direct conversations", () => {
       .resolves.toEqual([expect.objectContaining({ friendship: "accepted", friendRequestDirection: null, canStartDirectMessage: true })])
   })
 
-  it("reports unread state for a global DM independently of a workspace", async () => {
-    const t = convexTest(schema, modules)
-    await initialize(t, maya)
-    const leeUser = await initialize(t, lee)
-    const dm = await t.withIdentity(maya).mutation(api.direct_conversations.startOrReopen, { recipientUserId: leeUser.userId })
-    await t.run(async (ctx) => {
-      const membership = await ctx.db.query("channelMemberships")
-        .withIndex("by_channel_user", (q) => q.eq("channelId", dm.id).eq("userId", leeUser.userId)).unique()
-      if (membership === null) throw new Error("Expected DM membership")
-      await ctx.db.patch(membership._id, { lastReadAt: 1 })
-    })
-    await t.withIdentity(maya).mutation(api.chat.sendMessage, { channelId: dm.id, body: "Global unread" })
-    await expect(t.withIdentity(lee).query(api.direct_conversations.indicators, {}))
-      .resolves.toEqual([{ channelId: dm.id, indicator: "unread" }])
-  })
-
-  it("globalizes a legacy workspace DM without choosing between duplicate pairs", async () => {
+  it("combines workspace mentions with global DM unread state without treating DM mentions specially", async () => {
     const t = convexTest(schema, modules)
     const mayaUser = await initialize(t, maya)
     const leeUser = await initialize(t, lee)
-    const now = Date.now()
-    const pairKey = [mayaUser.userId, leeUser.userId].sort().join(":")
-    const channelId = await t.run(async (ctx) => {
-      const id = await ctx.db.insert("channels", {
-        workspaceId: mayaUser.workspaceId,
-        key: `direct-${pairKey}`,
-        name: "Direct conversation",
-        visibility: "private",
-        kind: "direct",
-        directPairKey: pairKey,
-        createdAt: now
-      })
-      for (const userId of [mayaUser.userId, leeUser.userId]) {
-        await ctx.db.insert("channelMemberships", { channelId: id, workspaceId: mayaUser.workspaceId, channelKind: "direct", userId, role: "member", createdAt: now })
-      }
-      return id
+    const dm = await t.withIdentity(maya).mutation(api.direct_conversations.startOrReopen, { recipientUserId: leeUser.userId })
+    await t.run(async (ctx) => {
+      const dmMembership = await ctx.db.query("channelMemberships")
+        .withIndex("by_channel_user", (q) => q.eq("channelId", dm.id).eq("userId", leeUser.userId)).unique()
+      const workspaceMembership = await ctx.db.query("channelMemberships")
+        .withIndex("by_channel_user", (q) => q.eq("channelId", leeUser.channelId).eq("userId", leeUser.userId)).unique()
+      if (dmMembership === null || workspaceMembership === null) throw new Error("Expected Lee memberships")
+      await Promise.all([
+        ctx.db.patch(dmMembership._id, { lastReadAt: 1 }),
+        ctx.db.patch(workspaceMembership._id, { lastReadAt: 1 })
+      ])
     })
-    await expect(t.mutation(internal.migrations.globalizeLegacyDirectConversations, { workspaceId: mayaUser.workspaceId, dryRun: false }))
-      .resolves.toMatchObject({ changes: [{ channelId, action: "globalized" }] })
-    await expect(t.run((ctx) => ctx.db.get(channelId))).resolves.toSatisfy((channel) => channel?.workspaceId === undefined)
+    await t.withIdentity(maya).mutation(api.chat.sendMessage, {
+      channelId: mayaUser.channelId,
+      body: "@lee Workspace mention"
+    })
+    await t.withIdentity(maya).mutation(api.chat.sendMessage, { channelId: dm.id, body: "@lee Global unread" })
+
+    const indicators = await t.withIdentity(lee).query(api.chat.conversationIndicators, {
+      workspaceId: leeUser.workspaceId
+    })
+    expect(indicators).toHaveLength(2)
+    expect(indicators).toEqual(expect.arrayContaining([
+      { channelId: leeUser.channelId, indicator: "mentioned" },
+      { channelId: dm.id, indicator: "unread" }
+    ]))
   })
+
 })

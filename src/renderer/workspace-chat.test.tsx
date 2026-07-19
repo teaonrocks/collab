@@ -3,27 +3,21 @@ import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within }
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type {
   ChatChannel,
+  ChatChannelMember,
   ChatDataModel,
   ChatMessage,
-  ChatMessageAttachment,
-  ChatMessageParent,
-  ChatMessageReaction
+  ChatMessageAttachment
 } from "./chat-data"
-import { WorkspaceChat } from "./workspace-chat"
+import { WorkspaceChat, type WorkspaceChatProps } from "./workspace-chat"
 
 afterEach(cleanup)
 
 const userId = "human-1"
-const workspaceId = "workspace-1"
 const channelId = "channel-1"
 const secondChannelId = "channel-2"
 const messageId = "message-1"
 
-const makeChannel = <T extends ChatChannel>(channel: T): ChatChannel => ({
-  id: channel.id,
-  name: channel.name,
-  visibility: channel.visibility
-})
+const makeChannel = (channel: ChatChannel): ChatChannel => channel
 
 type MessageFixture = Pick<
   ChatMessage,
@@ -39,10 +33,6 @@ const makeMessage = (message: MessageFixture): ChatMessage => ({
   attachments: [],
   ...message
 })
-
-const makeAttachment = <T extends ChatMessageAttachment>(attachment: T): ChatMessageAttachment => attachment
-const makeParent = <T extends ChatMessageParent>(parent: T): ChatMessageParent => parent
-const makeReaction = <T extends ChatMessageReaction>(reaction: T): ChatMessageReaction => reaction
 
 const makeChatModel = (messages: ReadonlyArray<ChatMessage> = [
   makeMessage({
@@ -69,10 +59,19 @@ const makeChatModel = (messages: ReadonlyArray<ChatMessage> = [
   channelMessagesLoading: false
 })
 
+const TestWorkspaceChat = ({ model, ...props }: { readonly model: ChatDataModel } & Partial<WorkspaceChatProps>) => (
+  <WorkspaceChat
+    model={model}
+    createChannelMessage={() => Promise.resolve()}
+    deleteChannelMessage={() => Promise.resolve()}
+    {...props}
+  />
+)
+
 const renderWorkspaceChat = (model: ChatDataModel) => {
   const calls: Array<{ method: string; args: unknown }> = []
   render(
-    <WorkspaceChat
+    <TestWorkspaceChat
       model={model}
       createChannelMessage={(input) => {
         calls.push({ method: "createChannelMessage", args: input })
@@ -112,13 +111,11 @@ describe("WorkspaceChat", () => {
   it("offers channel notification modes and saves the selected preference", async () => {
     const updates: Array<{ readonly channelId: string; readonly mode: "all" | "mentions" | "off" }> = []
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={{
           ...makeChatModel(),
           notificationPreference: { mode: "mentions", options: ["all", "mentions", "off"] }
         }}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
         updateNotificationPreference={(input) => {
           updates.push(input)
           return Promise.resolve({ mode: input.mode, options: ["all", "mentions", "off"] })
@@ -138,15 +135,13 @@ describe("WorkspaceChat", () => {
   it("omits mention-only notification mode for direct conversations", async () => {
     const directConversation = { id: "direct-1", otherUser: { id: "user-2", displayName: "Lee Chen" } }
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={{
           ...makeChatModel(),
           activeConversation: { kind: "direct", directConversation },
           directConversations: [directConversation],
           notificationPreference: { mode: "all", options: ["all", "off"] }
         }}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
         updateNotificationPreference={(input) => Promise.resolve({ mode: input.mode, options: ["all", "off"] })}
       />
     )
@@ -161,10 +156,8 @@ describe("WorkspaceChat", () => {
   it("presents explicit direct conversations in the global rail", async () => {
     const model = makeChatModel()
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={{ ...model, directConversations: [{ id: "direct-1", otherUser: { id: "user-2", displayName: "Lee Chen" } }] }}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
       />
     )
 
@@ -186,14 +179,12 @@ describe("WorkspaceChat", () => {
   it("announces inactive direct-message unread state in the rail button label", async () => {
     const directConversation = { id: "direct-1", otherUser: { id: "user-2", displayName: "Lee Chen" } }
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={{
           ...makeChatModel(),
           directConversations: [directConversation],
           channelIndicators: [{ channelId: directConversation.id, indicator: "unread" }]
         }}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
       />
     )
 
@@ -210,14 +201,12 @@ describe("WorkspaceChat", () => {
   it("announces inactive direct-message mention state in the rail button label", async () => {
     const directConversation = { id: "direct-1", otherUser: { id: "user-2", displayName: "Lee Chen" } }
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={{
           ...makeChatModel(),
           directConversations: [directConversation],
           channelIndicators: [{ channelId: directConversation.id, indicator: "mentioned" }]
         }}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
       />
     )
 
@@ -234,15 +223,13 @@ describe("WorkspaceChat", () => {
   it("does not announce stale unread state on the active direct message", async () => {
     const directConversation = { id: "direct-1", otherUser: { id: "user-2", displayName: "Lee Chen" } }
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={{
           ...makeChatModel(),
           activeConversation: { kind: "direct", directConversation },
           directConversations: [directConversation],
           channelIndicators: [{ channelId: directConversation.id, indicator: "mentioned" }]
         }}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
       />
     )
 
@@ -262,21 +249,24 @@ describe("WorkspaceChat", () => {
       resolveStart = resolve
     })
     const starts = vi.fn(() => pending)
+    const searchCandidates = vi.fn().mockResolvedValue([{
+      id: "user-2",
+      displayName: "Lee Chen",
+      username: "lee",
+      canStartDirectMessage: true
+    }])
     render(
-      <WorkspaceChat
-        model={{
-          ...makeChatModel(),
-          directConversationCandidates: [{ id: "user-2", displayName: "Lee Chen" }]
-        }}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
+      <TestWorkspaceChat
+        model={makeChatModel()}
         startDirectConversation={starts}
+        searchDirectConversationCandidates={searchCandidates}
       />
     )
 
     fireEvent.click(await screen.findByRole("button", { name: "Start direct message" }))
     const dialog = await screen.findByRole("dialog")
-    const recipient = within(dialog).getByRole("button", { name: "Lee Chen" })
+    fireEvent.change(within(dialog).getByPlaceholderText("Search usernames"), { target: { value: "lee" } })
+    const recipient = await within(dialog).findByRole("button", { name: "Lee Chen" })
     fireEvent.click(recipient)
     fireEvent.click(recipient)
 
@@ -292,22 +282,25 @@ describe("WorkspaceChat", () => {
       id: "direct-1",
       otherUser: { id: "user-2", displayName: "Lee Chen" }
     })
-    const base = makeChatModel()
-    const props = {
-      createChannelMessage: () => Promise.resolve(),
-      deleteChannelMessage: () => Promise.resolve(),
-      startDirectConversation: starts
-    }
-    const { rerender } = render(<WorkspaceChat {...props} model={{ ...base, directConversationCandidates: undefined }} />)
+    let resolveSearch!: (results: ReadonlyArray<ChatChannelMember>) => void
+    const searchCandidates = vi.fn((query: string) => query.toLowerCase() === "nobody"
+      ? Promise.resolve([])
+      : new Promise<ReadonlyArray<ChatChannelMember>>((resolve) => { resolveSearch = resolve }))
+    render(<TestWorkspaceChat
+      model={makeChatModel()}
+      startDirectConversation={starts}
+      searchDirectConversationCandidates={searchCandidates}
+    />)
 
     fireEvent.click(await screen.findByRole("button", { name: "Start direct message" }))
-    expect(await screen.findByText("Loading accounts...")).toBeTruthy()
-
-    rerender(<WorkspaceChat {...props} model={{ ...base, directConversationCandidates: [{ id: "user-2", displayName: "Lee Chen" }] }} />)
     const search = await screen.findByPlaceholderText("Search usernames")
-    fireEvent.change(search, { target: { value: "nobody" } })
-    expect(await screen.findByText("No matching accounts.")).toBeTruthy()
     fireEvent.change(search, { target: { value: "Lee" } })
+    expect(await screen.findByText("Loading accounts...")).toBeTruthy()
+    await act(async () => resolveSearch([{ id: "user-2", displayName: "Lee Chen", username: "lee" }]))
+    fireEvent.change(search, { target: { value: "nobody" } })
+    expect(await screen.findByText("No accounts are available.")).toBeTruthy()
+    fireEvent.change(search, { target: { value: "Lee" } })
+    await act(async () => resolveSearch([{ id: "user-2", displayName: "Lee Chen", username: "lee" }]))
     fireEvent.click(await screen.findByRole("button", { name: "Lee Chen" }))
     expect((await screen.findByRole("alert")).textContent).toContain("Check your connection and try again")
     fireEvent.click(await screen.findByRole("button", { name: "Lee Chen" }))
@@ -324,10 +317,8 @@ describe("WorkspaceChat", () => {
     }))
 
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={makeChatModel()}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
         startDirectConversation={() => Promise.reject(new Error("not used"))}
         searchDirectConversationCandidates={searchCandidates}
       />
@@ -369,10 +360,8 @@ describe("WorkspaceChat", () => {
     const sendFriendRequest = vi.fn().mockResolvedValue({ status: "accepted" })
 
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={makeChatModel()}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
         startDirectConversation={() => Promise.reject(new Error("not used"))}
         searchDirectConversationCandidates={searchCandidates}
         sendFriendRequest={sendFriendRequest}
@@ -393,18 +382,15 @@ describe("WorkspaceChat", () => {
     const directConversations = [{ id: "direct-1", otherUser: { id: "user-2", displayName: "Lee Chen" } }]
     const secondChannel = makeChannel({
       id: secondChannelId,
-      workspaceId,
       name: "design",
       visibility: "public",
-      createdBy: userId,
-      createdAt: 3
     })
     const props = {
       createChannelMessage: () => Promise.resolve(),
       deleteChannelMessage: () => Promise.resolve()
     }
     const { rerender } = render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         {...props}
         model={{ ...base, channels: [base.channel, secondChannel], directConversations }}
       />
@@ -415,7 +401,7 @@ describe("WorkspaceChat", () => {
     expect(await within(directMessages).findByRole("button", { name: "Lee Chen" })).toBeTruthy()
 
     rerender(
-      <WorkspaceChat
+      <TestWorkspaceChat
         {...props}
         model={{
           ...base,
@@ -440,14 +426,12 @@ describe("WorkspaceChat", () => {
     const directConversation = { id: "direct-1", otherUser: { id: "user-2", displayName: "Lee Chen" } }
     const selectChannel = vi.fn()
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={{
           ...makeChatModel(),
           activeConversation: { kind: "direct", directConversation },
           directConversations: [directConversation]
         }}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
         selectChannel={selectChannel}
       />
     )
@@ -469,19 +453,14 @@ describe("WorkspaceChat", () => {
     const base = makeChatModel()
     const secondChannel = makeChannel({
       id: secondChannelId,
-      workspaceId,
       name: "design",
       visibility: "public",
-      createdBy: userId,
-      createdAt: 3
     })
     const selections: Array<string> = []
 
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={{ ...base, channels: [base.channel, secondChannel] }}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
         selectChannel={(id) => selections.push(id)}
       />
     )
@@ -500,10 +479,8 @@ describe("WorkspaceChat", () => {
 
   it("uses icon-only channel visibility cues outside the channel header", async () => {
     const { container } = render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={makeChatModel()}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
       />
     )
 
@@ -517,19 +494,14 @@ describe("WorkspaceChat", () => {
     const calls: Array<{ readonly name: string; readonly visibility?: "public" | "private" }> = []
 
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={makeChatModel()}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
         createChannel={(input) => {
           calls.push(input)
           return Promise.resolve(makeChannel({
             id: secondChannelId,
-            workspaceId,
             name: input.name,
             visibility: input.visibility ?? "public",
-            createdBy: userId,
-            createdAt: 4
           }))
         }}
       />
@@ -558,10 +530,8 @@ describe("WorkspaceChat", () => {
     ]
 
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={{ ...makeChatModel(), createChannelInviteCandidates: inviteCandidates }}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
         createChannel={(input) => {
           calls.push(input)
           return Promise.resolve(makeChannel({ id: secondChannelId, name: input.name, visibility: "private" }))
@@ -608,7 +578,7 @@ describe("WorkspaceChat", () => {
       deleteChannelMessage: () => Promise.resolve(),
       createChannel: () => Promise.reject(new Error("not submitted"))
     }
-    const { rerender } = render(<WorkspaceChat {...props} model={makeChatModel()} />)
+    const { rerender } = render(<TestWorkspaceChat {...props} model={makeChatModel()} />)
 
     fireEvent.click(await screen.findByRole("button", { name: "Add channel" }))
     let form = await screen.findByRole("form", { name: "Create channel" })
@@ -617,7 +587,7 @@ describe("WorkspaceChat", () => {
     fireEvent.change(within(form).getByLabelText("Channel name"), { target: { value: "ops" } })
     expect((within(form).getByRole("button", { name: "Create" }) as HTMLButtonElement).disabled).toBe(true)
 
-    rerender(<WorkspaceChat {...props} model={{ ...makeChatModel(), createChannelInviteCandidates: [] }} />)
+    rerender(<TestWorkspaceChat {...props} model={{ ...makeChatModel(), createChannelInviteCandidates: [] }} />)
     form = await screen.findByRole("form", { name: "Create channel" })
     expect(within(form).getByText(/No other eligible members yet/)).toBeTruthy()
     expect((within(form).getByRole("button", { name: "Create" }) as HTMLButtonElement).disabled).toBe(false)
@@ -625,17 +595,12 @@ describe("WorkspaceChat", () => {
 
   it("keeps the channel creation dialog state scoped to an open attempt", async () => {
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={makeChatModel()}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
         createChannel={() => Promise.resolve(makeChannel({
           id: secondChannelId,
-          workspaceId,
           name: "product",
           visibility: "public",
-          createdBy: userId,
-          createdAt: 4
         }))}
       />
     )
@@ -664,13 +629,11 @@ describe("WorkspaceChat", () => {
 
   it("shows channel creation backend errors without collapsing reserved error space", async () => {
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={{
           ...makeChatModel(),
           createChannelInviteCandidates: [{ id: "human-2", displayName: "Lee Chen" }]
         }}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
         createChannel={() => Promise.reject(new Error("raw backend details"))}
       />
     )
@@ -698,19 +661,14 @@ describe("WorkspaceChat", () => {
     const calls: Array<{ readonly name: string }> = []
 
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={makeChatModel()}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
         createChannel={(input) => {
           calls.push(input)
           return Promise.resolve(makeChannel({
             id: secondChannelId,
-            workspaceId,
             name: input.name,
             visibility: "public",
-            createdBy: userId,
-            createdAt: 4
           }))
         }}
       />
@@ -734,10 +692,8 @@ describe("WorkspaceChat", () => {
     const calls: Array<{ readonly name: string }> = []
 
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={makeChatModel()}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
         createChannel={(input) => {
           calls.push(input)
           return Promise.reject(new Error("Channel already exists"))
@@ -762,10 +718,8 @@ describe("WorkspaceChat", () => {
   it("opens profile settings from the rail avatar", async () => {
     let signOuts = 0
     const { container } = render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={makeChatModel()}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
         profileMenuActions={[{ label: "Sign out", onSelect: () => signOuts++ }]}
       />
     )
@@ -793,22 +747,17 @@ describe("WorkspaceChat", () => {
     const base = makeChatModel()
     const secondChannel = makeChannel({
       id: secondChannelId,
-      workspaceId,
       name: "design",
       visibility: "public",
-      createdBy: userId,
-      createdAt: 3
     })
 
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={{
           ...base,
           channels: [base.channel, secondChannel],
           channelIndicators: [{ channelId: secondChannelId, indicator: "unread" }]
         }}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
       />
     )
 
@@ -824,22 +773,17 @@ describe("WorkspaceChat", () => {
     const base = makeChatModel()
     const secondChannel = makeChannel({
       id: secondChannelId,
-      workspaceId,
       name: "design",
       visibility: "public",
-      createdBy: userId,
-      createdAt: 3
     })
 
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={{
           ...base,
           channels: [base.channel, secondChannel],
           channelIndicators: [{ channelId: secondChannelId, indicator: "mentioned" }]
         }}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
       />
     )
 
@@ -855,13 +799,11 @@ describe("WorkspaceChat", () => {
     const base = makeChatModel()
 
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={{
           ...base,
           channelIndicators: [{ channelId, indicator: "mentioned" }]
         }}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
       />
     )
 
@@ -896,7 +838,7 @@ describe("WorkspaceChat", () => {
 
   it("searches current channel messages and highlights a selected result", async () => {
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={makeChatModel([
           makeMessage({
             id: "message-1",
@@ -929,8 +871,6 @@ describe("WorkspaceChat", () => {
             deletedAt: 8
           })
         ])}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
       />
     )
 
@@ -989,10 +929,8 @@ describe("WorkspaceChat", () => {
     })
     const searchChannelMessages = vi.fn().mockResolvedValue([olderMessage])
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={{ ...makeChatModel([currentMessage]), channelMessagesHasMore: true }}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
         searchChannelMessages={searchChannelMessages}
       />
     )
@@ -1026,14 +964,14 @@ describe("WorkspaceChat", () => {
       deleteChannelMessage: () => Promise.resolve(),
       searchChannelMessages
     }
-    const { rerender } = render(<WorkspaceChat {...props} model={{ ...base, directConversations: [directConversation] }} />)
+    const { rerender } = render(<TestWorkspaceChat {...props} model={{ ...base, directConversations: [directConversation] }} />)
 
     fireEvent.click(await screen.findByRole("button", { name: "Show search" }))
     fireEvent.change(await screen.findByPlaceholderText("Search origination"), { target: { value: "archive" } })
     await waitFor(() => expect(searchChannelMessages).toHaveBeenCalledWith({ channelId, query: "archive" }))
 
     rerender(
-      <WorkspaceChat
+      <TestWorkspaceChat
         {...props}
         model={{
           ...base,
@@ -1059,7 +997,7 @@ describe("WorkspaceChat", () => {
 
   it("navigates message search results with the keyboard", async () => {
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={makeChatModel([
           makeMessage({
             id: "message-1",
@@ -1092,8 +1030,6 @@ describe("WorkspaceChat", () => {
             deletedAt: null
           })
         ])}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
       />
     )
 
@@ -1132,7 +1068,7 @@ describe("WorkspaceChat", () => {
 
   it("moves Escape from a selected message to the input, then closes search without clearing the query", async () => {
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={makeChatModel([
           makeMessage({
             id: "message-1",
@@ -1165,8 +1101,6 @@ describe("WorkspaceChat", () => {
             deletedAt: null
           })
         ])}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
       />
     )
 
@@ -1192,10 +1126,8 @@ describe("WorkspaceChat", () => {
 
   it("shows message search empty and error states", async () => {
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={makeChatModel()}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
       />
     )
 
@@ -1252,11 +1184,8 @@ describe("WorkspaceChat", () => {
     })
     const secondChannel = makeChannel({
       id: secondChannelId,
-      workspaceId,
       name: "design",
       visibility: "public",
-      createdBy: userId,
-      createdAt: 3
     })
     const props = {
       createChannelMessage: () => pendingSend,
@@ -1264,7 +1193,7 @@ describe("WorkspaceChat", () => {
     }
     const base = makeChatModel([])
     const { rerender } = render(
-      <WorkspaceChat {...props} model={{ ...base, channels: [base.channel, secondChannel] }} />
+      <TestWorkspaceChat {...props} model={{ ...base, channels: [base.channel, secondChannel] }} />
     )
 
     const firstInput = await screen.findByPlaceholderText("Message origination")
@@ -1272,7 +1201,7 @@ describe("WorkspaceChat", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }))
 
     rerender(
-      <WorkspaceChat
+      <TestWorkspaceChat
         {...props}
         model={{
           ...base,
@@ -1348,7 +1277,7 @@ describe("WorkspaceChat", () => {
         createdAt: 3,
         deletedAt: null,
         parentMessageId: messageId,
-        parentMessage: makeParent({
+        parentMessage: ({
           id: messageId,
           authorDisplayName: "Maya Patel",
           bodyPreview: "The partner brief needs a concise risk summary.",
@@ -1394,7 +1323,7 @@ describe("WorkspaceChat", () => {
         createdAt: 2,
         deletedAt: null,
         attachments: [
-          makeAttachment({
+          ({
             id: "attachment-1",
             storageId: "storage-1",
             name: "brief.png",
@@ -1403,7 +1332,7 @@ describe("WorkspaceChat", () => {
             kind: "image",
             url: "https://files.example/brief.png"
           }),
-          makeAttachment({
+          ({
             id: "attachment-2",
             storageId: "storage-2",
             name: "notes.pdf",
@@ -1412,7 +1341,7 @@ describe("WorkspaceChat", () => {
             kind: "file",
             url: "javascript:alert(1)"
           }),
-          makeAttachment({
+          ({
             id: "attachment-3",
             storageId: "storage-3",
             name: "insecure.txt",
@@ -1448,7 +1377,7 @@ describe("WorkspaceChat", () => {
   it("filters and inserts mention suggestions from the composer with the keyboard", async () => {
     const calls: Array<{ readonly channelId: string; readonly body: string }> = []
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={{
           ...makeChatModel([]),
           channelMembers: [
@@ -1460,7 +1389,6 @@ describe("WorkspaceChat", () => {
           calls.push(input)
           return Promise.resolve()
         }}
-        deleteChannelMessage={() => Promise.resolve()}
       />
     )
     const input = await screen.findByPlaceholderText("Message origination")
@@ -1492,7 +1420,7 @@ describe("WorkspaceChat", () => {
 
   it("inserts mention suggestions from the composer with the mouse", async () => {
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={{
           ...makeChatModel([]),
           channelMembers: [
@@ -1500,8 +1428,6 @@ describe("WorkspaceChat", () => {
             { id: "human-3", displayName: "Mina Rao" }
           ]
         }}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
       />
     )
     const input = await screen.findByPlaceholderText("Message origination")
@@ -1515,13 +1441,11 @@ describe("WorkspaceChat", () => {
 
   it("dismisses mention suggestions from the composer without changing the draft", async () => {
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={{
           ...makeChatModel([]),
           channelMembers: [{ id: "human-2", displayName: "Lee Chen" }]
         }}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
       />
     )
     const input = await screen.findByPlaceholderText("Message origination")
@@ -1591,10 +1515,8 @@ describe("WorkspaceChat", () => {
     ])
 
     const { container } = render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={model}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
       />
     )
 
@@ -1622,10 +1544,8 @@ describe("WorkspaceChat", () => {
 
   it("shows channel skeletons while selected channel messages load", async () => {
     const { container } = render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={{ ...makeChatModel([]), channelMessagesLoading: true }}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
       />
     )
 
@@ -1639,7 +1559,7 @@ describe("WorkspaceChat", () => {
 
   it("shows membership-backed channel members before they post", async () => {
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={{
           ...makeChatModel([]),
           channelMembers: [
@@ -1647,8 +1567,6 @@ describe("WorkspaceChat", () => {
             { id: userId, displayName: "Maya Patel" }
           ]
         }}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
       />
     )
 
@@ -1676,7 +1594,7 @@ describe("WorkspaceChat", () => {
       removeChannelMember: vi.fn(() => Promise.resolve())
     }
     const { rerender } = render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         {...props}
         model={{
           ...base,
@@ -1703,7 +1621,7 @@ describe("WorkspaceChat", () => {
     expect(within(dialog).queryByText("Lee Chen was added.")).toBeNull()
 
     rerender(
-      <WorkspaceChat
+      <TestWorkspaceChat
         {...props}
         model={{
           ...base,
@@ -1723,7 +1641,7 @@ describe("WorkspaceChat", () => {
     const addChannelMember = vi.fn(() => Promise.reject(new Error("private backend detail")))
     const removeChannelMember = vi.fn(() => Promise.resolve())
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={{
           ...makeChatModel([]),
           channelMembers: [
@@ -1732,8 +1650,6 @@ describe("WorkspaceChat", () => {
           ],
           channelMemberInviteCandidates: [{ id: "human-3", displayName: "Diego Rivera" }]
         }}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
         addChannelMember={addChannelMember}
         removeChannelMember={removeChannelMember}
       />
@@ -1761,7 +1677,7 @@ describe("WorkspaceChat", () => {
     }
     const base = makeChatModel([])
     const { rerender } = render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         {...commands}
         model={{
           ...base,
@@ -1770,14 +1686,12 @@ describe("WorkspaceChat", () => {
             { id: "human-2", displayName: "Lee Chen", role: "admin" }
           ]
         }}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
       />
     )
 
     expect(screen.queryByRole("button", { name: "Manage channel members" })).toBeNull()
     rerender(
-      <WorkspaceChat
+      <TestWorkspaceChat
         {...commands}
         model={{
           ...base,
@@ -1785,8 +1699,6 @@ describe("WorkspaceChat", () => {
           channels: [makeChannel({ id: channelId, name: "origination", visibility: "public" })],
           channelMembers: [{ id: userId, displayName: "Maya Patel", role: "admin" }]
         }}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
       />
     )
     expect(screen.queryByRole("button", { name: "Manage channel members" })).toBeNull()
@@ -1795,10 +1707,8 @@ describe("WorkspaceChat", () => {
 
   it("shows an empty channel members state", async () => {
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={{ ...makeChatModel([]), channelMembers: [] }}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
       />
     )
 
@@ -1807,10 +1717,9 @@ describe("WorkspaceChat", () => {
 
   it("shows a compact send failure when an operation formatter is provided", async () => {
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={makeChatModel()}
         createChannelMessage={() => Promise.reject(new Error("backend token details"))}
-        deleteChannelMessage={() => Promise.resolve()}
         operationErrorMessage={() => "Could not send message. Check your connection and try again."}
       />
     )
@@ -1827,7 +1736,7 @@ describe("WorkspaceChat", () => {
     const calls: Array<unknown> = []
     const upload = vi.fn()
       .mockRejectedValueOnce(new Error("upload token expired"))
-      .mockResolvedValueOnce(makeAttachment({
+      .mockResolvedValueOnce(({
         id: "storage-1",
         storageId: "storage-1",
         name: "brief.png",
@@ -1838,14 +1747,13 @@ describe("WorkspaceChat", () => {
       }))
 
     const { container } = render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={makeChatModel([])}
         createChannelMessage={(input) => {
           calls.push(input)
           return Promise.resolve()
         }}
         uploadMessageAttachment={upload}
-        deleteChannelMessage={() => Promise.resolve()}
         operationErrorMessage={(operation) =>
           operation === "attach"
             ? "Could not upload attachment. Check your connection and try again."
@@ -1884,11 +1792,8 @@ describe("WorkspaceChat", () => {
     const discard = vi.fn(() => Promise.resolve())
     const secondChannel = makeChannel({
       id: secondChannelId,
-      workspaceId,
       name: "design",
       visibility: "public",
-      createdBy: userId,
-      createdAt: 3
     })
     const base = makeChatModel([])
     const props = {
@@ -1898,7 +1803,7 @@ describe("WorkspaceChat", () => {
       deleteChannelMessage: () => Promise.resolve()
     }
     const { container, rerender } = render(
-      <WorkspaceChat {...props} model={{ ...base, channels: [base.channel, secondChannel] }} />
+      <TestWorkspaceChat {...props} model={{ ...base, channels: [base.channel, secondChannel] }} />
     )
     const fileInput = container.querySelector("input[type='file']") as HTMLInputElement
     fireEvent.change(fileInput, {
@@ -1906,7 +1811,7 @@ describe("WorkspaceChat", () => {
     })
 
     rerender(
-      <WorkspaceChat
+      <TestWorkspaceChat
         {...props}
         model={{
           ...base,
@@ -1918,7 +1823,7 @@ describe("WorkspaceChat", () => {
     )
     const nextInput = await screen.findByPlaceholderText("Message design")
     fireEvent.change(nextInput, { target: { value: "Keep this design draft." } })
-    const uploaded = makeAttachment({
+    const uploaded: ChatMessageAttachment = ({
       id: "storage-1",
       storageId: "storage-1",
       name: "brief.png",
@@ -1936,7 +1841,7 @@ describe("WorkspaceChat", () => {
   })
 
   it("rejects invalid files before upload and cleans successful uploads after a partial batch failure", async () => {
-    const uploaded = makeAttachment({
+    const uploaded: ChatMessageAttachment = ({
       id: "storage-1", storageId: "storage-1", name: "brief.png", contentType: "image/png",
       size: 5, kind: "image", url: null
     })
@@ -1945,12 +1850,10 @@ describe("WorkspaceChat", () => {
       .mockRejectedValueOnce(new Error("second upload failed"))
     const discard = vi.fn(() => Promise.resolve())
     const { container } = render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={makeChatModel([])}
-        createChannelMessage={() => Promise.resolve()}
         uploadMessageAttachment={upload}
         discardMessageAttachment={discard}
-        deleteChannelMessage={() => Promise.resolve()}
       />
     )
     const fileInput = container.querySelector("input[type='file']") as HTMLInputElement
@@ -2068,10 +1971,8 @@ describe("WorkspaceChat", () => {
 
   it("shows reaction buttons beside the icon More button in the inline message actions", async () => {
     const { container } = render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={makeChatModel()}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
         toggleMessageReaction={() => Promise.resolve()}
       />
     )
@@ -2089,7 +1990,7 @@ describe("WorkspaceChat", () => {
   it("renders message reactions under the message and toggles the selected emoji", async () => {
     const calls: Array<{ readonly messageId: string; readonly emoji: string }> = []
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={makeChatModel([
           makeMessage({
             id: messageId,
@@ -2100,11 +2001,9 @@ describe("WorkspaceChat", () => {
             body: "The partner brief needs a concise risk summary.",
             createdAt: 2,
             deletedAt: null,
-            reactions: [makeReaction({ emoji: "👍", count: 2, reactedByCurrentUser: true })]
+            reactions: [({ emoji: "👍", count: 2, reactedByCurrentUser: true })]
           })
         ])}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
         toggleMessageReaction={(input) => {
           calls.push({ messageId: input.messageId, emoji: input.emoji })
           return Promise.resolve()
@@ -2132,7 +2031,7 @@ describe("WorkspaceChat", () => {
 
   it("rolls back an optimistic reaction and shows an error when the mutation fails", async () => {
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={makeChatModel([
           makeMessage({
             id: messageId,
@@ -2143,11 +2042,9 @@ describe("WorkspaceChat", () => {
             body: "The partner brief needs a concise risk summary.",
             createdAt: 2,
             deletedAt: null,
-            reactions: [makeReaction({ emoji: "👍", count: 2, reactedByCurrentUser: true })]
+            reactions: [({ emoji: "👍", count: 2, reactedByCurrentUser: true })]
           })
         ])}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
         toggleMessageReaction={() => Promise.reject(new Error("offline"))}
       />
     )
@@ -2206,9 +2103,8 @@ describe("WorkspaceChat", () => {
     ])
 
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={model}
-        createChannelMessage={() => Promise.resolve()}
         editChannelMessage={(input) => {
           calls.push({ method: "editChannelMessage", args: input })
           return Promise.resolve()
@@ -2236,14 +2132,12 @@ describe("WorkspaceChat", () => {
     const calls: Array<{ method: string; args: unknown }> = []
 
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={makeChatModel()}
-        createChannelMessage={() => Promise.resolve()}
         editChannelMessage={(input) => {
           calls.push({ method: "editChannelMessage", args: input })
           return Promise.resolve()
         }}
-        deleteChannelMessage={() => Promise.resolve()}
       />
     )
 
@@ -2266,11 +2160,9 @@ describe("WorkspaceChat", () => {
 
   it("shows a compact edit failure and keeps the editor open", async () => {
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={makeChatModel()}
-        createChannelMessage={() => Promise.resolve()}
         editChannelMessage={() => Promise.reject(new Error("raw mutation stack"))}
-        deleteChannelMessage={() => Promise.resolve()}
         operationErrorMessage={() => "Could not save edit. Check your connection and try again."}
       />
     )
@@ -2289,14 +2181,12 @@ describe("WorkspaceChat", () => {
     const calls: Array<{ method: string; args: unknown }> = []
 
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={makeChatModel()}
-        createChannelMessage={() => Promise.resolve()}
         editChannelMessage={(input) => {
           calls.push({ method: "editChannelMessage", args: input })
           return Promise.resolve()
         }}
-        deleteChannelMessage={() => Promise.resolve()}
       />
     )
 
@@ -2313,9 +2203,8 @@ describe("WorkspaceChat", () => {
 
   it("shows a compact delete failure and keeps the confirmation open", async () => {
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={makeChatModel()}
-        createChannelMessage={() => Promise.resolve()}
         deleteChannelMessage={() => Promise.reject(new Error("raw delete failure"))}
         operationErrorMessage={() => "Could not delete message. Check your connection and try again."}
       />
@@ -2336,14 +2225,12 @@ describe("WorkspaceChat", () => {
     const calls: Array<{ method: string; args: unknown }> = []
 
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={makeChatModel()}
-        createChannelMessage={() => Promise.resolve()}
         editChannelMessage={(input) => {
           calls.push({ method: "editChannelMessage", args: input })
           return Promise.resolve()
         }}
-        deleteChannelMessage={() => Promise.resolve()}
       />
     )
 
@@ -2378,10 +2265,8 @@ describe("WorkspaceChat", () => {
     const deletions: unknown[] = []
     const selections: string[] = []
     render(
-      <WorkspaceChat
+      <TestWorkspaceChat
         model={makeChatModel()}
-        createChannelMessage={() => Promise.resolve()}
-        deleteChannelMessage={() => Promise.resolve()}
         selectChannel={(id) => selections.push(id)}
         editChannel={(input) => {
           edits.push(input)

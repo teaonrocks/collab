@@ -17,7 +17,7 @@
     "convex:codegen": "convex codegen",
     "convex:check": "tsc -p convex/tsconfig.json --noEmit && node scripts/check-convex-bindings.mjs",
     "dogfood:verify": "pnpm typecheck && pnpm convex:check && pnpm lint && pnpm test && pnpm build",
-    "lint": "eslint . && knip --dependencies",
+    "lint": "eslint . && knip",
     "native:macos-auth": "node scripts/build-macos-auth-helper.mjs",
     "start": "electron-vite preview",
     "package:mac": "pnpm build && electron-builder --mac dir --publish never",
@@ -40,9 +40,11 @@
   },
   "knip": {
     "entry": [
+      "electron.vite.config.ts",
       "src/main/index.ts",
+      "src/preload/index.ts",
       "src/renderer/main.tsx",
-      "convex/{auth.config,chat,schema}.ts"
+      "convex/{auth.config,chat,direct_conversations,notification_preferences,schema,social}.ts"
     ],
     "project": [
       "src/**/*.{ts,tsx}",

@@ -1,6 +1,6 @@
 import type { Doc, Id } from "./_generated/dataModel"
 import type { MutationCtx } from "./_generated/server"
-import { isAcceptedAttachmentContentType, MESSAGE_ATTACHMENT_POLICY } from "../src/shared/attachment-policy"
+import { MESSAGE_ATTACHMENT_POLICY, validateAttachmentMetadata } from "../src/shared/attachment-policy"
 import { requireAllowedCurrentUser, requireChannelMember } from "./chat_access"
 import { toMessageView } from "./chat_message_projection"
 import { queueMessageNotifications } from "./notification_preferences"
@@ -18,20 +18,6 @@ const attachmentName = (name: string): string => {
 
 const attachmentKind = (contentType: string): "file" | "image" =>
   contentType.toLowerCase().startsWith("image/") ? "image" : "file"
-
-const validateAttachmentMetadata = (
-  metadata: { readonly size: number },
-  declaredContentType?: string
-) => {
-  if (metadata.size > MESSAGE_ATTACHMENT_POLICY.maxSizeBytes) {
-    throw new Error("Attachments can be at most 25 MB")
-  }
-  const contentType = declaredContentType?.toLowerCase()
-  if (contentType === undefined || !isAcceptedAttachmentContentType(contentType)) {
-    throw new Error("Attachments must be a PNG, JPEG, GIF, WebP, PDF, or plain-text file")
-  }
-  return contentType
-}
 
 const validateMessageBody = (
   rawBody: string,
@@ -172,7 +158,6 @@ export const sendMessageTransaction = async (
     const parent = await ctx.db.get(args.parentMessageId)
     if (
       parent === null ||
-      parent.workspaceId !== channel.workspaceId ||
       parent.channelId !== args.channelId
     ) {
       throw new Error("Parent message not found")
@@ -180,7 +165,6 @@ export const sendMessageTransaction = async (
   }
 
   const messageId = await ctx.db.insert("messages", {
-    workspaceId: channel.workspaceId,
     channelId: args.channelId,
     authorUserId: user._id,
     authorDisplayName: user.displayName,
@@ -322,7 +306,6 @@ export const toggleMessageReactionTransaction = async (
 
   if (existing.length === 0) {
     await ctx.db.insert("messageReactions", {
-      workspaceId: channel.workspaceId,
       channelId: message.channelId,
       messageId: message._id,
       userId: user._id,

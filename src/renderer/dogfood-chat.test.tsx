@@ -1,12 +1,13 @@
 // @vitest-environment happy-dom
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { getFunctionName } from "convex/server"
 import type { ComponentType } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Id } from "../../convex/_generated/dataModel"
-import type { ChatMessage } from "./chat-data"
+import { ConvexDogfoodApp, DogfoodErrorBoundary } from "./dogfood-chat"
 import {
   dogfoodChatToChatData,
+  type DogfoodChatAdapterInput,
   type DogfoodChannelMemberView,
   type DogfoodChannelMessageView,
   type DogfoodChannelView,
@@ -14,6 +15,7 @@ import {
   type DogfoodPrivateChannelInviteCandidateView,
   type DogfoodWorkspaceView
 } from "./dogfood-chat-adapter"
+import type { WorkspaceChatProps } from "./workspace-chat"
 
 const mocks = vi.hoisted(() => ({
   auth: {
@@ -57,11 +59,9 @@ const mocks = vi.hoisted(() => ({
   openNotificationFeed: vi.fn(),
   loadMore: vi.fn(),
   paginationStatus: undefined as "LoadingFirstPage" | "CanLoadMore" | "LoadingMore" | "Exhausted" | undefined,
-  mutationCallCount: 0,
   workspace: undefined as DogfoodWorkspaceView | null | undefined,
   channels: undefined as ReadonlyArray<DogfoodChannelView> | undefined,
   directConversations: [] as ReadonlyArray<DogfoodDirectConversationView> | undefined,
-  directConversationCandidates: undefined as ReadonlyArray<{ readonly id: Id<"users">; readonly displayName: string }> | undefined,
   messages: undefined as ReadonlyArray<DogfoodChannelMessageView> | undefined,
   messagesByChannel: undefined as Record<string, ReadonlyArray<DogfoodChannelMessageView>> | undefined,
   members: undefined as ReadonlyArray<DogfoodChannelMemberView> | undefined,
@@ -71,6 +71,7 @@ const mocks = vi.hoisted(() => ({
   channelIndicators: undefined as ReadonlyArray<{ readonly channelId: string; readonly indicator: "unread" | "mentioned" }> | undefined,
   notificationPreference: undefined as { readonly mode: "all" | "mentions" | "off"; readonly options: ReadonlyArray<"all" | "mentions" | "off"> } | undefined,
   notificationFeedArgs: [] as Array<{ readonly cursor: number }>,
+  workspaceChatProps: null as WorkspaceChatProps | null,
   notificationEvents: {
     cursor: 0,
     notifications: [] as ReadonlyArray<{
@@ -93,31 +94,30 @@ vi.mock("convex/react", () => ({
   useConvex: () => ({ query: mocks.convexQuery }),
   useConvexAuth: () => mocks.convexAuth,
   useAction: () => mocks.ensureViewer,
-  useMutation: () => {
-    const mutation = [
-      mocks.sendMessage,
-      mocks.editMessage,
-      mocks.deleteMessage,
-      mocks.toggleMessageReaction,
-      mocks.createChannel,
-      mocks.editChannel,
-      mocks.deleteChannel,
-      mocks.addPrivateChannelMember,
-      mocks.removePrivateChannelMember,
-      mocks.ensureChannelMember,
-      mocks.markChannelRead,
-      mocks.generateAttachmentUploadUrl,
-      mocks.registerAttachmentUpload,
-      mocks.deleteAttachmentUpload,
-      mocks.startOrReopenDirectConversation,
-      mocks.sendFriendRequest,
-      mocks.updateDirectMessageProfile,
-      mocks.respondToFriendRequest,
-      mocks.updateNotificationPreference,
-      mocks.openNotificationFeed
-    ][mocks.mutationCallCount % 20]
-    mocks.mutationCallCount += 1
-    return mutation
+  useMutation: (reference: unknown) => {
+    const mutations = {
+      "chat:sendMessage": mocks.sendMessage,
+      "chat:editMessage": mocks.editMessage,
+      "chat:deleteMessage": mocks.deleteMessage,
+      "chat:toggleMessageReaction": mocks.toggleMessageReaction,
+      "chat:createChannel": mocks.createChannel,
+      "chat:editChannel": mocks.editChannel,
+      "chat:deleteChannel": mocks.deleteChannel,
+      "chat:addPrivateChannelMember": mocks.addPrivateChannelMember,
+      "chat:removePrivateChannelMember": mocks.removePrivateChannelMember,
+      "chat:ensureChannelMember": mocks.ensureChannelMember,
+      "chat:markChannelRead": mocks.markChannelRead,
+      "chat:generateAttachmentUploadUrl": mocks.generateAttachmentUploadUrl,
+      "chat:registerAttachmentUpload": mocks.registerAttachmentUpload,
+      "chat:deleteAttachmentUpload": mocks.deleteAttachmentUpload,
+      "direct_conversations:startOrReopen": mocks.startOrReopenDirectConversation,
+      "social:sendFriendRequest": mocks.sendFriendRequest,
+      "social:updateProfile": mocks.updateDirectMessageProfile,
+      "social:respondToFriendRequest": mocks.respondToFriendRequest,
+      "notification_preferences:updatePreference": mocks.updateNotificationPreference,
+      "notification_preferences:openFeed": mocks.openNotificationFeed
+    }
+    return mutations[getFunctionName(reference as never) as keyof typeof mutations]
   },
   usePaginatedQuery: (_query: unknown, args: unknown) => {
     if (args === "skip") return { results: [], status: "LoadingFirstPage", loadMore: mocks.loadMore }
@@ -134,8 +134,6 @@ vi.mock("convex/react", () => ({
     mocks.queryCalls.push(functionName)
     if (args === "skip") return undefined
     if (functionName === "direct_conversations:list") return mocks.directConversations
-    if (functionName === "direct_conversations:candidates") return mocks.directConversationCandidates
-    if (functionName === "direct_conversations:indicators") return []
     if (functionName === "social:profile") return undefined
     if (functionName === "social:incomingFriendRequests") return undefined
     if (functionName === "notification_preferences:preference") return mocks.notificationPreference
@@ -155,212 +153,17 @@ vi.mock("convex/react", () => ({
       }
       return mocks.membersByChannel?.[channelId] ?? mocks.members
     }
-    if (functionName === "chat:channelIndicators") return mocks.channelIndicators
+    if (functionName === "chat:conversationIndicators") return mocks.channelIndicators
     if (typeof args === "object" && args !== null && "workspaceId" in args) return mocks.channels
     return mocks.workspace
   }
 }))
 
 vi.mock("./workspace-chat", () => ({
-  WorkspaceChat: ((props: {
-    readonly model: {
-      readonly workspace: { readonly name: string }
-      readonly channel: { readonly id: string }
-      readonly activeConversation: { readonly kind: "channel"; readonly channel: { readonly id: string } } | { readonly kind: "direct"; readonly directConversation: { readonly id: string } }
-      readonly channels: ReadonlyArray<{ readonly id: string; readonly name: string }>
-      readonly directConversations: ReadonlyArray<{ readonly id: string; readonly otherUser: { readonly displayName: string } }>
-      readonly directConversationCandidates?: ReadonlyArray<{ readonly id: string; readonly displayName: string }>
-      readonly channelMessages: ReadonlyArray<ChatMessage>
-      readonly channelMembers?: ReadonlyArray<{ readonly id: string; readonly displayName: string }>
-      readonly channelMemberInviteCandidates?: ReadonlyArray<{ readonly id: string; readonly displayName: string }>
-      readonly createChannelInviteCandidates?: ReadonlyArray<{ readonly id: string; readonly displayName: string }>
-      readonly channelIndicators?: ReadonlyArray<{ readonly channelId: string; readonly indicator: "unread" | "mentioned" }>
-      readonly channelMembersLoading?: boolean
-      readonly channelMessagesLoading?: boolean
-      readonly channelMessagesHasMore?: boolean
-      readonly channelMessagesLoadingMore?: boolean
-    }
-  readonly createChannel?: (input: {
-    readonly name: string
-    readonly visibility?: "public" | "private"
-    readonly initialMemberIds?: ReadonlyArray<string>
-  }) => Promise<unknown>
-  readonly selectChannel?: (channelId: string) => void
-  readonly selectDirectConversation?: (conversationId: string) => void
-  readonly startDirectConversation?: (recipientUserId: string) => Promise<unknown>
-  readonly searchDirectConversationCandidates?: (query: string) => Promise<ReadonlyArray<{ readonly id: string; readonly displayName: string }>>
-  readonly addChannelMember?: (input: { readonly channelId: string; readonly userId: string }) => Promise<unknown>
-  readonly removeChannelMember?: (input: { readonly channelId: string; readonly userId: string }) => Promise<unknown>
-  readonly createChannelMessage: (input: {
-    readonly channelId: string
-    readonly body: string
-    readonly parentMessageId?: string | null
-    readonly attachments?: ReadonlyArray<{ readonly storageId: string; readonly name: string }>
-  }) => Promise<unknown>
-  readonly uploadMessageAttachment?: (file: File) => Promise<unknown>
-  readonly editChannelMessage?: (input: { readonly channelId: string; readonly messageId: string; readonly body: string }) => Promise<unknown>
-  readonly deleteChannelMessage: (input: { readonly channelId: string; readonly messageId: string }) => Promise<unknown>
-  readonly toggleMessageReaction?: (input: { readonly channelId: string; readonly messageId: string; readonly emoji: string }) => Promise<unknown>
-  readonly operationErrorMessage?: (operation: "send" | "edit" | "delete" | "react", cause: unknown) => string
-  readonly canEditMessage?: (message: ChatMessage) => boolean
-  readonly canDeleteMessage?: (message: ChatMessage) => boolean
-  readonly profileMenuActions?: ReadonlyArray<{
-    readonly id?: string
-    readonly label: string
-    readonly detail?: string
-    readonly selected?: boolean
-    readonly onSelect: () => void
-  }>
-  readonly loadOlderChannelMessages?: () => void
-}) => {
-    const firstMessage = props.model.channelMessages[0]
-    const secondMessage = props.model.channelMessages[1]
-    return (
-      <section aria-label="mock workspace chat">
-        <h2>{props.model.workspace.name}</h2>
-        <output aria-label="active channel">{props.model.activeConversation.kind === "channel" ? props.model.channel.id : props.model.activeConversation.directConversation.id}</output>
-        {props.model.channelMessagesLoading === true ? <p>messages loading</p> : null}
-        {props.model.channelMessagesHasMore === true
-          ? <button type="button" onClick={props.loadOlderChannelMessages}>Load older messages</button>
-          : null}
-        {props.model.channelMembersLoading === true ? <p>members loading</p> : null}
-        <ul aria-label="mock members">
-          {props.model.channelMembers?.map((member) => <li key={member.id}>{member.displayName}</li>)}
-        </ul>
-        <ul aria-label="mock channels">
-          {props.model.channels.map((channel) => (
-            <li key={channel.id}>
-              <button type="button" onClick={() => props.selectChannel?.(channel.id)}>
-                {channel.name}
-              </button>
-              <span>{props.model.channelIndicators?.find((state) => state.channelId === channel.id)?.indicator}</span>
-            </li>
-          ))}
-        </ul>
-        <ul aria-label="mock direct conversations">
-          {props.model.directConversations.map((conversation) => (
-            <li key={conversation.id}>
-              <button type="button" onClick={() => props.selectDirectConversation?.(conversation.id)}>{conversation.otherUser.displayName}</button>
-            </li>
-          ))}
-        </ul>
-        <ul aria-label="mock direct candidates">
-          {props.model.directConversationCandidates?.map((candidate) => (
-            <li key={candidate.id}>
-              <button type="button" onClick={() => void props.startDirectConversation?.(candidate.id)}>Start {candidate.displayName}</button>
-            </li>
-          ))}
-        </ul>
-        <button type="button" onClick={() => void props.searchDirectConversationCandidates?.("lee")}>Search direct candidates</button>
-        <p>{firstMessage?.body}</p>
-        {firstMessage?.reactions.map((reaction) => (
-          <span key={reaction.emoji}>{reaction.emoji} {reaction.count} {reaction.reactedByCurrentUser ? "active" : "idle"}</span>
-        ))}
-        {firstMessage?.editedAt === null ? null : <span>edited</span>}
-        <button
-          type="button"
-          onClick={() => props.createChannelMessage({ channelId: props.model.channel.id, body: "Hello from dogfood" })}
-        >
-          Send mock message
-        </button>
-        <button type="button" onClick={() => props.createChannel?.({ name: "design" })}>
-          Create design channel
-        </button>
-        <button
-          type="button"
-          onClick={() => props.createChannel?.({
-            name: "leadership",
-            visibility: "private",
-            initialMemberIds: props.model.createChannelInviteCandidates?.slice(0, 1).map((member) => member.id)
-          })}
-        >
-          Create private channel
-        </button>
-        <button
-          type="button"
-          onClick={() => props.model.channelMemberInviteCandidates?.[0] === undefined
-            ? undefined
-            : props.addChannelMember?.({
-                channelId: props.model.channel.id,
-                userId: props.model.channelMemberInviteCandidates[0].id
-              })}
-        >
-          Add managed member
-        </button>
-        <button
-          type="button"
-          onClick={() => props.removeChannelMember?.({ channelId: props.model.channel.id, userId: "user-1" })}
-        >
-          Remove current member
-        </button>
-        <button
-          type="button"
-          onClick={() => void props.uploadMessageAttachment?.(
-            new File(["file"], "brief.txt", { type: "text/plain" })
-          ).catch(() => {})}
-        >
-          Upload mock attachment
-        </button>
-        {firstMessage !== undefined && props.canEditMessage?.(firstMessage)
-          ? (
-            <button
-              type="button"
-              onClick={() => props.editChannelMessage?.({
-                channelId: props.model.channel.id,
-                messageId: firstMessage.id,
-                body: "Edited dogfood"
-              })}
-            >
-              Edit first message
-            </button>
-          )
-          : null}
-        {firstMessage !== undefined && props.canDeleteMessage?.(firstMessage)
-          ? (
-            <button
-              type="button"
-              onClick={() => props.deleteChannelMessage({
-                channelId: props.model.channel.id,
-                messageId: firstMessage.id
-              })}
-            >
-              Delete first message
-            </button>
-          )
-          : null}
-        {firstMessage !== undefined && props.toggleMessageReaction !== undefined
-          ? (
-            <button
-              type="button"
-              onClick={() => props.toggleMessageReaction?.({
-                channelId: props.model.channel.id,
-                messageId: firstMessage.id,
-                emoji: "👍"
-              })}
-            >
-              Toggle first reaction
-            </button>
-          )
-          : null}
-        {secondMessage !== undefined && props.canEditMessage?.(secondMessage)
-          ? <button type="button">Edit second message</button>
-          : null}
-        {secondMessage !== undefined && props.canDeleteMessage?.(secondMessage)
-          ? <button type="button">Delete second message</button>
-          : null}
-        <ul aria-label="mock profile actions">
-          {props.profileMenuActions?.map((action) => (
-            <li key={action.id ?? action.label}>
-              <button type="button" onClick={action.onSelect}>{action.label}</button>
-              {action.detail === undefined ? null : <span>{action.detail}</span>}
-              {action.selected === true ? <span>selected</span> : null}
-            </li>
-          ))}
-        </ul>
-        <p>{props.operationErrorMessage?.("send", new Error("secret mutation details"))}</p>
-      </section>
-    )
-  }) satisfies ComponentType<any>
+  WorkspaceChat: ((props: WorkspaceChatProps) => {
+    mocks.workspaceChatProps = props
+    return <section aria-label="mock workspace chat" />
+  }) satisfies ComponentType<WorkspaceChatProps>
 }))
 
 afterEach(() => {
@@ -407,12 +210,10 @@ beforeEach(() => {
     otherUser: { id: "user-2", displayName: "Lee Chen" },
     createdAt: 44
   })
-  mocks.mutationCallCount = 0
   mocks.queryCalls = []
   mocks.workspace = undefined
   mocks.channels = undefined
   mocks.directConversations = []
-  mocks.directConversationCandidates = undefined
   mocks.messages = undefined
   mocks.messagesByChannel = undefined
   mocks.paginationStatus = undefined
@@ -423,6 +224,7 @@ beforeEach(() => {
   mocks.channelIndicators = undefined
   mocks.notificationPreference = undefined
   mocks.notificationFeedArgs = []
+  mocks.workspaceChatProps = null
   mocks.notificationEvents = { cursor: 0, notifications: [] }
   mocks.updateNotificationPreference.mockResolvedValue({ mode: "mentions", options: ["all", "mentions", "off"] })
   mocks.openNotificationFeed.mockResolvedValue({ cursor: 0 })
@@ -530,6 +332,54 @@ const inviteCandidates: ReadonlyArray<DogfoodPrivateChannelInviteCandidateView> 
   displayName: "Lee Chen"
 }]
 
+const adapterData = (
+  overrides: Partial<DogfoodChatAdapterInput["data"]> = {}
+): DogfoodChatAdapterInput["data"] => ({
+  workspace,
+  channels,
+  selectedConversation: { kind: "channel", id: workspace.channel.id },
+  messages,
+  ...overrides
+})
+
+type AuthenticatedDogfoodOverrides = Partial<Pick<typeof mocks,
+  | "workspace"
+  | "channels"
+  | "directConversations"
+  | "messages"
+  | "messagesByChannel"
+  | "members"
+  | "membersByChannel"
+  | "inviteCandidates"
+  | "managementCandidates"
+  | "channelIndicators"
+  | "notificationPreference"
+  | "paginationStatus"
+>>
+
+const renderAuthenticatedDogfood = (overrides: AuthenticatedDogfoodOverrides = {}) => {
+  mocks.auth.user = {
+    id: "auth-user-1",
+    email: "maya@example.com",
+    firstName: "Maya",
+    lastName: "Patel"
+  }
+  mocks.convexAuth.isAuthenticated = true
+  Object.assign(mocks, {
+    workspace,
+    channels,
+    messages: [],
+    members: [],
+    ...overrides
+  })
+  return render(<ConvexDogfoodApp />)
+}
+
+const capturedWorkspaceChatProps = (): WorkspaceChatProps => {
+  if (mocks.workspaceChatProps === null) throw new Error("WorkspaceChat has not rendered")
+  return mocks.workspaceChatProps
+}
+
 describe("dogfoodChatToChatData", () => {
   it("adapts a direct conversation into the shared timeline without channel-only controls", async () => {
     const directConversation = {
@@ -539,13 +389,11 @@ describe("dogfoodChatToChatData", () => {
     }
     const selections: Array<Id<"channels">> = []
     const chatData = dogfoodChatToChatData({
-      data: {
-        workspace,
-        channels,
+      data: adapterData({
         directConversations: [directConversation],
         selectedConversation: { kind: "direct", id: directConversation.id },
         messages: []
-      },
+      }),
       commands: {
         selectDirectConversation: (id) => selections.push(id),
         editChannel: mocks.editChannel,
@@ -580,16 +428,11 @@ describe("dogfoodChatToChatData", () => {
 
   it("adapts the Convex dogfood chat view into the chat data interface", async () => {
     const chatData = dogfoodChatToChatData({
-      data: {
-        workspace,
-        channels,
-        selectedChannelId: workspace.channel.id,
-        directConversationCandidates: inviteCandidates,
-        messages,
+      data: adapterData({
         members,
         channelMemberInviteCandidates: inviteCandidates,
         createChannelInviteCandidates: inviteCandidates
-      },
+      }),
       commands: {
         startDirectConversation: mocks.startOrReopenDirectConversation,
         addChannelMember: mocks.addPrivateChannelMember,
@@ -608,7 +451,6 @@ describe("dogfoodChatToChatData", () => {
     expect(chatData.model.channels.map((channel) => channel.name)).toEqual(["general", "design"])
     expect(chatData.model.channelMembers?.map((member) => member.displayName)).toEqual(["Lee Chen", "Maya Patel"])
     expect(chatData.model.channelMembers?.map((member) => member.role)).toEqual(["member", "admin"])
-    expect(chatData.model.directConversationCandidates).toEqual([{ id: "user-2", displayName: "Lee Chen" }])
     expect(chatData.model.channelMemberInviteCandidates).toEqual([{ id: "user-2", displayName: "Lee Chen" }])
     expect(chatData.model.createChannelInviteCandidates).toEqual([{ id: "user-2", displayName: "Lee Chen" }])
     await expect(chatData.startDirectConversation?.("user-2")).resolves.toEqual({
@@ -634,12 +476,9 @@ describe("dogfoodChatToChatData", () => {
 
   it("falls back to the default Convex channel when selection is stale", () => {
     const chatData = dogfoodChatToChatData({
-      data: {
-        workspace,
-        channels,
-        selectedChannelId: "removed-channel" as Id<"channels">,
-        messages
-      },
+      data: adapterData({
+        selectedConversation: { kind: "channel", id: "removed-channel" as Id<"channels"> },
+      }),
       commands: {
         sendMessage: mocks.sendMessage,
         editMessage: mocks.editMessage,
@@ -652,10 +491,7 @@ describe("dogfoodChatToChatData", () => {
 
   it("adapts reply parent ids and previews", async () => {
     const chatData = dogfoodChatToChatData({
-      data: {
-        workspace,
-        channels,
-        selectedChannelId: workspace.channel.id,
+      data: adapterData({
         messages: [{
           ...messages[0]!,
           id: "message-2" as Id<"messages">,
@@ -671,7 +507,7 @@ describe("dogfoodChatToChatData", () => {
           },
           createdAt: 43
         }]
-      },
+      }),
       commands: {
         sendMessage: mocks.sendMessage,
         editMessage: mocks.editMessage,
@@ -704,10 +540,7 @@ describe("dogfoodChatToChatData", () => {
 
   it("adapts attachment metadata and forwards storage ids when sending", async () => {
     const chatData = dogfoodChatToChatData({
-      data: {
-        workspace,
-        channels,
-        selectedChannelId: workspace.channel.id,
+      data: adapterData({
         messages: [{
           ...messages[0]!,
           attachments: [{
@@ -719,7 +552,7 @@ describe("dogfoodChatToChatData", () => {
             url: "https://files.example/brief.png"
           }]
         }]
-      },
+      }),
       commands: {
         sendMessage: mocks.sendMessage,
         discardMessageAttachment: mocks.deleteAttachmentUpload,
@@ -759,12 +592,9 @@ describe("dogfoodChatToChatData", () => {
 
   it("preserves Convex editedAt in the chat data model", () => {
     const chatData = dogfoodChatToChatData({
-      data: {
-        workspace,
-        channels,
-        selectedChannelId: workspace.channel.id,
+      data: adapterData({
         messages: [{ ...messages[0]!, editedAt: 45 }]
-      },
+      }),
       commands: {
         sendMessage: mocks.sendMessage,
         editMessage: mocks.editMessage,
@@ -778,15 +608,12 @@ describe("dogfoodChatToChatData", () => {
 
   it("adapts Convex reaction counts and current-user state", async () => {
     const chatData = dogfoodChatToChatData({
-      data: {
-        workspace,
-        channels,
-        selectedChannelId: workspace.channel.id,
+      data: adapterData({
         messages: [{
           ...messages[0]!,
           reactions: [{ emoji: "👍", count: 2, reactedByCurrentUser: true }]
         }]
-      },
+      }),
       commands: {
         sendMessage: mocks.sendMessage,
         editMessage: mocks.editMessage,
@@ -814,7 +641,7 @@ describe("dogfoodChatToChatData", () => {
 
   it("marks selected channel messages as loading without requiring message rows", () => {
     const chatData = dogfoodChatToChatData({
-      data: { workspace, channels, selectedChannelId: channels[1]!.id, messages: [], members: [] },
+      data: adapterData({ selectedConversation: { kind: "channel", id: channels[1]!.id }, messages: [], members: [] }),
       state: { messagesLoading: true, membersLoading: true },
       commands: {
         sendMessage: mocks.sendMessage,
@@ -833,13 +660,9 @@ describe("dogfoodChatToChatData", () => {
 
   it("adapts per-channel unread and mention indicators", () => {
     const chatData = dogfoodChatToChatData({
-      data: {
-        workspace,
-        channels,
-        selectedChannelId: workspace.channel.id,
-        messages,
+      data: adapterData({
         channelIndicators: [{ channelId: channels[1]!.id, indicator: "mentioned" }]
-      },
+      }),
       commands: {
         sendMessage: mocks.sendMessage,
         editMessage: mocks.editMessage,
@@ -856,13 +679,9 @@ describe("dogfoodChatToChatData", () => {
       options: ["all", "mentions", "off"] as const
     })
     const chatData = dogfoodChatToChatData({
-      data: {
-        workspace,
-        channels,
-        selectedChannelId: workspace.channel.id,
-        messages,
+      data: adapterData({
         notificationPreference: { mode: "mentions", options: ["all", "mentions", "off"] }
-      },
+      }),
       commands: {
         sendMessage: mocks.sendMessage,
         editMessage: mocks.editMessage,
@@ -884,7 +703,7 @@ describe("dogfoodChatToChatData", () => {
 
   it("uses Convex ids for chat commands without exposing snapshot-era fields", async () => {
     const chatData = dogfoodChatToChatData({
-      data: { workspace, channels, selectedChannelId: workspace.channel.id, messages },
+      data: adapterData(),
       commands: {
         sendMessage: mocks.sendMessage,
         editMessage: mocks.editMessage,
@@ -920,12 +739,9 @@ describe("dogfoodChatToChatData", () => {
 
   it("authorizes edit and delete commands only for the current user", () => {
     const chatData = dogfoodChatToChatData({
-      data: {
-        workspace,
-        channels,
-        selectedChannelId: workspace.channel.id,
+      data: adapterData({
         messages: messagesWithAnotherAuthor
-      },
+      }),
       commands: {
         sendMessage: mocks.sendMessage,
         editMessage: mocks.editMessage,
@@ -942,7 +758,7 @@ describe("dogfoodChatToChatData", () => {
   it("uses the selected Convex channel and exposes create/select channel commands", async () => {
     const selections: Array<Id<"channels">> = []
     const chatData = dogfoodChatToChatData({
-      data: { workspace, channels, selectedChannelId: channels[1]!.id, messages: designMessages },
+      data: adapterData({ selectedConversation: { kind: "channel", id: channels[1]!.id }, messages: designMessages }),
       commands: {
         createChannel: mocks.createChannel,
         selectChannel: (channelId) => selections.push(channelId),
@@ -971,7 +787,6 @@ describe("dogfoodChatToChatData", () => {
 
 describe("ConvexDogfoodApp", () => {
   it("shows the sign-in entry state when signed out", async () => {
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
 
     render(<ConvexDogfoodApp />)
 
@@ -1007,7 +822,6 @@ describe("ConvexDogfoodApp", () => {
     mocks.workspace = workspace
     mocks.channels = channels
     mocks.messages = messages
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
 
     render(<ConvexDogfoodApp />)
 
@@ -1039,7 +853,6 @@ describe("ConvexDogfoodApp", () => {
         })
       }
     })
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
 
     render(<ConvexDogfoodApp />)
     fireEvent.click(await screen.findByRole("button", { name: "Sign in" }))
@@ -1055,7 +868,7 @@ describe("ConvexDogfoodApp", () => {
   })
 
   it("shows access setup errors from ensureViewer", async () => {
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
     mocks.auth.user = { id: "user-1" }
     mocks.convexAuth.isAuthenticated = true
     mocks.ensureViewer.mockRejectedValue(new Error("This email is not on the Aether dogfood allowlist"))
@@ -1067,10 +880,13 @@ describe("ConvexDogfoodApp", () => {
     expect(screen.getByText(/^VIEWER-/)).toBeTruthy()
     expect(screen.getByText("Use Try again after checking the connection or allowlist.")).toBeTruthy()
     expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy()
+    expect(warnSpy).toHaveBeenCalledWith("Dogfood chat diagnostic", expect.objectContaining({
+      message: "Error: details redacted"
+    }))
   })
 
   it("can retry viewer setup after an access setup error", async () => {
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
     mocks.auth.user = { id: "user-1" }
     mocks.convexAuth.isAuthenticated = true
     mocks.ensureViewer.mockRejectedValueOnce(new Error("WorkOS user profile is missing an email address"))
@@ -1080,19 +896,13 @@ describe("ConvexDogfoodApp", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Try again" }))
 
     await waitFor(() => expect(mocks.ensureViewer).toHaveBeenCalledTimes(2))
+    expect(warnSpy).toHaveBeenCalledTimes(1)
   })
 
   it("wires the profile sign-out action through the reused chat surface", async () => {
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
-    mocks.auth.user = { id: "user-1" }
-    mocks.convexAuth.isAuthenticated = true
-    mocks.workspace = workspace
-    mocks.channels = channels
-    mocks.messages = messages
-
-    render(<ConvexDogfoodApp />)
-
-    fireEvent.click(await screen.findByRole("button", { name: "Sign out" }))
+    renderAuthenticatedDogfood({ messages })
+    const props = await waitFor(capturedWorkspaceChatProps)
+    await act(async () => props.profileMenuActions?.find(({ label }) => label === "Sign out")?.onSelect())
 
     expect(mocks.auth.signOut).toHaveBeenCalledWith({
       returnTo: "http://localhost:3000/"
@@ -1123,29 +933,18 @@ describe("ConvexDogfoodApp", () => {
         signOutAllAccounts
       }
     })
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
-    mocks.auth.user = {
-      id: "user-1",
-      email: "maya@example.com",
-      firstName: "Maya",
-      lastName: "Patel",
-      profilePictureUrl: null
-    }
-    mocks.convexAuth.isAuthenticated = true
-    mocks.workspace = workspace
-    mocks.channels = channels
-    mocks.messages = messages
-
-    render(<ConvexDogfoodApp />)
-
-    fireEvent.click(await screen.findByRole("button", { name: "Archer" }))
+    renderAuthenticatedDogfood({ messages })
+    const props = await waitFor(capturedWorkspaceChatProps)
+    props.profileMenuActions?.find(({ label }) => label === "Archer")?.onSelect()
     expect(switchAccount).toHaveBeenCalledWith("account-2")
-    expect(screen.getByText("archer@example.com")).toBeTruthy()
+    expect(props.profileMenuActions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "Archer", detail: "archer@example.com" })
+    ]))
 
-    fireEvent.click(screen.getByRole("button", { name: "Add account" }))
+    props.profileMenuActions?.find(({ label }) => label === "Add account")?.onSelect()
     expect(addAccount).toHaveBeenCalledTimes(1)
 
-    fireEvent.click(screen.getByRole("button", { name: "Sign out all accounts" }))
+    props.profileMenuActions?.find(({ label }) => label === "Sign out all accounts")?.onSelect()
     await waitFor(() => expect(signOutAllAccounts).toHaveBeenCalledTimes(1))
     expect(mocks.auth.signOut).toHaveBeenCalledWith({ navigate: false })
   })
@@ -1175,21 +974,9 @@ describe("ConvexDogfoodApp", () => {
         signOutAllAccounts: vi.fn().mockResolvedValue(undefined)
       }
     })
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
-    mocks.auth.user = {
-      id: "user-1",
-      email: "maya@example.com",
-      firstName: "Maya",
-      lastName: "Patel",
-      profilePictureUrl: null
-    }
-    mocks.convexAuth.isAuthenticated = true
-    mocks.workspace = workspace
-    mocks.channels = channels
-    mocks.messages = messages
-
-    const { unmount } = render(<ConvexDogfoodApp />)
-    await screen.findByRole("button", { name: "Maya Patel" })
+    const { unmount } = renderAuthenticatedDogfood({ messages })
+    await waitFor(() => expect(capturedWorkspaceChatProps().profileMenuActions)
+      .toEqual(expect.arrayContaining([expect.objectContaining({ label: "Maya Patel" })])))
 
     await act(async () => accountContextListener({
       ...initialContext,
@@ -1199,22 +986,19 @@ describe("ConvexDogfoodApp", () => {
       ]
     }))
 
-    expect(await screen.findByRole("button", { name: "Priya Rao" })).toBeTruthy()
+    await waitFor(() => expect(capturedWorkspaceChatProps().profileMenuActions)
+      .toEqual(expect.arrayContaining([expect.objectContaining({ label: "Priya Rao" })])))
     unmount()
     expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
   it("sends messages through the Convex mutation using the active channel", async () => {
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
-    mocks.auth.user = { id: "user-1" }
-    mocks.convexAuth.isAuthenticated = true
-    mocks.workspace = workspace
-    mocks.channels = channels
-    mocks.messages = messages
-
-    render(<ConvexDogfoodApp />)
-
-    fireEvent.click(await screen.findByRole("button", { name: "Send mock message" }))
+    renderAuthenticatedDogfood({ messages })
+    const props = await waitFor(capturedWorkspaceChatProps)
+    await act(async () => props.createChannelMessage({
+      channelId: String(workspace.channel.id),
+      body: "Hello from dogfood"
+    }))
 
     await waitFor(() =>
       expect(mocks.sendMessage).toHaveBeenCalledWith({
@@ -1225,23 +1009,15 @@ describe("ConvexDogfoodApp", () => {
   })
 
   it("passes membership-backed channel members to the reused chat surface", async () => {
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
-    mocks.auth.user = { id: "user-1" }
-    mocks.convexAuth.isAuthenticated = true
-    mocks.workspace = workspace
-    mocks.channels = channels
-    mocks.messages = messages
-    mocks.members = members
-
-    render(<ConvexDogfoodApp />)
-
-    const memberList = await screen.findByRole("list", { name: "mock members" })
-    expect(await within(memberList).findByText("Lee Chen")).toBeTruthy()
-    expect(within(memberList).getByText("Maya Patel")).toBeTruthy()
+    renderAuthenticatedDogfood({ messages, members })
+    await waitFor(() => expect(capturedWorkspaceChatProps().model.channelMembers)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ displayName: "Lee Chen" }),
+        expect.objectContaining({ displayName: "Maya Patel" })
+      ])))
   })
 
   it("wires private membership commands and moves a self-removed viewer to the default channel", async () => {
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
     const safeChannel: DogfoodChannelView = {
       id: "channel-safe" as Id<"channels">,
       key: "general",
@@ -1260,130 +1036,103 @@ describe("ConvexDogfoodApp", () => {
       visibility: "private",
       createdAt: 3
     }
-    mocks.auth.user = { id: "user-1" }
-    mocks.convexAuth.isAuthenticated = true
-    mocks.workspace = safeWorkspace
-    mocks.channels = [safeChannel, privateChannel]
-    mocks.messagesByChannel = { "channel-safe": [], "channel-private": [] }
-    mocks.membersByChannel = {
-      "channel-safe": members,
-      "channel-private": members
-    }
-    mocks.managementCandidates = inviteCandidates
+    renderAuthenticatedDogfood({
+      workspace: safeWorkspace,
+      channels: [safeChannel, privateChannel],
+      messagesByChannel: { "channel-safe": [], "channel-private": [] },
+      membersByChannel: { "channel-safe": members, "channel-private": members },
+      managementCandidates: inviteCandidates
+    })
 
-    render(<ConvexDogfoodApp />)
-
-    fireEvent.click(await screen.findByRole("button", { name: "leadership" }))
-    await waitFor(() => expect(screen.getByLabelText("active channel").textContent).toBe("channel-private"))
-    fireEvent.click(screen.getByRole("button", { name: "Add managed member" }))
+    const initialProps = await waitFor(capturedWorkspaceChatProps)
+    await act(async () => initialProps.selectChannel?.(String(privateChannel.id)))
+    await waitFor(() => expect(capturedWorkspaceChatProps().model.channel.id).toBe("channel-private"))
+    await act(async () => capturedWorkspaceChatProps().addChannelMember?.({
+      channelId: String(privateChannel.id),
+      userId: String(inviteCandidates[0]!.id)
+    }))
     await waitFor(() => expect(mocks.addPrivateChannelMember).toHaveBeenCalledWith({
       channelId: privateChannel.id,
       userId: inviteCandidates[0]!.id
     }))
 
-    fireEvent.click(screen.getByRole("button", { name: "Remove current member" }))
+    await act(async () => capturedWorkspaceChatProps().removeChannelMember?.({
+      channelId: String(privateChannel.id),
+      userId: String(workspace.currentUser.id)
+    }))
     await waitFor(() => expect(mocks.removePrivateChannelMember).toHaveBeenCalledWith({
       channelId: privateChannel.id,
       userId: workspace.currentUser.id
     }))
-    await waitFor(() => expect(screen.getByLabelText("active channel").textContent).toBe("channel-safe"))
+    await waitFor(() => expect(capturedWorkspaceChatProps().model.channel.id).toBe("channel-safe"))
   })
 
   it("keeps the workspace shell mounted while selected channel messages and members load", async () => {
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
-    mocks.auth.user = { id: "user-1" }
-    mocks.convexAuth.isAuthenticated = true
-    mocks.workspace = workspace
-    mocks.channels = channels
-    mocks.messages = undefined
-    mocks.members = undefined
-
-    render(<ConvexDogfoodApp />)
-
-    expect(await screen.findByRole("heading", { name: "Aether Dogfood" })).toBeTruthy()
-    expect(screen.getByText("messages loading")).toBeTruthy()
-    expect(screen.getByText("members loading")).toBeTruthy()
+    renderAuthenticatedDogfood({ messages: undefined, members: undefined })
+    const props = await waitFor(capturedWorkspaceChatProps)
+    expect(props.model.workspace.name).toBe("Aether Dogfood")
+    expect(props.model.channelMessagesLoading).toBe(true)
+    expect(props.model.channelMembersLoading).toBe(true)
     expect(screen.queryByRole("heading", { name: "Loading Chat" })).toBeNull()
   })
 
   it("opens a direct conversation without public-channel auto-join", async () => {
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
     const directConversation: DogfoodDirectConversationView = {
       id: "direct-1" as Id<"channels">,
       otherUser: { id: "user-2" as Id<"users">, displayName: "Lee Chen" },
       createdAt: 44
     }
-    mocks.auth.user = { id: "user-1" }
-    mocks.convexAuth.isAuthenticated = true
-    mocks.workspace = workspace
-    mocks.channels = channels
-    mocks.directConversations = [directConversation]
-    mocks.messagesByChannel = { "channel-1": messages, "direct-1": [] }
-
-    const { rerender } = render(<ConvexDogfoodApp />)
-    await screen.findByRole("button", { name: "Lee Chen" })
+    const { rerender } = renderAuthenticatedDogfood({
+      directConversations: [directConversation],
+      messagesByChannel: { "channel-1": messages, "direct-1": [] }
+    })
+    await waitFor(() => expect(capturedWorkspaceChatProps().model.directConversations).toHaveLength(1))
     mocks.directConversations = undefined
     rerender(<ConvexDogfoodApp />)
-    expect(screen.getByRole("button", { name: "Lee Chen" })).toBeTruthy()
+    expect(capturedWorkspaceChatProps().model.directConversations).toHaveLength(1)
     mocks.ensureChannelMember.mockClear()
-    fireEvent.click(screen.getByRole("button", { name: "Lee Chen" }))
+    await act(async () => capturedWorkspaceChatProps().selectDirectConversation?.("direct-1"))
 
-    await waitFor(() => expect(screen.getByLabelText("active channel").textContent).toBe("direct-1"))
+    await waitFor(() => expect(capturedWorkspaceChatProps().model.activeConversation)
+      .toMatchObject({ kind: "direct", directConversation: { id: "direct-1" } }))
     expect(mocks.ensureChannelMember).not.toHaveBeenCalled()
   })
 
   it("uses server-side user search without subscribing to the legacy candidate scan", async () => {
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
-    mocks.auth.user = { id: "user-1" }
-    mocks.convexAuth.isAuthenticated = true
-    mocks.workspace = workspace
-    mocks.channels = channels
-    mocks.directConversations = []
-    mocks.messagesByChannel = { "channel-1": messages }
     mocks.convexQuery.mockResolvedValue([{ id: "user-2", displayName: "Lee Chen", username: "lee", canStartDirectMessage: true }])
 
-    render(<ConvexDogfoodApp />)
-    fireEvent.click(await screen.findByRole("button", { name: "Search direct candidates" }))
+    renderAuthenticatedDogfood({ directConversations: [], messagesByChannel: { "channel-1": messages } })
+    const props = await waitFor(capturedWorkspaceChatProps)
+    await props.searchDirectConversationCandidates?.("lee")
 
     await waitFor(() => expect(mocks.convexQuery).toHaveBeenCalledTimes(1))
     const [query, args] = mocks.convexQuery.mock.calls[0]!
     expect(getFunctionName(query as never)).toBe("social:searchUsers")
     expect(args).toEqual({ query: "lee" })
-    expect(mocks.queryCalls).not.toContain("direct_conversations:candidates")
   })
 
   it("exposes incremental history loading from the Convex pagination state", async () => {
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
-    mocks.auth.user = { id: "user-1" }
-    mocks.convexAuth.isAuthenticated = true
-    mocks.workspace = workspace
-    mocks.channels = channels
-    mocks.messages = messages
-    mocks.paginationStatus = "CanLoadMore"
-
-    render(<ConvexDogfoodApp />)
-
-    fireEvent.click(await screen.findByRole("button", { name: "Load older messages" }))
+    renderAuthenticatedDogfood({ messages, paginationStatus: "CanLoadMore" })
+    const props = await waitFor(capturedWorkspaceChatProps)
+    props.loadOlderChannelMessages?.()
     expect(mocks.loadMore).toHaveBeenCalledWith(50)
   })
 
   it("switches channels and scopes messages and sends to the active channel", async () => {
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
-    mocks.auth.user = { id: "user-1" }
-    mocks.convexAuth.isAuthenticated = true
-    mocks.workspace = workspace
-    mocks.channels = channels
-    mocks.messagesByChannel = {
+    renderAuthenticatedDogfood({ messagesByChannel: {
       "channel-1": messages,
       "channel-2": designMessages
-    }
+    } })
 
-    render(<ConvexDogfoodApp />)
-
-    fireEvent.click(await screen.findByRole("button", { name: "design" }))
+    const initialProps = await waitFor(capturedWorkspaceChatProps)
+    await act(async () => initialProps.selectChannel?.(String(channels[1]!.id)))
     await waitFor(() => expect(mocks.ensureChannelMember).toHaveBeenCalledWith({ channelId: channels[1]!.id }))
-    expect(await screen.findByText("Design kickoff is scoped here.")).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: "Send mock message" }))
+    await waitFor(() => expect(capturedWorkspaceChatProps().model.channelMessages[0]?.body)
+      .toBe("Design kickoff is scoped here."))
+    await act(async () => capturedWorkspaceChatProps().createChannelMessage({
+      channelId: String(channels[1]!.id),
+      body: "Hello from dogfood"
+    }))
 
     await waitFor(() =>
       expect(mocks.sendMessage).toHaveBeenCalledWith({
@@ -1394,7 +1143,6 @@ describe("ConvexDogfoodApp", () => {
   })
 
   it("marks the active channel read after its messages load", async () => {
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
     mocks.auth.user = { id: "user-1" }
     mocks.convexAuth.isAuthenticated = true
     mocks.workspace = workspace
@@ -1412,7 +1160,6 @@ describe("ConvexDogfoodApp", () => {
   })
 
   it("does not mark a background conversation read until the window becomes active", async () => {
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
     vi.mocked(document.hasFocus).mockReturnValue(false)
     mocks.auth.user = { id: "user-1" }
     mocks.convexAuth.isAuthenticated = true
@@ -1433,7 +1180,6 @@ describe("ConvexDogfoodApp", () => {
   })
 
   it("marks the active channel read through the newest loaded message without repeating the same marker", async () => {
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
     mocks.auth.user = { id: "user-1" }
     mocks.convexAuth.isAuthenticated = true
     mocks.workspace = workspace
@@ -1456,47 +1202,30 @@ describe("ConvexDogfoodApp", () => {
   })
 
   it("passes per-channel indicators through to the reused chat surface", async () => {
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
-    mocks.auth.user = { id: "user-1" }
-    mocks.convexAuth.isAuthenticated = true
-    mocks.workspace = workspace
-    mocks.channels = channels
-    mocks.messages = messages
-    mocks.channelIndicators = [{ channelId: channels[1]!.id, indicator: "unread" }]
-
-    render(<ConvexDogfoodApp />)
-
-    const channelList = await screen.findByRole("list", { name: "mock channels" })
-    expect(within(channelList).getByText("unread")).toBeTruthy()
+    renderAuthenticatedDogfood({
+      messages,
+      channelIndicators: [{ channelId: channels[1]!.id, indicator: "unread" }]
+    })
+    await waitFor(() => expect(capturedWorkspaceChatProps().model.channelIndicators)
+      .toEqual([{ channelId: String(channels[1]!.id), indicator: "unread" }]))
   })
 
   it("creates channels through the Convex mutation", async () => {
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
-    mocks.auth.user = { id: "user-1" }
-    mocks.convexAuth.isAuthenticated = true
-    mocks.workspace = workspace
-    mocks.channels = channels
-    mocks.messages = messages
-
-    render(<ConvexDogfoodApp />)
-
-    fireEvent.click(await screen.findByRole("button", { name: "Create design channel" }))
+    renderAuthenticatedDogfood({ messages })
+    const props = await waitFor(capturedWorkspaceChatProps)
+    await act(async () => props.createChannel?.({ name: "design" }))
 
     await waitFor(() => expect(mocks.createChannel).toHaveBeenCalledWith({ name: "design" }))
   })
 
   it("loads eligible invitees and sends private creation through the typed adapter", async () => {
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
-    mocks.auth.user = { id: "user-1" }
-    mocks.convexAuth.isAuthenticated = true
-    mocks.workspace = workspace
-    mocks.channels = channels
-    mocks.messages = messages
-    mocks.inviteCandidates = inviteCandidates
-
-    render(<ConvexDogfoodApp />)
-
-    fireEvent.click(await screen.findByRole("button", { name: "Create private channel" }))
+    renderAuthenticatedDogfood({ messages, inviteCandidates })
+    const props = await waitFor(capturedWorkspaceChatProps)
+    await act(async () => props.createChannel?.({
+      name: "leadership",
+      visibility: "private",
+      initialMemberIds: [String(inviteCandidates[0]!.id)]
+    }))
 
     await waitFor(() => expect(mocks.createChannel).toHaveBeenCalledWith({
       name: "leadership",
@@ -1506,45 +1235,40 @@ describe("ConvexDogfoodApp", () => {
   })
 
   it("joins a selected shared channel before loading its messages", async () => {
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
-    mocks.auth.user = { id: "user-1" }
-    mocks.convexAuth.isAuthenticated = true
-    mocks.workspace = workspace
-    mocks.channels = channels
-    mocks.messagesByChannel = {
+    let finishJoin!: () => void
+    mocks.ensureChannelMember.mockReturnValue(new Promise<void>((resolve) => { finishJoin = resolve }))
+    renderAuthenticatedDogfood({ messagesByChannel: {
       "channel-1": messages,
       "channel-2": designMessages
-    }
-    mocks.ensureChannelMember.mockImplementation(async () => {
-      await Promise.resolve()
-    })
+    } })
 
-    render(<ConvexDogfoodApp />)
-
-    fireEvent.click(await screen.findByRole("button", { name: "design" }))
-
-    expect(screen.getByText("messages loading")).toBeTruthy()
+    const initialProps = await waitFor(capturedWorkspaceChatProps)
+    await act(async () => initialProps.selectChannel?.(String(channels[1]!.id)))
+    await waitFor(() => expect(capturedWorkspaceChatProps().model.channelMessagesLoading).toBe(true))
     await waitFor(() => expect(mocks.ensureChannelMember).toHaveBeenCalledWith({ channelId: channels[1]!.id }))
-    expect(await screen.findByText("Design kickoff is scoped here.")).toBeTruthy()
+    await act(async () => finishJoin())
+    await waitFor(() => expect(capturedWorkspaceChatProps().model.channelMessages[0]?.body)
+      .toBe("Design kickoff is scoped here."))
   })
 
   it("wires edit and hard delete mutations for the current author only", async () => {
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
-    mocks.auth.user = { id: "user-1" }
-    mocks.convexAuth.isAuthenticated = true
-    mocks.workspace = workspace
-    mocks.channels = channels
-    mocks.messages = messagesWithAnotherAuthor
+    renderAuthenticatedDogfood({ messages: messagesWithAnotherAuthor })
+    await waitFor(() => expect(capturedWorkspaceChatProps().model.channelMessages).toHaveLength(2))
+    const props = capturedWorkspaceChatProps()
+    expect(props.canEditMessage?.(props.model.channelMessages[0]!)).toBe(true)
+    expect(props.canDeleteMessage?.(props.model.channelMessages[0]!)).toBe(true)
+    expect(props.canEditMessage?.(props.model.channelMessages[1]!)).toBe(false)
+    expect(props.canDeleteMessage?.(props.model.channelMessages[1]!)).toBe(false)
 
-    render(<ConvexDogfoodApp />)
-
-    expect(await screen.findByRole("button", { name: "Edit first message" })).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Delete first message" })).toBeTruthy()
-    expect(screen.queryByRole("button", { name: "Edit second message" })).toBeNull()
-    expect(screen.queryByRole("button", { name: "Delete second message" })).toBeNull()
-
-    fireEvent.click(screen.getByRole("button", { name: "Edit first message" }))
-    fireEvent.click(screen.getByRole("button", { name: "Delete first message" }))
+    await act(async () => props.editChannelMessage?.({
+      channelId: String(workspace.channel.id),
+      messageId: String(messages[0]!.id),
+      body: "Edited dogfood"
+    }))
+    await act(async () => props.deleteChannelMessage({
+      channelId: String(workspace.channel.id),
+      messageId: String(messages[0]!.id)
+    }))
 
     await waitFor(() =>
       expect(mocks.editMessage).toHaveBeenCalledWith({
@@ -1560,16 +1284,13 @@ describe("ConvexDogfoodApp", () => {
   })
 
   it("wires reaction toggles through the Convex mutation", async () => {
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
-    mocks.auth.user = { id: "user-1" }
-    mocks.convexAuth.isAuthenticated = true
-    mocks.workspace = workspace
-    mocks.channels = channels
-    mocks.messages = messages
-
-    render(<ConvexDogfoodApp />)
-
-    fireEvent.click(await screen.findByRole("button", { name: "Toggle first reaction" }))
+    renderAuthenticatedDogfood({ messages })
+    const props = await waitFor(capturedWorkspaceChatProps)
+    await act(async () => props.toggleMessageReaction?.({
+      channelId: String(workspace.channel.id),
+      messageId: String(messages[0]!.id),
+      emoji: "👍"
+    }))
 
     await waitFor(() =>
       expect(mocks.toggleMessageReaction).toHaveBeenCalledWith({
@@ -1581,12 +1302,6 @@ describe("ConvexDogfoodApp", () => {
   })
 
   it("retries attachment registration after the upload succeeds", async () => {
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
-    mocks.auth.user = { id: "user-1" }
-    mocks.convexAuth.isAuthenticated = true
-    mocks.workspace = workspace
-    mocks.channels = channels
-    mocks.messages = messages
     mocks.registerAttachmentUpload
       .mockRejectedValueOnce(new Error("temporary registration failure"))
       .mockRejectedValueOnce(new Error("temporary registration failure"))
@@ -1596,28 +1311,28 @@ describe("ConvexDogfoodApp", () => {
       json: () => Promise.resolve({ storageId: "storage-1" })
     }))
 
-    render(<ConvexDogfoodApp />)
-    fireEvent.click(await screen.findByRole("button", { name: "Upload mock attachment" }))
+    renderAuthenticatedDogfood({ messages })
+    const props = await waitFor(capturedWorkspaceChatProps)
+    await props.uploadMessageAttachment?.(
+      new File(["file"], "brief.txt", { type: "text/plain" })
+    ).catch(() => {})
 
     await waitFor(() => expect(mocks.registerAttachmentUpload).toHaveBeenCalledTimes(3))
     expect(mocks.deleteAttachmentUpload).not.toHaveBeenCalled()
   })
 
   it("cleans up a direct upload after terminal registration failure", async () => {
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
-    mocks.auth.user = { id: "user-1" }
-    mocks.convexAuth.isAuthenticated = true
-    mocks.workspace = workspace
-    mocks.channels = channels
-    mocks.messages = messages
     mocks.registerAttachmentUpload.mockRejectedValue(new Error("registration unavailable"))
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ storageId: "storage-1" })
     }))
 
-    render(<ConvexDogfoodApp />)
-    fireEvent.click(await screen.findByRole("button", { name: "Upload mock attachment" }))
+    renderAuthenticatedDogfood({ messages })
+    const props = await waitFor(capturedWorkspaceChatProps)
+    await props.uploadMessageAttachment?.(
+      new File(["file"], "brief.txt", { type: "text/plain" })
+    ).catch(() => {})
 
     await waitFor(() => expect(mocks.deleteAttachmentUpload).toHaveBeenCalledWith({
       intentId: "intent-1",
@@ -1628,17 +1343,13 @@ describe("ConvexDogfoodApp", () => {
 
   it("passes compact dogfood mutation errors into the reused chat surface", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
-    mocks.auth.user = { id: "user-1" }
-    mocks.convexAuth.isAuthenticated = true
-    mocks.workspace = workspace
-    mocks.channels = channels
-    mocks.messages = messages
-
-    render(<ConvexDogfoodApp />)
-
-    expect(await screen.findByText(/^Could not send message\. Check your connection and try again\. Diagnostic: MUTATION-/)).toBeTruthy()
-    expect(screen.queryByText(/secret mutation details/)).toBeNull()
+    renderAuthenticatedDogfood({ messages })
+    const props = await waitFor(capturedWorkspaceChatProps)
+    const message = props.operationErrorMessage?.(
+      "send",
+      new Error("secret mutation details")
+    )
+    expect(message).toMatch(/^Could not send message\. Check your connection and try again\. Diagnostic: MUTATION-/)
     const logs = JSON.stringify(warnSpy.mock.calls)
     expect(logs).toContain("details redacted")
     expect(logs).not.toContain("secret mutation details")
@@ -1649,7 +1360,6 @@ describe("ConvexDogfoodApp", () => {
   })
 
   it("sanitizes render-boundary failures and offers a recovery action", async () => {
-    const { DogfoodErrorBoundary } = await import("./dogfood-chat")
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
     const BrokenChat = () => {
       throw new Error("secret render text https://private.example friend@example.com Bearer token api_key=oops")
@@ -1671,7 +1381,6 @@ describe("ConvexDogfoodApp", () => {
   })
 
   it("waits for Convex to authenticate before initializing the viewer", async () => {
-    const { ConvexDogfoodApp } = await import("./dogfood-chat")
     mocks.auth.user = { id: "user-1" }
     mocks.convexAuth.isLoading = true
     mocks.convexAuth.isAuthenticated = false
