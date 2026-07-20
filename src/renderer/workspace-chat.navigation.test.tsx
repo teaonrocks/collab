@@ -162,6 +162,9 @@ describe("WorkspaceChat", () => {
     expect(directMessageButton.textContent).toBe("LC")
     expect(directMessageButton.childElementCount).toBe(0)
     expect(directMessageButton.className).toContain("rounded-full")
+    expect(directMessageButton.className).toContain("hover:bg-surface-muted-hover")
+    expect(directMessageButton.className).toContain("active:bg-surface-rail")
+    expect(directMessageButton.className.split(" ")).not.toContain("hover:bg-surface-muted")
     expect(directMessageButton.hasAttribute("data-base-ui-tooltip-trigger")).toBe(true)
     expect(within(workspaceNavigation).queryByRole("navigation", { name: "Direct messages" })).toBeNull()
     expect(within(workspaceNavigation).queryByText("Maya Patel")).toBeNull()
@@ -185,9 +188,11 @@ describe("WorkspaceChat", () => {
     })
 
     expect(unreadDirectMessage).toBeTruthy()
-    expect(
-      unreadDirectMessage.querySelector("[title='Unread direct messages with Lee Chen since you last opened it.']")
-    ).toBeTruthy()
+    const unreadIndicator = unreadDirectMessage.querySelector(
+      "[title='Unread direct messages with Lee Chen since you last opened it.']"
+    )
+    expect(unreadIndicator).toBeTruthy()
+    expect(unreadIndicator?.className).toContain("bg-signal-unread")
     expect(within(directMessages).queryByRole("button", { name: "Lee Chen" })).toBeNull()
   })
 
@@ -205,11 +210,15 @@ describe("WorkspaceChat", () => {
       name: "Direct messages"
     })
 
+    const mentionedDirectMessage = within(directMessages).getByRole("button", {
+      name: "Lee Chen, Mention in direct message with Lee Chen since you last opened it."
+    })
+    expect(mentionedDirectMessage).toBeTruthy()
     expect(
-      within(directMessages).getByRole("button", {
-        name: "Lee Chen, Mention in direct message with Lee Chen since you last opened it."
-      })
-    ).toBeTruthy()
+      mentionedDirectMessage.querySelector(
+        "[title='Mention in direct message with Lee Chen since you last opened it.']"
+      )?.className
+    ).toContain("bg-signal-mentioned")
     expect(
       within(directMessages).queryByRole("button", {
         name: "Lee Chen, Unread direct messages with Lee Chen since you last opened it."
@@ -236,6 +245,8 @@ describe("WorkspaceChat", () => {
     const activeDirectMessage = within(directMessages).getByRole("button", { name: "Lee Chen" })
 
     expect(activeDirectMessage.getAttribute("aria-current")).toBe("page")
+    expect(activeDirectMessage.className).toContain("hover:bg-surface-canvas")
+    expect(activeDirectMessage.className).toContain("active:bg-surface-muted")
     expect(activeDirectMessage.querySelector("[title]")).toBeNull()
     expect(
       within(directMessages).queryByRole("button", {
@@ -771,9 +782,15 @@ describe("WorkspaceChat", () => {
     expect(profileRail).toBeTruthy()
     expect(profileRail?.textContent).toBe("MP")
     expect(profileRail?.childElementCount).toBe(0)
+    expect(profileRail?.className).toContain("hover:bg-surface-muted-hover")
+    expect(profileRail?.className).toContain("active:bg-surface-rail")
+    expect(profileRail?.getAttribute("aria-expanded")).toBe("false")
     await userEvent.setup().click(profileRail!)
 
     const menu = await screen.findByRole("menu", { name: "Profile settings" })
+    expect(profileRail?.getAttribute("aria-expanded")).toBe("true")
+    expect(profileRail?.className).toContain("hover:bg-surface-canvas")
+    expect(profileRail?.className).toContain("active:bg-surface-muted")
     const actions = menu.querySelector(".profileMenuActions")
     expect(actions).toBeTruthy()
     expect(within(menu).getByText("Maya Patel")).toBeTruthy()

@@ -47,7 +47,9 @@ export type ProfileMenuAction = {
 
 const iconClassName = "size-4 [stroke-width:2]"
 const railItemClassName =
-  "group/rail relative grid size-9 cursor-pointer place-items-center rounded-card border-0 bg-surface-muted text-[13px] font-extrabold text-foreground"
+  "group/rail relative grid size-9 cursor-pointer place-items-center rounded-card border-0 bg-surface-muted text-[13px] font-extrabold text-foreground transition-colors hover:bg-surface-muted-hover active:bg-surface-rail"
+const selectedRailItemClassName =
+  "active bg-surface-canvas outline-2 outline-border hover:bg-surface-canvas active:bg-surface-muted"
 
 const directConversationIndicatorDescription = (indicator: ChatChannelIndicator, recipientName: string): string =>
   indicator === "mentioned"
@@ -102,11 +104,12 @@ export function WorkspaceRail(props: {
       <nav className="railGroup flex w-full flex-col items-center gap-2" aria-label="Workspaces">
         <Tooltip>
           <TooltipTrigger
-            render={<Button variant="ghost" size="icon" />}
+            render={<Button variant={null} size="icon" />}
             className={cn(
               railItemClassName,
+              workspaceActive && selectedRailItemClassName,
               workspaceActive &&
-                "active bg-surface-canvas outline-2 outline-border before:absolute before:-left-2 before:h-6 before:w-[3px] before:rounded-r-[3px] before:bg-foreground"
+                "before:absolute before:-left-2 before:h-6 before:w-[3px] before:rounded-r-[3px] before:bg-foreground"
             )}
             aria-label={workspaceName}
             aria-current={workspaceActive ? "page" : undefined}
@@ -123,7 +126,7 @@ export function WorkspaceRail(props: {
           <Tooltip>
             <TooltipTrigger
               ref={addButtonRef}
-              render={<Button variant="ghost" size="icon" />}
+              render={<Button variant={null} size="icon" />}
               className={cn(railItemClassName, "rounded-full text-foreground-muted")}
               aria-label="Start direct message"
               onClick={() => setStartOpen(true)}
@@ -149,11 +152,11 @@ export function WorkspaceRail(props: {
           return (
             <Tooltip key={conversation.id}>
               <TooltipTrigger
-                render={<Button variant="ghost" size="icon" />}
+                render={<Button variant={null} size="icon" />}
                 className={cn(
                   railItemClassName,
                   "dmRailItem rounded-full",
-                  conversation.id === activeConversationId && "active bg-surface-canvas outline-2 outline-border"
+                  conversation.id === activeConversationId && selectedRailItemClassName
                 )}
                 aria-label={directConversationButtonLabel(conversation.otherUser.displayName, indicator)}
                 aria-current={conversation.id === activeConversationId ? "page" : undefined}
@@ -161,7 +164,13 @@ export function WorkspaceRail(props: {
               >
                 {initials(conversation.otherUser.displayName)}
                 {indicator === undefined ? null : (
-                  <span className="bg-accent absolute top-0 right-0 size-2 rounded-full" title={indicatorDescription} />
+                  <span
+                    className={cn(
+                      "absolute top-0 right-0 size-2 rounded-full",
+                      indicator === "mentioned" ? "bg-signal-mentioned" : "bg-signal-unread"
+                    )}
+                    title={indicatorDescription}
+                  />
                 )}
               </TooltipTrigger>
               <TooltipContent side="right">{conversation.otherUser.displayName}</TooltipContent>
@@ -174,9 +183,13 @@ export function WorkspaceRail(props: {
         <Button
           ref={profileButtonRef}
           type="button"
-          variant="ghost"
+          variant={null}
           size="icon"
-          className="railProfile railUser grid size-8 cursor-pointer place-items-center rounded-full border-0 bg-surface-muted p-0 text-[11px] font-extrabold text-foreground disabled:cursor-default"
+          className={cn(
+            railItemClassName,
+            "railProfile railUser size-8 rounded-full p-0 text-[11px] disabled:cursor-default",
+            profileOpen && selectedRailItemClassName
+          )}
           title={currentUserName}
           aria-label={hasProfileActions ? `Profile menu for ${currentUserName}` : currentUserName}
           aria-haspopup={hasProfileActions ? "menu" : undefined}
