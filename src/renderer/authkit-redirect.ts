@@ -23,5 +23,15 @@ export const authKitRedirectUriForCurrentLocation = (
   return withoutSearchOrHash(location.href)
 }
 
+export const authKitProviderOptionsForCurrentLocation = (
+  configuredRedirectUri: string,
+  location: Pick<Location, "href" | "protocol" | "search">
+): { readonly redirectUri: string; readonly devMode?: true } => ({
+  redirectUri: authKitRedirectUriForCurrentLocation(configuredRedirectUri, location),
+  // AuthKit's production mode relies on web-origin refresh cookies. A packaged
+  // file renderer instead needs its persistent local-storage token mode.
+  ...(location.protocol === "file:" ? { devMode: true as const } : {})
+})
+
 export const authKitSignOutReturnTo = (location: Pick<Location, "href"> = window.location): string =>
   withoutSearchOrHash(location.href)

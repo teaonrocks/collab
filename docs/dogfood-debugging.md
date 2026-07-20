@@ -24,7 +24,11 @@ Do not share `.env.local`, WorkOS secrets, Convex deploy keys, auth tokens, cook
 - For send, edit, delete, reaction, or attachment failures, keep the draft, editor, or dialog open, reconnect, then retry the same action.
 - For direct-message startup failures, retry from the global rail. Starting the same pair is
   idempotent; a retry should return the existing conversation rather than creating split history.
-- If the app shows `Waiting for your AuthKit session to reach Convex...` for more than a few seconds, retry sign-in.
+- If an older packaged build logs `Missing refresh token` and remains at
+  `Waiting for your AuthKit session to reach Convex...`, rebuild and restart the packaged app. Sign
+  in once more if that partition was already left without a refresh token. Updated packaged builds
+  retain the rotating token in the account's persistent Electron partition and should recover from
+  normal Convex reconnects and app restarts without another sign-in.
 
 ## Developer diagnostics
 

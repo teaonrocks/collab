@@ -2,7 +2,7 @@ import { ConvexProviderWithAuthKit } from "@convex-dev/workos"
 import { AuthKitProvider, useAuth } from "@workos-inc/authkit-react"
 import { ConvexReactClient } from "convex/react"
 import type { ReactNode } from "react"
-import { authKitRedirectUriForCurrentLocation } from "./authkit-redirect"
+import { authKitProviderOptionsForCurrentLocation } from "./authkit-redirect"
 import { isDogfoodAuthConfigured } from "./dogfood-config"
 
 let convexClient: ConvexReactClient | null = null
@@ -27,10 +27,10 @@ export function DogfoodAuthProvider(props: { readonly children: ReactNode }) {
     return <>{props.children}</>
   }
 
-  const redirectUri = authKitRedirectUriForCurrentLocation(configuredRedirectUri, window.location)
+  const authKitOptions = authKitProviderOptionsForCurrentLocation(configuredRedirectUri, window.location)
 
   return (
-    <AuthKitProvider clientId={clientId} redirectUri={redirectUri}>
+    <AuthKitProvider clientId={clientId} {...authKitOptions}>
       <ConvexProviderWithAuthKit client={getConvexClient(convexUrl)} useAuth={useAuth}>
         {props.children}
       </ConvexProviderWithAuthKit>

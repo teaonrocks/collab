@@ -53,11 +53,18 @@ configured `redirectUri` pathname. In packaged Electron, the page is the built r
 native callback. Normal sign-in URL generation continues to use `VITE_WORKOS_REDIRECT_URI`, which
 should remain `aether://auth/callback`.
 
+AuthKit normally uses its cookie-backed production session mode outside localhost. A packaged
+`file://` renderer does not have the web-origin cookie lifecycle that mode expects, so Aether
+explicitly enables AuthKit's local-storage session mode for packaged renderers only. This makes the
+rotating refresh token durable across renderer reloads and app restarts. Development and HTTPS web
+origins keep AuthKit's automatic storage policy.
+
 Each saved account uses a separate persistent Electron session partition. The initial account keeps
 the historical default partition so an existing installation does not lose its current sign-in.
-The display-only account registry lives under Electron's `userData` directory and never contains
-access or refresh tokens. Switching accounts replaces only the initiating window with one bound to
-the selected partition; other windows remain untouched.
+The packaged refresh token lives in Chromium local storage inside that partition; access tokens stay
+in AuthKit's in-memory client state. The display-only account registry lives under Electron's
+`userData` directory and never contains access or refresh tokens. Switching accounts replaces only
+the initiating window with one bound to the selected partition; other windows remain untouched.
 
 Removing an account first asks AuthKit to end the current session without navigation, then clears
 that account partition and moves every window using it to another saved account. Sign out all clears
