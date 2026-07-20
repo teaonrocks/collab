@@ -140,8 +140,8 @@ const skeletonBlockClassName =
 
 const channelIndicatorDescription = (indicator: ChatChannelIndicator, channelName: string): string =>
   indicator === "mentioned"
-    ? `Mention in #${channelName} since you last opened it. No native push is sent.`
-    : `Unread messages in #${channelName} since you last opened it. No native push is sent.`
+    ? `Mention in #${channelName} since you last opened it.`
+    : `Unread messages in #${channelName} since you last opened it.`
 
 export type WorkspaceChatProps = ChatDataView & {
   readonly profileMenuActions?: ReadonlyArray<ProfileMenuAction>

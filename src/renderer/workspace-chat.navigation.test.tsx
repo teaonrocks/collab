@@ -820,13 +820,9 @@ describe("WorkspaceChat", () => {
 
     const channels = await screen.findByRole("navigation", { name: "Channels" })
 
-    const indicator = within(channels).getByLabelText(
-      "Unread messages in #design since you last opened it. No native push is sent."
-    )
+    const indicator = within(channels).getByLabelText("Unread messages in #design since you last opened it.")
     expect(indicator).toBeTruthy()
-    expect(indicator.getAttribute("title")).toBe(
-      "Unread messages in #design since you last opened it. No native push is sent."
-    )
+    expect(indicator.getAttribute("title")).toBe("Unread messages in #design since you last opened it.")
     expect(within(channels).queryByText("2")).toBeNull()
   })
 
@@ -848,14 +844,10 @@ describe("WorkspaceChat", () => {
 
     const channels = await screen.findByRole("navigation", { name: "Channels" })
 
-    const indicator = within(channels).getByLabelText(
-      "Mention in #design since you last opened it. No native push is sent."
-    )
+    const indicator = within(channels).getByLabelText("Mention in #design since you last opened it.")
     expect(indicator).toBeTruthy()
-    expect(indicator.getAttribute("title")).toBe("Mention in #design since you last opened it. No native push is sent.")
-    expect(
-      within(channels).queryByLabelText("Unread messages in #design since you last opened it. No native push is sent.")
-    ).toBeNull()
+    expect(indicator.getAttribute("title")).toBe("Mention in #design since you last opened it.")
+    expect(within(channels).queryByLabelText("Unread messages in #design since you last opened it.")).toBeNull()
   })
 
   it("does not show stale unread state on the current channel", async () => {
@@ -865,14 +857,8 @@ describe("WorkspaceChat", () => {
 
     const channels = await screen.findByRole("navigation", { name: "Channels" })
 
-    expect(
-      within(channels).queryByLabelText("Mention in #origination since you last opened it. No native push is sent.")
-    ).toBeNull()
-    expect(
-      within(channels).queryByLabelText(
-        "Unread messages in #origination since you last opened it. No native push is sent."
-      )
-    ).toBeNull()
+    expect(within(channels).queryByLabelText("Mention in #origination since you last opened it.")).toBeNull()
+    expect(within(channels).queryByLabelText("Unread messages in #origination since you last opened it.")).toBeNull()
   })
 
   it("opens and closes message search from the header toggle and keyboard shortcut", async () => {
