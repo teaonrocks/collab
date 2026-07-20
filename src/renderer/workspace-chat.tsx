@@ -1261,7 +1261,7 @@ function ChannelHeader(props: {
           }}
         >
           <SelectTrigger
-            className="h-8 max-w-44 gap-1.5 bg-surface-canvas px-2 text-xs text-foreground-subtle"
+            className="max-w-44 gap-1.5 bg-surface-canvas px-2 text-xs text-foreground-subtle"
             aria-label={`Notifications for ${channelName}`}
             title={notificationPreferenceError ?? "Notification preference"}
           >
@@ -1293,7 +1293,7 @@ function ChannelHeader(props: {
             variant="secondary"
             size="icon"
             className={cn(
-              "searchToggle grid min-h-[30px] w-8 cursor-pointer place-items-center rounded-control border border-border-strong bg-surface-canvas p-0 font-[inherit] text-ring hover:border-ring hover:bg-surface-muted hover:text-foreground-subtle focus-visible:border-ring focus-visible:bg-surface-muted focus-visible:text-foreground-subtle",
+              "searchToggle grid size-control! cursor-pointer place-items-center rounded-control border border-border-strong bg-surface-canvas p-0 font-[inherit] text-ring hover:border-ring hover:bg-surface-muted hover:text-foreground-subtle focus-visible:border-ring focus-visible:bg-surface-muted focus-visible:text-foreground-subtle",
               searchOpen && "active text-foreground hover:text-foreground focus-visible:text-foreground"
             )}
             aria-label={searchToggleLabel}
@@ -1310,7 +1310,7 @@ function ChannelHeader(props: {
             variant="secondary"
             size="icon"
             className={cn(
-              "membersToggle grid min-h-[30px] w-8 cursor-pointer place-items-center rounded-control border border-border-strong bg-surface-canvas p-0 font-[inherit] text-ring hover:border-ring hover:bg-surface-muted hover:text-foreground-subtle focus-visible:border-ring focus-visible:bg-surface-muted focus-visible:text-foreground-subtle",
+              "membersToggle grid size-control! cursor-pointer place-items-center rounded-control border border-border-strong bg-surface-canvas p-0 font-[inherit] text-ring hover:border-ring hover:bg-surface-muted hover:text-foreground-subtle focus-visible:border-ring focus-visible:bg-surface-muted focus-visible:text-foreground-subtle",
               membersOpen && "active text-foreground hover:text-foreground focus-visible:text-foreground"
             )}
             aria-label={membersToggleLabel}
