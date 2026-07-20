@@ -97,6 +97,40 @@ const openMessageSearch = async () => {
 }
 
 describe("WorkspaceChat", () => {
+  it("shows the latest message when entering a channel after its messages load", async () => {
+    const scrollHeight = vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(720)
+    const base = makeChatModel([])
+    const { rerender } = render(
+      <TestWorkspaceChat
+        model={{ ...base, channelMessagesLoading: true }}
+      />
+    )
+
+    const timeline = screen.getByRole("list", { name: "Channel messages" })
+    expect(timeline.scrollTop).toBe(0)
+
+    rerender(
+      <TestWorkspaceChat
+        model={{
+          ...base,
+          channelMessages: [makeMessage({
+            id: "latest-message",
+            channelId,
+            authorType: "human",
+            authorId: userId,
+            authorDisplayName: "Maya Patel",
+            body: "This is the latest update.",
+            createdAt: 10
+          })],
+          channelMessagesLoading: false
+        }}
+      />
+    )
+
+    await waitFor(() => expect(timeline.scrollTop).toBe(720))
+    scrollHeight.mockRestore()
+  })
+
   it("keeps the compact lock badge in the private-channel glyph", async () => {
     renderWorkspaceChat(makeChatModel())
 

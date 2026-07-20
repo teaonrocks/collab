@@ -21,7 +21,7 @@ import {
   X,
   Users
 } from "lucide-react"
-import { Fragment, type FormEvent, type RefObject, useEffect, useMemo, useRef, useState } from "react"
+import { Fragment, type FormEvent, type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import "./App.css"
 import { MESSAGE_ATTACHMENT_POLICY } from "../shared/attachment-policy"
 import { MESSAGE_REACTION_EMOJIS } from "../shared/reaction-policy"
@@ -407,6 +407,7 @@ export function WorkspaceChat(props: WorkspaceChatProps) {
       />
 
       <ChatPane
+        conversationId={activeId}
         channelName={activeName}
         messageGroups={messageGroups}
         loading={channelMessagesLoading}
@@ -1640,6 +1641,7 @@ const notificationModeLabel = (mode: ChatConversationNotificationMode): string =
 }
 
 function ChatPane(props: {
+  readonly conversationId: ChatChannelId
   readonly channelName: string
   readonly messageGroups: ReadonlyArray<ChannelMessageGroup>
   readonly loading: boolean
@@ -1660,6 +1662,7 @@ function ChatPane(props: {
   readonly mentionMembersLoading: boolean
 }) {
   const {
+    conversationId,
     channelName,
     messageGroups,
     loading,
@@ -1679,7 +1682,17 @@ function ChatPane(props: {
     mentionMembers,
     mentionMembersLoading
   } = props
+  const timelineRef = useRef<HTMLOListElement>(null)
+  const bottomAlignedConversationIdRef = useRef<ChatChannelId | null>(null)
   const messageRowRefs = useRef(new Map<ChatMessageId, HTMLElement>())
+
+  useLayoutEffect(() => {
+    if (loading || bottomAlignedConversationIdRef.current === conversationId) return
+    const timeline = timelineRef.current
+    if (timeline === null) return
+    timeline.scrollTop = timeline.scrollHeight
+    bottomAlignedConversationIdRef.current = conversationId
+  }, [conversationId, loading, messageGroups])
 
   useEffect(() => {
     if (search.activeMessageId === null) return
@@ -1701,7 +1714,7 @@ function ChatPane(props: {
         onQueryChange={search.setQuery}
         onSelectResult={search.selectResult}
       />
-      <ol className={chatTimelineClassName} aria-label="Channel messages" aria-busy={loading}>
+      <ol ref={timelineRef} className={chatTimelineClassName} aria-label="Channel messages" aria-busy={loading}>
         {loading
           ? <ChannelMessagesSkeleton />
           : null}
