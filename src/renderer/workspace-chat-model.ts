@@ -38,11 +38,13 @@ export const MESSAGE_SEARCH_MAX_QUERY_LENGTH = 120
 
 export const createChannelViewModel = (model: ChatDataModel): ChannelViewModel => {
   const channelIndicators = new Map<ChatChannelId, ChatChannelIndicator>()
-  model.channelIndicators?.forEach((state) => {
-    if (state.channelId !== model.channel.id) channelIndicators.set(state.channelId, state.indicator)
-  })
+  if ("data" in model.indicators) {
+    model.indicators.data.forEach((state) => {
+      if (state.channelId !== model.channel.id) channelIndicators.set(state.channelId, state.indicator)
+    })
+  }
   return {
-    members: uniqueMembers(model.channelMessages),
+    members: uniqueMembers(model.conversation.messages.status === "ready" ? model.conversation.messages.data : []),
     channelIndicators
   }
 }
@@ -85,17 +87,16 @@ export const searchChannelMessages = (
   }
 
   const results = messages
-    .filter((message) =>
-      message.deletedAt === null &&
-      (message.body.toLowerCase().includes(normalizedQuery) ||
-        message.authorDisplayName.toLowerCase().includes(normalizedQuery))
+    .filter(
+      (message) =>
+        message.deletedAt === null &&
+        (message.body.toLowerCase().includes(normalizedQuery) ||
+          message.authorDisplayName.toLowerCase().includes(normalizedQuery))
     )
     .slice(0, MESSAGE_SEARCH_RESULT_LIMIT)
     .map((message) => ({ message, bodyPreview: message.body }))
 
-  return results.length === 0
-    ? { status: "empty" }
-    : { status: "results", results }
+  return results.length === 0 ? { status: "empty" } : { status: "results", results }
 }
 
 export const getMentionRequest = (
@@ -117,9 +118,10 @@ export const filterMentionMembers = (
   query: string
 ): ReadonlyArray<ChatChannelMember> => {
   const normalizedQuery = query.trim().toLowerCase()
-  const matches = normalizedQuery.length === 0
-    ? members
-    : members.filter((member) => member.displayName.toLowerCase().includes(normalizedQuery))
+  const matches =
+    normalizedQuery.length === 0
+      ? members
+      : members.filter((member) => member.displayName.toLowerCase().includes(normalizedQuery))
   return matches.slice(0, MENTION_SUGGESTION_LIMIT)
 }
 
@@ -131,8 +133,7 @@ export const resizeTextarea = (textarea: HTMLTextAreaElement | null, minHeight: 
   textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden"
 }
 
-export const formatTime = (timestamp: number): string =>
-  `${formatDatePart(timestamp)} ${formatClockPart(timestamp)}`
+export const formatTime = (timestamp: number): string => `${formatDatePart(timestamp)} ${formatClockPart(timestamp)}`
 
 export const formatDatePart = (timestamp: number): string => {
   const date = new Date(timestamp)

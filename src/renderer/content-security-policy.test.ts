@@ -19,6 +19,6 @@ describe("production renderer Content Security Policy", () => {
   it("is installed in the renderer document through the build-time policy token", async () => {
     const html = await readFile(new URL("./index.html", import.meta.url), "utf8")
     expect(html).toContain('http-equiv="Content-Security-Policy"')
-    expect(html).toContain('__AETHER_CONTENT_SECURITY_POLICY__')
+    expect(html).toContain("__AETHER_CONTENT_SECURITY_POLICY__")
   })
 })

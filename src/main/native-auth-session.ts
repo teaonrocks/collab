@@ -25,9 +25,10 @@ export const nativeAuthHelperExecutable = ({
   readonly appPath: string
   readonly resourcesPath: string
   readonly packaged: boolean
-}): string => packaged
-  ? join(resourcesPath, "native", "AetherWebAuthHelper.app", "Contents", "MacOS", "AetherWebAuthHelper")
-  : join(appPath, "build", "native", "AetherWebAuthHelper.app", "Contents", "MacOS", "AetherWebAuthHelper")
+}): string =>
+  packaged
+    ? join(resourcesPath, "native", "AetherWebAuthHelper.app", "Contents", "MacOS", "AetherWebAuthHelper")
+    : join(appPath, "build", "native", "AetherWebAuthHelper.app", "Contents", "MacOS", "AetherWebAuthHelper")
 
 const parseAuthenticationEvent = (rawEvent: string): NativeAuthenticationEvent => {
   const value: unknown = JSON.parse(rawEvent)
@@ -39,9 +40,7 @@ const parseAuthenticationEvent = (rawEvent: string): NativeAuthenticationEvent =
     return { type: "completed", callbackURL: value.callbackURL }
   }
   if (value.type === "error") {
-    const message = "message" in value && typeof value.message === "string"
-      ? value.message.slice(0, 1_000)
-      : undefined
+    const message = "message" in value && typeof value.message === "string" ? value.message.slice(0, 1_000) : undefined
     return { type: "error", ...(message === undefined ? {} : { message }) }
   }
   throw new Error("The native authentication helper returned an invalid response.")
@@ -108,7 +107,11 @@ export const runNativeAuthSession = (
               finish(new Error(event.message ?? "The native authentication session failed."))
             }
           } catch (cause) {
-            finish(cause instanceof Error ? cause : new Error("The native authentication helper returned an invalid response."))
+            finish(
+              cause instanceof Error
+                ? cause
+                : new Error("The native authentication helper returned an invalid response.")
+            )
             child.kill()
           }
         }
@@ -125,16 +128,22 @@ export const runNativeAuthSession = (
       activeSessions.delete(child)
       if (settled) return
       const diagnostic = errorOutput.trim()
-      finish(new Error(diagnostic.length > 0
-        ? `The native authentication helper failed: ${diagnostic}`
-        : `The native authentication helper exited before sign-in completed (${signal ?? code ?? "unknown"}).`))
+      finish(
+        new Error(
+          diagnostic.length > 0
+            ? `The native authentication helper failed: ${diagnostic}`
+            : `The native authentication helper exited before sign-in completed (${signal ?? code ?? "unknown"}).`
+        )
+      )
     })
 
-    child.stdin.end(JSON.stringify({
-      authorizationURL: rawUrl,
-      callbackScheme: authCallbackScheme,
-      ephemeral: true
-    }))
+    child.stdin.end(
+      JSON.stringify({
+        authorizationURL: rawUrl,
+        callbackScheme: authCallbackScheme,
+        ephemeral: true
+      })
+    )
   })
 }
 

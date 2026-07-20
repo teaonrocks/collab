@@ -31,9 +31,7 @@ const messagePreview = (message: Doc<"messages">): string => {
   const body = message.body.replace(/\s+/g, " ").trim()
   const fallback = (message.attachments?.length ?? 0) > 1 ? "Sent attachments" : "Sent an attachment"
   const value = body.length === 0 ? fallback : body
-  return value.length <= NOTIFICATION_PREVIEW_LENGTH
-    ? value
-    : `${value.slice(0, NOTIFICATION_PREVIEW_LENGTH - 3)}...`
+  return value.length <= NOTIFICATION_PREVIEW_LENGTH ? value : `${value.slice(0, NOTIFICATION_PREVIEW_LENGTH - 3)}...`
 }
 
 export const preference = query({
@@ -48,9 +46,7 @@ export const preference = query({
       .unique()
     return {
       mode: saved?.mode ?? defaultMode(channel),
-      options: channel.kind === "direct"
-        ? (["all", "off"] as const)
-        : (["all", "mentions", "off"] as const)
+      options: channel.kind === "direct" ? (["all", "off"] as const) : (["all", "mentions", "off"] as const)
     }
   }
 })
@@ -84,9 +80,7 @@ export const updatePreference = mutation({
     }
     return {
       mode: args.mode,
-      options: channel.kind === "direct"
-        ? (["all", "off"] as const)
-        : (["all", "mentions", "off"] as const)
+      options: channel.kind === "direct" ? (["all", "off"] as const) : (["all", "mentions", "off"] as const)
     }
   }
 })
@@ -109,8 +103,7 @@ export const feed = query({
     const user = await requireAllowedCurrentUser(ctx)
     const events = await ctx.db
       .query("messageNotificationEvents")
-      .withIndex("by_recipient_and_sequence", (q) =>
-        q.eq("recipientUserId", user._id).gt("sequence", args.cursor))
+      .withIndex("by_recipient_and_sequence", (q) => q.eq("recipientUserId", user._id).gt("sequence", args.cursor))
       .order("asc")
       .take(MAX_NOTIFICATION_EVENTS)
     const notifications = []
@@ -118,7 +111,8 @@ export const feed = query({
       const [message, channel, membership] = await Promise.all([
         ctx.db.get(event.messageId),
         ctx.db.get(event.channelId),
-        ctx.db.query("channelMemberships")
+        ctx.db
+          .query("channelMemberships")
           .withIndex("by_channel_user", (q) => q.eq("channelId", event.channelId).eq("userId", user._id))
           .unique()
       ])
@@ -128,14 +122,15 @@ export const feed = query({
         channel.deletedAt !== undefined ||
         membership === null ||
         message.authorUserId === user._id
-      ) continue
+      )
+        continue
       const direct = channel.kind === "direct"
       notifications.push({
         id: event._id,
         messageId: message._id,
         channelId: channel._id,
-        conversationKind: direct ? "direct" as const : "channel" as const,
-        title: direct ? message.authorDisplayName ?? "Direct message" : `#${channel.name}`,
+        conversationKind: direct ? ("direct" as const) : ("channel" as const),
+        title: direct ? (message.authorDisplayName ?? "Direct message") : `#${channel.name}`,
         body: direct
           ? messagePreview(message)
           : `${message.authorDisplayName ?? "Someone"}: ${messagePreview(message)}`,

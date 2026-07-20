@@ -1,35 +1,25 @@
 import { useAuth } from "@workos-inc/authkit-react"
-import { useAction, useConvex, useConvexAuth, useMutation, usePaginatedQuery, useQuery } from "convex/react"
-import { Component, type Dispatch, type ErrorInfo, type ReactNode, type SetStateAction, useEffect, useMemo, useRef, useState } from "react"
-import { api } from "../../convex/_generated/api"
-import type { Id } from "../../convex/_generated/dataModel"
+import { Component, type ErrorInfo, type ReactNode, useCallback, useEffect, useState } from "react"
 import type { WindowAccountContext } from "../shared/account-session"
-import { uploadAttachment } from "./attachment-draft"
 import { authKitSignOutReturnTo } from "./authkit-redirect"
-import {
-  dogfoodChatToChatData,
-  type DogfoodChannelMemberView,
-  type DogfoodChannelMessageView,
-  type DogfoodChannelView,
-  type DogfoodActiveConversation,
-  type DogfoodDirectConversationView,
-  type DogfoodWorkspaceView
-} from "./dogfood-chat-adapter"
+import { dogfoodChatToChatData } from "./dogfood-chat-adapter"
+import { useConversationSelection } from "./dogfood-chat/use-conversation-selection"
+import { useDesktopNotifications } from "./dogfood-chat/use-desktop-notifications"
+import { useActiveConversationData, useDogfoodWorkspaceData } from "./dogfood-chat/use-dogfood-data"
+import { useDogfoodCommands } from "./dogfood-chat/use-dogfood-commands"
+import { useReadMarkers } from "./dogfood-chat/use-read-markers"
+import { useViewerSession } from "./dogfood-chat/use-viewer-session"
 import {
   addWindowAccount,
   getWindowAccountContext,
   openExternalUrl,
   openNativeAuthUrl,
   removeCurrentWindowAccount,
-  showDesktopNotification,
   signOutAllWindowAccounts,
-  subscribeToDesktopNotificationActivation,
   subscribeToWindowAccountContext,
   switchWindowAccount,
-  updateDesktopNotificationContext,
   updateWindowAccountProfile
 } from "./electron-shell"
-import { consumeNotificationFeedPage } from "./desktop-notification-feed"
 import { Button } from "./ui"
 import { WorkspaceChat, type ProfileMenuAction } from "./workspace-chat"
 
@@ -62,311 +52,114 @@ export function ConvexDogfoodApp() {
 }
 
 function ConvexDogfoodChat() {
-  const auth = useAuth()
-  const convex = useConvex()
-  const convexAuth = useConvexAuth()
-  const ensureViewer = useAction(api.chat.ensureViewer)
-  const sendMessage = useMutation(api.chat.sendMessage)
-  const editMessage = useMutation(api.chat.editMessage)
-  const deleteMessage = useMutation(api.chat.deleteMessage)
-  const toggleMessageReaction = useMutation(api.chat.toggleMessageReaction)
-  const createChannel = useMutation(api.chat.createChannel)
-  const editChannel = useMutation(api.chat.editChannel)
-  const deleteChannel = useMutation(api.chat.deleteChannel)
-  const addPrivateChannelMember = useMutation(api.chat.addPrivateChannelMember)
-  const removePrivateChannelMember = useMutation(api.chat.removePrivateChannelMember)
-  const ensureChannelMember = useMutation(api.chat.ensureChannelMember)
-  const markChannelRead = useMutation(api.chat.markChannelRead)
-  const generateAttachmentUploadUrl = useMutation(api.chat.generateAttachmentUploadUrl)
-  const registerAttachmentUpload = useMutation(api.chat.registerAttachmentUpload)
-  const deleteAttachmentUpload = useMutation(api.chat.deleteAttachmentUpload)
-  const startOrReopenDirectConversation = useMutation(api.direct_conversations.startOrReopen)
-  const sendFriendRequest = useMutation(api.social.sendFriendRequest)
-  const updateDirectMessageProfile = useMutation(api.social.updateProfile)
-  const respondToFriendRequest = useMutation(api.social.respondToFriendRequest)
-  const updateNotificationPreference = useMutation(api.notification_preferences.updatePreference)
-  const [ensuredUserId, setEnsuredUserId] = useState<string | null>(null)
-  const [selectedConversation, setSelectedConversation] = useState<DogfoodActiveConversation | null>(null)
-  const [stableDirectConversations, setStableDirectConversations] = useState<ReadonlyArray<DogfoodDirectConversationView>>([])
-  const [joinedChannelIds, setJoinedChannelIds] = useState<ReadonlySet<Id<"channels">>>(() => new Set())
-  const [createdChannels, setCreatedChannels] = useState<ReadonlyArray<DogfoodChannelView>>([])
   const [error, setError] = useState<ConvexDogfoodError | null>(null)
   const [signInOpening, setSignInOpening] = useState(false)
-  const [ensureAttempt, setEnsureAttempt] = useState(0)
-  const lastReadMarkerRef = useRef<string | null>(null)
-  const [windowActive, setWindowActive] = useState(() =>
-    document.visibilityState === "visible" && document.hasFocus())
-  const authUserId = auth.user?.id ?? null
-  const accountContext = useWindowAccountContext(auth.user)
-  const sessionReady = authUserId !== null && convexAuth.isAuthenticated
-  const viewerReady = sessionReady && ensuredUserId === authUserId && error === null
-  const workspace = useQuery(api.chat.defaultWorkspace, viewerReady ? {} : "skip")
-  const channels = useQuery(
-    api.chat.channels,
-    workspace === undefined || workspace === null ? "skip" : { workspaceId: workspace.workspace.id }
-  )
-  const channelList = useMemo(
-    () => channels === undefined ? undefined : mergeDogfoodChannels(channels, createdChannels),
-    [channels, createdChannels]
-  )
-  const directConversations = useQuery(
-    api.direct_conversations.list,
-    viewerReady ? {} : "skip"
-  )
-  const directMessageProfile = useQuery(api.social.profile, viewerReady ? {} : "skip")
-  const incomingFriendRequests = useQuery(api.social.incomingFriendRequests, viewerReady ? {} : "skip")
-  useEffect(() => {
-    if (directConversations !== undefined) setStableDirectConversations(directConversations)
-  }, [directConversations])
-  const activeKind = selectedConversation?.kind ?? "channel"
-  const selectedChannelId = selectedConversation?.kind === "channel" ? selectedConversation.id : null
-  const activeChannel = activeKind === "direct"
-    ? undefined
-    : selectedChannelId === null
-    ? workspace?.channel
-    : channelList?.find((channel) => channel.id === selectedChannelId) ?? workspace?.channel
-  const activeDirectConversation = selectedConversation?.kind === "direct"
-    ? stableDirectConversations.find((conversation) => conversation.id === selectedConversation.id)
-    : undefined
-  const activeChannelId = activeDirectConversation?.id ?? activeChannel?.id
-  const activeChannelJoined = activeChannelId === undefined ? false : joinedChannelIds.has(activeChannelId)
-  const messagePagination = usePaginatedQuery(
-    api.chat.channelMessages,
-    activeChannelId === undefined || (activeKind === "channel" && !activeChannelJoined) ? "skip" : { channelId: activeChannelId },
-    { initialNumItems: 50 }
-  )
-  const messages = useMemo(
-    () => [...messagePagination.results].reverse(),
-    [messagePagination.results]
-  )
-  const members = useQuery(
-    api.chat.channelMembers,
-    activeKind === "direct" || activeChannelId === undefined || !activeChannelJoined ? "skip" : { channelId: activeChannelId }
-  )
-  const currentUserIsPrivateChannelAdmin = activeChannel?.visibility === "private" && members?.some((member) =>
-    member.id === workspace?.currentUser.id && member.role === "admin"
-  ) === true
-  const channelMemberInviteCandidates = useQuery(
-    api.chat.eligiblePrivateChannelMembers,
-    activeChannelId === undefined || !currentUserIsPrivateChannelAdmin ? "skip" : { channelId: activeChannelId }
-  )
-  const createChannelInviteCandidates = useQuery(
-    api.chat.eligiblePrivateChannelMembers,
-    workspace === undefined || workspace === null ? "skip" : {}
-  )
-  const conversationIndicators = useQuery(
-    api.chat.conversationIndicators,
-    workspace === undefined || workspace === null ? "skip" : { workspaceId: workspace.workspace.id }
-  )
-  const notificationPreference = useQuery(
-    api.notification_preferences.preference,
-    activeChannelId === undefined || (activeKind === "channel" && !activeChannelJoined)
-      ? "skip"
-      : { channelId: activeChannelId }
-  )
-  useDesktopNotificationFeed(viewerReady, authUserId, activeChannelId, setSelectedConversation)
-
-  useEffect(() => {
-    const updateWindowActivity = () => {
-      setWindowActive(document.visibilityState === "visible" && document.hasFocus())
-    }
-    window.addEventListener("focus", updateWindowActivity)
-    window.addEventListener("blur", updateWindowActivity)
-    document.addEventListener("visibilitychange", updateWindowActivity)
-    return () => {
-      window.removeEventListener("focus", updateWindowActivity)
-      window.removeEventListener("blur", updateWindowActivity)
-      document.removeEventListener("visibilitychange", updateWindowActivity)
-    }
+  const viewerFailure = useCallback((cause: unknown) => {
+    const diagnostic = dogfoodDiagnostic("viewer", "try-again", cause)
+    logDogfoodDiagnostic("viewer", cause, diagnostic)
+    setError({ message: dogfoodAccessErrorMessage(cause), diagnostic })
   }, [])
+  const membershipFailure = useCallback((cause: unknown) => {
+    const diagnostic = dogfoodDiagnostic("channel", "try-again", cause)
+    logDogfoodDiagnostic("channel", cause, diagnostic)
+    setError({ message: dogfoodAccessErrorMessage(cause), diagnostic })
+  }, [])
+  const readMarkerFailure = useCallback((cause: unknown) => {
+    logDogfoodDiagnostic("read-marker", cause, dogfoodDiagnostic("mutation", "try-again", cause))
+  }, [])
+  const session = useViewerSession(error !== null, viewerFailure)
+  const { auth, authUserId, viewerReady, ensureAttempt } = session
+  const accountContext = useWindowAccountContext(auth.user)
+  const workspaceData = useDogfoodWorkspaceData(viewerReady)
+  const { workspace } = workspaceData
+  const selection = useConversationSelection({
+    viewerReady,
+    workspace,
+    channels: workspaceData.channels,
+    directConversations: workspaceData.directConversations,
+    onMembershipError: membershipFailure
+  })
+  const conversationData = useActiveConversationData(selection, workspace?.currentUser.id)
+  const commands = useDogfoodCommands({
+    workspace,
+    selection,
+    loadOlderMessages: conversationData.loadOlderMessages,
+    operationErrorMessage: dogfoodOperationErrorMessage
+  })
+  useDesktopNotifications({
+    viewerReady,
+    authUserId,
+    activeChannelId: selection.activeChannelId,
+    activateConversation: selection.activateConversation
+  })
+  useReadMarkers({
+    viewerReady,
+    activeKind: selection.activeKind,
+    activeChannelId: selection.activeChannelId,
+    activeChannelJoined: selection.activeChannelJoined,
+    messagesLoading: conversationData.messagesLoading,
+    messages: conversationData.messages,
+    onFailure: readMarkerFailure
+  })
 
-  useEffect(() => {
-    if (workspace === undefined || workspace === null) return
-    setJoinedChannelIds((existing) => {
-      if (existing.has(workspace.channel.id)) return existing
-      return new Set([...existing, workspace.channel.id])
-    })
-  }, [workspace])
-
-  useEffect(() => {
-    if (!viewerReady || activeKind === "direct" || activeChannelId === undefined || activeChannelJoined) return
-
-    let cancelled = false
-    void ensureChannelMember({ channelId: activeChannelId })
-      .then(() => {
-        if (cancelled) return
-        setJoinedChannelIds((existing) => {
-          if (existing.has(activeChannelId)) return existing
-          return new Set([...existing, activeChannelId])
-        })
-      })
-      .catch((cause: unknown) => {
-        if (!cancelled) {
-          const diagnostic = dogfoodDiagnostic("channel", "try-again", cause)
-          logDogfoodDiagnostic("channel", cause, diagnostic)
-          setError({ message: dogfoodAccessErrorMessage(cause), diagnostic })
-        }
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [activeChannelId, activeChannelJoined, activeKind, ensureChannelMember, viewerReady])
-
-  useEffect(() => {
-    if (!viewerReady || !windowActive || activeChannelId === undefined || (activeKind === "channel" && !activeChannelJoined) || messagePagination.status === "LoadingFirstPage") return
-    const readThroughMessageId = latestMessageId(messages)
-    if (readThroughMessageId === null) return
-    const readMarker = `${activeChannelId}:${readThroughMessageId}`
-    if (lastReadMarkerRef.current === readMarker) return
-    lastReadMarkerRef.current = readMarker
-
-    void markChannelRead({ channelId: activeChannelId, readThroughMessageId }).catch((cause: unknown) => {
-      logDogfoodDiagnostic("read-marker", cause, dogfoodDiagnostic("mutation", "try-again", cause))
-    })
-  }, [activeChannelId, activeChannelJoined, activeKind, markChannelRead, messagePagination.status, messages, viewerReady, windowActive])
-
-  useEffect(() => {
-    if (workspace === undefined || workspace === null || channelList === undefined) return
-    if (selectedConversation?.kind !== "channel") return
-    if (channelList.some((channel) => channel.id === selectedChannelId)) return
-    setSelectedConversation({ kind: "channel", id: workspace.channel.id })
-  }, [channelList, selectedChannelId, selectedConversation, workspace])
-
-  useEffect(() => {
-    if (selectedConversation?.kind !== "direct" || directConversations === undefined) return
-    if (directConversations.some((conversation) => conversation.id === selectedConversation.id)) return
-    if (workspace !== undefined && workspace !== null) {
-      setSelectedConversation({ kind: "channel", id: workspace.channel.id })
-    }
-  }, [directConversations, selectedConversation, workspace])
-
-  useEffect(() => {
-    const user = auth.user
-    if (auth.isLoading || convexAuth.isLoading || !convexAuth.isAuthenticated || user === null || ensuredUserId === user.id) {
-      return
-    }
-
-    let cancelled = false
-    void ensureViewer({})
-      .then(() => {
-        if (!cancelled) {
-          setEnsuredUserId(user.id)
-          setError(null)
-        }
-      })
-      .catch((cause: unknown) => {
-        if (!cancelled) {
-          const diagnostic = dogfoodDiagnostic("viewer", "try-again", cause)
-          logDogfoodDiagnostic("viewer", cause, diagnostic)
-          setError({ message: dogfoodAccessErrorMessage(cause), diagnostic })
-        }
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [auth.isLoading, auth.user, convexAuth.isAuthenticated, convexAuth.isLoading, ensureAttempt, ensureViewer, ensuredUserId])
-
-  const model = workspace === undefined || workspace === null || channelList === undefined || activeChannelId === undefined
-    ? null
-    : dogfoodChatToChatData({
+  const model =
+    workspace === undefined ||
+    workspace === null ||
+    selection.channelList === undefined ||
+    selection.activeChannelId === undefined
+      ? null
+      : dogfoodChatToChatData({
           data: {
             workspace,
-            channels: channelList,
-            directConversations: stableDirectConversations,
-            directMessageProfile,
-            incomingFriendRequests,
-            selectedConversation: activeKind === "direct"
-              ? { kind: "direct", id: activeChannelId }
-              : { kind: "channel", id: activeChannelId },
-            messages,
-            members: members ?? [],
-            channelMemberInviteCandidates,
-            createChannelInviteCandidates,
-            channelIndicators: conversationIndicators,
-            notificationPreference
+            channels: selection.channelList,
+            directConversations: selection.directConversations,
+            ...(workspaceData.directMessageProfile === undefined
+              ? {}
+              : { directMessageProfile: workspaceData.directMessageProfile }),
+            ...(workspaceData.incomingFriendRequests === undefined
+              ? {}
+              : { incomingFriendRequests: workspaceData.incomingFriendRequests }),
+            selectedConversation:
+              selection.activeKind === "direct"
+                ? { kind: "direct", id: selection.activeChannelId }
+                : { kind: "channel", id: selection.activeChannelId },
+            messages: conversationData.messages,
+            ...(conversationData.members === undefined ? {} : { members: conversationData.members }),
+            ...(conversationData.channelMemberInviteCandidates === undefined
+              ? {}
+              : { channelMemberInviteCandidates: conversationData.channelMemberInviteCandidates }),
+            ...(workspaceData.createChannelInviteCandidates === undefined
+              ? {}
+              : { createChannelInviteCandidates: workspaceData.createChannelInviteCandidates }),
+            ...(workspaceData.conversationIndicators === undefined
+              ? {}
+              : { channelIndicators: workspaceData.conversationIndicators }),
+            ...(conversationData.notificationPreference === undefined
+              ? {}
+              : { notificationPreference: conversationData.notificationPreference })
           },
           state: {
-            messagesLoading: messagePagination.status === "LoadingFirstPage",
-            messagesHasMore: messagePagination.status === "CanLoadMore" || messagePagination.status === "LoadingMore",
-            messagesLoadingMore: messagePagination.status === "LoadingMore",
-            membersLoading: members === undefined,
-            directConversationsLoading: directConversations === undefined
+            messagesLoading: conversationData.messagesLoading,
+            messagesHasMore: conversationData.messagesHasMore,
+            messagesLoadingMore: conversationData.messagesLoadingMore,
+            membersLoading: conversationData.members === undefined,
+            directConversationsLoading: workspaceData.directConversations === undefined
           },
-          commands: {
-            loadOlderMessages: () => messagePagination.loadMore(50),
-            createChannel: async (input) => {
-              const channel = await createChannel(input)
-              setCreatedChannels((existing) => mergeDogfoodChannels(existing, [channel]))
-              setJoinedChannelIds((existing) => new Set([...existing, channel.id]))
-              setSelectedConversation({ kind: "channel", id: channel.id })
-              return channel
-            },
-            selectChannel: (channelId) => setSelectedConversation({ kind: "channel", id: channelId }),
-            selectDirectConversation: (conversationId) => setSelectedConversation({ kind: "direct", id: conversationId }),
-            startDirectConversation: async (recipientUserId) => {
-              const conversation = await startOrReopenDirectConversation({
-                recipientUserId
-              })
-              setStableDirectConversations((existing) => {
-                const withoutConversation = existing.filter((item) => item.id !== conversation.id)
-                return [conversation, ...withoutConversation]
-              })
-              setSelectedConversation({ kind: "direct", id: conversation.id })
-              return conversation
-            },
-            searchDirectConversationCandidates: (query) => convex.query(api.social.searchUsers, { query }),
-            sendFriendRequest,
-            updateDirectMessageProfile,
-            respondToFriendRequest,
-            updateNotificationPreference,
-            editChannel,
-            deleteChannel: async (input) => {
-              await deleteChannel(input)
-              if (selectedConversation?.kind === "channel" && selectedConversation.id === input.channelId) {
-                setSelectedConversation({ kind: "channel", id: workspace.channel.id })
-              }
-              setCreatedChannels((existing) => existing.filter((channel) => channel.id !== input.channelId))
-            },
-            addChannelMember: addPrivateChannelMember,
-            removeChannelMember: async (input) => {
-              const result = await removePrivateChannelMember(input)
-              if (workspace.currentUser.id === input.userId) {
-                setSelectedConversation({ kind: "channel", id: workspace.channel.id })
-                setJoinedChannelIds((existing) => {
-                  const next = new Set(existing)
-                  next.delete(input.channelId)
-                  return next
-                })
-                setCreatedChannels((existing) => existing.filter((channel) => channel.id !== input.channelId))
-              }
-              return result
-            },
-            sendMessage,
-            uploadMessageAttachment: (file) => uploadAttachment({
-              file,
-              generateUploadUrl: () => generateAttachmentUploadUrl({}),
-              register: (input) => registerAttachmentUpload(input),
-              deleteUpload: (input) => deleteAttachmentUpload(input),
-              storageIdFromResponse: storageIdFromUploadResponse,
-              storageIdToString: String
-            }),
-            discardMessageAttachment: deleteAttachmentUpload,
-            editMessage,
-            deleteMessage,
-            toggleMessageReaction,
-            searchMessages: (input) => convex.query(api.chat.searchChannelMessages, input),
-            operationErrorMessage: dogfoodOperationErrorMessage
-          }
+          commands
         })
 
-  if (auth.isLoading) {
-    return <DogfoodShell title="Checking Session" variant="plain">Loading your Aether session...</DogfoodShell>
+  if (session.status === "auth-loading") {
+    return (
+      <DogfoodShell title="Checking Session" variant="plain">
+        Loading your Aether session...
+      </DogfoodShell>
+    )
   }
 
-  if (auth.user === null) {
-    const previousAccount = accountContext?.accounts.find((account) => !account.current && account.displayName !== "Sign in")
+  if (session.status === "signed-out") {
+    const previousAccount = accountContext?.accounts.find(
+      (account) => !account.current && account.displayName !== "Sign in"
+    )
     return (
       <DogfoodShell title="Welcome to Aether" variant="plain">
         <Button
@@ -375,52 +168,64 @@ function ConvexDogfoodChat() {
           disabled={signInOpening || (window.aetherShell !== undefined && accountContext === null)}
           onClick={() => void signInInDefaultBrowser(auth, setSignInOpening, setError, accountContext)}
         >
-          {signInOpening ? "Opening browser..." : accountContext === null && window.aetherShell !== undefined ? "Loading account..." : "Sign in"}
+          {signInOpening
+            ? "Opening browser..."
+            : accountContext === null && window.aetherShell !== undefined
+              ? "Loading account..."
+              : "Sign in"}
         </Button>
-        {previousAccount === undefined
-          ? null
-          : (
-            <Button
-              type="button"
-              variant="link"
-              className="dogfoodLinkButton text-xs font-normal focus-visible:rounded-sm"
-              onClick={() => void switchWindowAccount(previousAccount.id)}
-            >
-              Back to {previousAccount.displayName}
-            </Button>
-          )}
+        {previousAccount === undefined ? null : (
+          <Button
+            type="button"
+            variant="link"
+            className="dogfoodLinkButton text-xs font-normal focus-visible:rounded-sm"
+            onClick={() => void switchWindowAccount(previousAccount.id)}
+          >
+            Back to {previousAccount.displayName}
+          </Button>
+        )}
       </DogfoodShell>
     )
   }
 
-  if (!convexAuth.isAuthenticated) {
-    return <DogfoodShell title="Checking Session" variant="plain">Waiting for your AuthKit session to reach Convex...</DogfoodShell>
+  if (session.status === "convex-loading") {
+    return (
+      <DogfoodShell title="Checking Session" variant="plain">
+        Waiting for your AuthKit session to reach Convex...
+      </DogfoodShell>
+    )
   }
 
   if (error !== null) {
     return (
       <DogfoodShell title="Could Not Join">
-        <p className="errorText max-w-[min(720px,calc(100vw-48px))] [overflow-wrap:anywhere] text-destructive-text">{error.message}</p>
+        <p className="errorText max-w-[min(720px,calc(100vw-48px))] [overflow-wrap:anywhere] text-destructive-text">
+          {error.message}
+        </p>
         {error.diagnostic === undefined ? null : <DogfoodDiagnosticDetails diagnostic={error.diagnostic} />}
         <Button
           type="button"
           className="dogfoodPrimaryButton min-h-9 rounded-panel"
           onClick={() => {
             setError(null)
-            setEnsuredUserId(null)
-            setEnsureAttempt((attempt) => attempt + 1)
+            session.retry()
           }}
         >
           Try again
         </Button>
-        <Button type="button" variant="secondary" className="dogfoodSecondaryButton min-h-9 rounded-panel" onClick={() => void signOutCurrentAccount(auth, accountContext)}>
+        <Button
+          type="button"
+          variant="secondary"
+          className="dogfoodSecondaryButton min-h-9 rounded-panel"
+          onClick={() => void signOutCurrentAccount(auth, accountContext)}
+        >
           Sign out
         </Button>
       </DogfoodShell>
     )
   }
 
-  if (!viewerReady) {
+  if (session.status !== "ready") {
     return (
       <DogfoodShell title="Preparing Workspace" variant="plain">
         {ensureAttempt > 0
@@ -431,19 +236,22 @@ function ConvexDogfoodChat() {
   }
 
   if (workspace === null) {
-    return <DogfoodShell title="Preparing Workspace" variant="plain">Setting up the shared channel...</DogfoodShell>
+    return (
+      <DogfoodShell title="Preparing Workspace" variant="plain">
+        Setting up the shared channel...
+      </DogfoodShell>
+    )
   }
 
   if (model === null) {
-    return <DogfoodShell title="Loading Chat" variant="plain">Waiting for realtime messages...</DogfoodShell>
+    return (
+      <DogfoodShell title="Loading Chat" variant="plain">
+        Waiting for realtime messages...
+      </DogfoodShell>
+    )
   }
 
-  return (
-    <WorkspaceChat
-      {...model}
-      profileMenuActions={profileMenuActions(auth, accountContext, setError)}
-    />
-  )
+  return <WorkspaceChat {...model} profileMenuActions={profileMenuActions(auth, accountContext, setError)} />
 }
 
 function useWindowAccountContext(user: ReturnType<typeof useAuth>["user"]): WindowAccountContext | null {
@@ -471,90 +279,29 @@ function useWindowAccountContext(user: ReturnType<typeof useAuth>["user"]): Wind
 
   useEffect(() => {
     if (user === null || typeof user.email !== "string" || user.email.length === 0) return
-    const displayName = [user.firstName, user.lastName]
-      .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
-      .join(" ") || user.email
+    const displayName =
+      [user.firstName, user.lastName]
+        .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
+        .join(" ") || user.email
     let cancelled = false
     void updateWindowAccountProfile({
       userId: user.id,
       displayName,
       email: user.email,
       avatarUrl: user.profilePictureUrl
-    }).then((context) => {
-      if (!cancelled && context !== null) setAccountContext(context)
-    }).catch((cause: unknown) => {
-      console.warn("Could not remember the signed-in Aether account", cause)
     })
+      .then((context) => {
+        if (!cancelled && context !== null) setAccountContext(context)
+      })
+      .catch((cause: unknown) => {
+        console.warn("Could not remember the signed-in Aether account", cause)
+      })
     return () => {
       cancelled = true
     }
   }, [user])
 
   return accountContext
-}
-
-function useDesktopNotificationFeed(
-  viewerReady: boolean,
-  authUserId: string | null,
-  activeChannelId: Id<"channels"> | undefined,
-  setSelectedConversation: Dispatch<SetStateAction<DogfoodActiveConversation | null>>
-): void {
-  const openFeed = useMutation(api.notification_preferences.openFeed)
-  const seenEventIdsRef = useRef(new Set<string>())
-  const [cursor, setCursor] = useState<number | null>(null)
-  const events = useQuery(
-    api.notification_preferences.feed,
-    viewerReady && cursor !== null ? { cursor } : "skip"
-  )
-
-  useEffect(() => {
-    if (!viewerReady) {
-      setCursor(null)
-      seenEventIdsRef.current.clear()
-      return
-    }
-    let cancelled = false
-    setCursor(null)
-    seenEventIdsRef.current.clear()
-    void openFeed({})
-      .then(({ cursor: openedCursor }) => {
-        if (!cancelled) setCursor(openedCursor)
-      })
-      .catch((cause: unknown) => {
-        console.warn("Could not open the desktop notification feed", cause)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [authUserId, openFeed, viewerReady])
-
-  useEffect(() => {
-    if (activeChannelId === undefined) return
-    void updateDesktopNotificationContext(String(activeChannelId)).catch((cause: unknown) => {
-      console.warn("Could not update the desktop notification context", cause)
-    })
-  }, [activeChannelId])
-
-  useEffect(() => subscribeToDesktopNotificationActivation((activation) => {
-    setSelectedConversation({ kind: activation.conversationKind, id: activation.conversationId as Id<"channels"> })
-  }), [setSelectedConversation])
-
-  useEffect(() => {
-    if (events === undefined) return
-    const page = consumeNotificationFeedPage(events, seenEventIdsRef.current)
-    for (const event of page.notifications) {
-      void showDesktopNotification({
-        messageId: String(event.messageId),
-        conversationId: String(event.channelId),
-        conversationKind: event.conversationKind,
-        title: event.title,
-        body: event.body
-      }).catch((cause: unknown) => {
-        console.warn("Could not show a desktop notification", cause)
-      })
-    }
-    setCursor((current) => current === null ? page.cursor : Math.max(current, page.cursor))
-  }, [events])
 }
 
 const signInInDefaultBrowser = async (
@@ -566,14 +313,16 @@ const signInInDefaultBrowser = async (
   setSignInOpening(true)
   setError(null)
   try {
-    const generatedUrl = await auth.getSignInUrl(accountContext === null
-      ? {}
-      : {
-          state: {
-            aetherWindowId: accountContext.windowId,
-            aetherAccountId: accountContext.currentAccountId
+    const generatedUrl = await auth.getSignInUrl(
+      accountContext === null
+        ? {}
+        : {
+            state: {
+              aetherWindowId: accountContext.windowId,
+              aetherAccountId: accountContext.currentAccountId
+            }
           }
-        })
+    )
     const currentAccount = accountContext?.accounts.find((account) => account.current)
     if (currentAccount?.pending === true) {
       await openNativeAuthUrl(generatedUrl)
@@ -628,10 +377,12 @@ const profileMenuActions = (
   setError: (error: ConvexDogfoodError | null) => void
 ): ReadonlyArray<ProfileMenuAction> => {
   if (accountContext === null) {
-    return [{
-      label: "Sign out",
-      onSelect: () => auth.signOut({ returnTo: authKitSignOutReturnTo() })
-    }]
+    return [
+      {
+        label: "Sign out",
+        onSelect: () => auth.signOut({ returnTo: authKitSignOutReturnTo() })
+      }
+    ]
   }
 
   const run = (operation: () => Promise<void>) => {
@@ -699,8 +450,13 @@ function DogfoodShell(props: {
 }) {
   return (
     <main className={dogfoodShellClassName}>
-      <section className={props.variant === "plain" ? dogfoodPlainStateClassName : dogfoodAuthPanelClassName} aria-live="polite">
-        {props.variant === "plain" ? null : <span className="text-xs font-bold uppercase tracking-[0.08em] text-foreground-subtle">Aether Dogfood</span>}
+      <section
+        className={props.variant === "plain" ? dogfoodPlainStateClassName : dogfoodAuthPanelClassName}
+        aria-live="polite"
+      >
+        {props.variant === "plain" ? null : (
+          <span className="text-xs font-bold tracking-[0.08em] text-foreground-subtle uppercase">Aether Dogfood</span>
+        )}
         <h1>{props.title}</h1>
         <div className={props.variant === "plain" ? dogfoodPlainContentClassName : undefined}>{props.children}</div>
       </section>
@@ -730,9 +486,15 @@ export class DogfoodErrorBoundary extends Component<
     if (this.state.message !== null) {
       return (
         <DogfoodShell title="Chat Failed">
-          <p className="errorText max-w-[min(720px,calc(100vw-48px))] [overflow-wrap:anywhere] text-destructive-text">Something unexpected interrupted chat.</p>
+          <p className="errorText max-w-[min(720px,calc(100vw-48px))] [overflow-wrap:anywhere] text-destructive-text">
+            Something unexpected interrupted chat.
+          </p>
           <DogfoodDiagnosticDetails diagnostic={dogfoodDiagnostic("render", "try-again", this.state.message)} />
-          <Button className="dogfoodPrimaryButton min-h-9 rounded-panel" type="button" onClick={() => window.location.reload()}>
+          <Button
+            className="dogfoodPrimaryButton min-h-9 rounded-panel"
+            type="button"
+            onClick={() => window.location.reload()}
+          >
             Reload chat
           </Button>
         </DogfoodShell>
@@ -743,25 +505,7 @@ export class DogfoodErrorBoundary extends Component<
   }
 }
 
-const storageIdFromUploadResponse = (body: unknown): Id<"_storage"> => {
-  if (typeof body !== "object" || body === null || !("storageId" in body)) {
-    throw new Error("Attachment upload did not return a storage id")
-  }
-  const storageId = body.storageId
-  if (typeof storageId !== "string" || storageId.length === 0) {
-    throw new Error("Attachment upload did not return a storage id")
-  }
-  return storageId as Id<"_storage">
-}
-
-const latestMessageId = (messages: ReadonlyArray<DogfoodChannelMessageView>): Id<"messages"> | null =>
-  messages.reduce<DogfoodChannelMessageView | null>(
-    (latest, message) => latest === null || message.createdAt > latest.createdAt ? message : latest,
-    null
-  )?.id ?? null
-
-const errorMessage = (cause: unknown): string =>
-  cause instanceof Error ? cause.message : "Something went wrong."
+const errorMessage = (cause: unknown): string => (cause instanceof Error ? cause.message : "Something went wrong.")
 
 const dogfoodDiagnostic = (
   source: DogfoodDiagnostic["source"],
@@ -790,11 +534,7 @@ const supportSafeDiagnostic = (cause: unknown): string => {
   return `${kind}: details redacted`
 }
 
-const logDogfoodDiagnostic = (
-  context: string,
-  cause: unknown,
-  diagnostic: DogfoodDiagnostic
-) => {
+const logDogfoodDiagnostic = (context: string, cause: unknown, diagnostic: DogfoodDiagnostic) => {
   console.warn("Dogfood chat diagnostic", {
     context,
     diagnostic,
@@ -829,16 +569,6 @@ const dogfoodAccessErrorMessage = (cause: unknown): string => {
 }
 
 const signInErrorMessage = (_cause: unknown): string => "Could not open sign-in. Try again."
-
-const mergeDogfoodChannels = (
-  channels: ReadonlyArray<DogfoodChannelView>,
-  nextChannels: ReadonlyArray<DogfoodChannelView>
-): ReadonlyArray<DogfoodChannelView> => {
-  const byId = new Map<Id<"channels">, DogfoodChannelView>()
-  channels.forEach((channel) => byId.set(channel.id, channel))
-  nextChannels.forEach((channel) => byId.set(channel.id, channel))
-  return Array.from(byId.values())
-}
 
 const dogfoodOperationErrorMessage = (operation: DogfoodOperation, cause: unknown): string => {
   const diagnostic = dogfoodDiagnostic("mutation", "message-action", cause)

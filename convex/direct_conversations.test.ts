@@ -11,7 +11,10 @@ const lee = { tokenIdentifier: "issuer|lee-dm", email: "lee@example.com", name: 
 const diego = { tokenIdentifier: "issuer|diego-dm", email: "diego@example.com", name: "Diego Rivera" }
 
 beforeEach(() => vi.stubEnv("AETHER_ALLOWED_EMAILS", "maya@example.com,lee@example.com,diego@example.com"))
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs() })
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllEnvs()
+})
 
 const initialize = (t: ReturnType<typeof convexTest>, identity: typeof maya) =>
   t.mutation(internal.chat.ensureViewerForIdentity, {
@@ -31,15 +34,19 @@ describe("global direct conversations", () => {
     ])
     expect(first.id).toBe(repeat.id)
     await t.run(async (ctx) => {
-      const membership = await ctx.db.query("workspaceMemberships")
-        .withIndex("by_workspace_user", (q) => q.eq("workspaceId", mayaUser.workspaceId).eq("userId", leeUser.userId)).unique()
+      const membership = await ctx.db
+        .query("workspaceMemberships")
+        .withIndex("by_workspace_user", (q) => q.eq("workspaceId", mayaUser.workspaceId).eq("userId", leeUser.userId))
+        .unique()
       if (membership === null) throw new Error("Expected Lee workspace membership")
       await ctx.db.delete(membership._id)
     })
-    await expect(t.withIdentity(lee).mutation(api.chat.sendMessage, { channelId: first.id, body: "Still here" }))
-      .resolves.toMatchObject({ body: "Still here" })
-    await expect(t.withIdentity(maya).query(api.direct_conversations.list, {}))
-      .resolves.toEqual([expect.objectContaining({ id: first.id, otherUser: expect.objectContaining({ username: "lee" }) })])
+    await expect(
+      t.withIdentity(lee).mutation(api.chat.sendMessage, { channelId: first.id, body: "Still here" })
+    ).resolves.toMatchObject({ body: "Still here" })
+    await expect(t.withIdentity(maya).query(api.direct_conversations.list, {})).resolves.toEqual([
+      expect.objectContaining({ id: first.id, otherUser: expect.objectContaining({ username: "lee" }) })
+    ])
   })
 
   it("enforces the recipient's preference only when starting a new DM", async () => {
@@ -48,14 +55,19 @@ describe("global direct conversations", () => {
     const leeUser = await initialize(t, lee)
     const diegoUser = await initialize(t, diego)
     await t.withIdentity(lee).mutation(api.social.updateProfile, { directMessagePreference: "friends" })
-    await expect(t.withIdentity(maya).mutation(api.direct_conversations.startOrReopen, { recipientUserId: leeUser.userId }))
-      .rejects.toThrow("not accepting new direct messages")
-    const request = await t.withIdentity(maya).mutation(api.social.sendFriendRequest, { recipientUserId: leeUser.userId })
+    await expect(
+      t.withIdentity(maya).mutation(api.direct_conversations.startOrReopen, { recipientUserId: leeUser.userId })
+    ).rejects.toThrow("not accepting new direct messages")
+    const request = await t
+      .withIdentity(maya)
+      .mutation(api.social.sendFriendRequest, { recipientUserId: leeUser.userId })
     await t.withIdentity(lee).mutation(api.social.respondToFriendRequest, { friendRequestId: request.id, accept: true })
-    await expect(t.withIdentity(maya).mutation(api.direct_conversations.startOrReopen, { recipientUserId: leeUser.userId }))
-      .resolves.toMatchObject({ otherUser: expect.objectContaining({ id: leeUser.userId }) })
-    await expect(t.withIdentity(diego).mutation(api.direct_conversations.startOrReopen, { recipientUserId: leeUser.userId }))
-      .rejects.toThrow("not accepting new direct messages")
+    await expect(
+      t.withIdentity(maya).mutation(api.direct_conversations.startOrReopen, { recipientUserId: leeUser.userId })
+    ).resolves.toMatchObject({ otherUser: expect.objectContaining({ id: leeUser.userId }) })
+    await expect(
+      t.withIdentity(diego).mutation(api.direct_conversations.startOrReopen, { recipientUserId: leeUser.userId })
+    ).rejects.toThrow("not accepting new direct messages")
     expect(diegoUser.userId).toBeTruthy()
     expect(mayaUser.userId).toBeTruthy()
   })
@@ -65,8 +77,9 @@ describe("global direct conversations", () => {
     await initialize(t, maya)
     await initialize(t, lee)
     await t.withIdentity(lee).mutation(api.social.updateProfile, { directMessagePreference: "friends" })
-    await expect(t.withIdentity(maya).query(api.social.searchUsers, { query: "@lee" }))
-      .resolves.toEqual([expect.objectContaining({ username: "lee", canStartDirectMessage: false })])
+    await expect(t.withIdentity(maya).query(api.social.searchUsers, { query: "@lee" })).resolves.toEqual([
+      expect.objectContaining({ username: "lee", canStartDirectMessage: false })
+    ])
   })
 
   it("accepts a reciprocal pending friend request instead of silently keeping it pending", async () => {
@@ -74,26 +87,37 @@ describe("global direct conversations", () => {
     const mayaUser = await initialize(t, maya)
     const leeUser = await initialize(t, lee)
     await t.withIdentity(lee).mutation(api.social.updateProfile, { directMessagePreference: "friends" })
-    const incoming = await t.withIdentity(lee).mutation(api.social.sendFriendRequest, { recipientUserId: mayaUser.userId })
+    const incoming = await t
+      .withIdentity(lee)
+      .mutation(api.social.sendFriendRequest, { recipientUserId: mayaUser.userId })
 
-    await expect(t.withIdentity(maya).query(api.social.searchUsers, { query: "lee" }))
-      .resolves.toEqual([expect.objectContaining({ friendship: "pending", friendRequestDirection: "incoming" })])
-    await expect(t.withIdentity(maya).mutation(api.social.sendFriendRequest, { recipientUserId: leeUser.userId }))
-      .resolves.toEqual({ id: incoming.id, status: "accepted" })
-    await expect(t.withIdentity(maya).query(api.social.searchUsers, { query: "lee" }))
-      .resolves.toEqual([expect.objectContaining({ friendship: "accepted", friendRequestDirection: null, canStartDirectMessage: true })])
+    await expect(t.withIdentity(maya).query(api.social.searchUsers, { query: "lee" })).resolves.toEqual([
+      expect.objectContaining({ friendship: "pending", friendRequestDirection: "incoming" })
+    ])
+    await expect(
+      t.withIdentity(maya).mutation(api.social.sendFriendRequest, { recipientUserId: leeUser.userId })
+    ).resolves.toEqual({ id: incoming.id, status: "accepted" })
+    await expect(t.withIdentity(maya).query(api.social.searchUsers, { query: "lee" })).resolves.toEqual([
+      expect.objectContaining({ friendship: "accepted", friendRequestDirection: null, canStartDirectMessage: true })
+    ])
   })
 
   it("combines workspace mentions with global DM unread state without treating DM mentions specially", async () => {
     const t = convexTest(schema, modules)
     const mayaUser = await initialize(t, maya)
     const leeUser = await initialize(t, lee)
-    const dm = await t.withIdentity(maya).mutation(api.direct_conversations.startOrReopen, { recipientUserId: leeUser.userId })
+    const dm = await t
+      .withIdentity(maya)
+      .mutation(api.direct_conversations.startOrReopen, { recipientUserId: leeUser.userId })
     await t.run(async (ctx) => {
-      const dmMembership = await ctx.db.query("channelMemberships")
-        .withIndex("by_channel_user", (q) => q.eq("channelId", dm.id).eq("userId", leeUser.userId)).unique()
-      const workspaceMembership = await ctx.db.query("channelMemberships")
-        .withIndex("by_channel_user", (q) => q.eq("channelId", leeUser.channelId).eq("userId", leeUser.userId)).unique()
+      const dmMembership = await ctx.db
+        .query("channelMemberships")
+        .withIndex("by_channel_user", (q) => q.eq("channelId", dm.id).eq("userId", leeUser.userId))
+        .unique()
+      const workspaceMembership = await ctx.db
+        .query("channelMemberships")
+        .withIndex("by_channel_user", (q) => q.eq("channelId", leeUser.channelId).eq("userId", leeUser.userId))
+        .unique()
       if (dmMembership === null || workspaceMembership === null) throw new Error("Expected Lee memberships")
       await Promise.all([
         ctx.db.patch(dmMembership._id, { lastReadAt: 1 }),
@@ -110,10 +134,11 @@ describe("global direct conversations", () => {
       workspaceId: leeUser.workspaceId
     })
     expect(indicators).toHaveLength(2)
-    expect(indicators).toEqual(expect.arrayContaining([
-      { channelId: leeUser.channelId, indicator: "mentioned" },
-      { channelId: dm.id, indicator: "unread" }
-    ]))
+    expect(indicators).toEqual(
+      expect.arrayContaining([
+        { channelId: leeUser.channelId, indicator: "mentioned" },
+        { channelId: dm.id, indicator: "unread" }
+      ])
+    )
   })
-
 })

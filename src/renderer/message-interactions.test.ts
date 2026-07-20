@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { ChatMessage } from "./chat-data"
-import {
-  createMessageInteractionView,
-  pruneSelectedMessageIds,
-  toggleMessageId
-} from "./message-interactions"
+import { createMessageInteractionView, pruneSelectedMessageIds, toggleMessageId } from "./message-interactions"
 
 const channelId = "channel-1"
 
@@ -13,22 +9,21 @@ const makeMessage = (input: {
   readonly authorDisplayName?: string
   readonly createdAt?: number
   readonly deletedAt?: number | null
-}): ChatMessage =>
-  ({
-    id: input.id,
-    channelId,
-    authorType: "human",
-    authorId: `human-${input.id}`,
-    authorDisplayName: input.authorDisplayName ?? "Maya Patel",
-    body: `Body ${input.id}`,
-    createdAt: input.createdAt ?? 1,
-    editedAt: null,
-    deletedAt: input.deletedAt ?? null,
-    parentMessageId: null,
-    parentMessage: null,
-    reactions: [],
-    attachments: []
-  })
+}): ChatMessage => ({
+  id: input.id,
+  channelId,
+  authorType: "human",
+  authorId: `human-${input.id}`,
+  authorDisplayName: input.authorDisplayName ?? "Maya Patel",
+  body: `Body ${input.id}`,
+  createdAt: input.createdAt ?? 1,
+  editedAt: null,
+  deletedAt: input.deletedAt ?? null,
+  parentMessageId: null,
+  parentMessage: null,
+  reactions: [],
+  attachments: []
+})
 
 describe("message interactions", () => {
   it("toggles selected message ids without reordering the remaining selection", () => {

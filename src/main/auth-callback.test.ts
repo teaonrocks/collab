@@ -46,7 +46,7 @@ describe("auth callback coordinator", () => {
   it("ignores unsupported callback URLs without replacing pending work", () => {
     const coordinator = createAuthCallbackCoordinator({
       initialAuthCallbackUrl: "aether://auth/callback?code=first",
-      rendererCallbackUrl: (rawUrl) => rawUrl.startsWith("aether://auth/callback") ? "file:///app/index.html" : null
+      rendererCallbackUrl: (rawUrl) => (rawUrl.startsWith("aether://auth/callback") ? "file:///app/index.html" : null)
     })
     const window = makeWindow()
 

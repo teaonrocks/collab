@@ -53,20 +53,15 @@ export function useMessageInteractions(input: {
   readonly operationErrorMessage?: OperationErrorMessage
   readonly setOperationError: (message: string | null) => void
 }) {
-  const {
-    channelId,
-    messages,
-    deleteChannelMessage,
-    editChannelMessage,
-    operationErrorMessage,
-    setOperationError
-  } = input
+  const { channelId, messages, deleteChannelMessage, editChannelMessage, operationErrorMessage, setOperationError } =
+    input
   const [selectedMessageIds, setSelectedMessageIds] = useState<ReadonlyArray<ChatMessageId>>([])
   const [editingMessage, setEditingMessage] = useState<EditingMessageState>(null)
   const [pendingDeleteMessageId, setPendingDeleteMessageId] = useState<ChatMessageId | null>(null)
   const [messageMenu, setMessageMenu] = useState<MessageMenuState>(null)
   const view = useMemo(
-    () => createMessageInteractionView(messages, selectedMessageIds, editingMessage, pendingDeleteMessageId, messageMenu),
+    () =>
+      createMessageInteractionView(messages, selectedMessageIds, editingMessage, pendingDeleteMessageId, messageMenu),
     [messages, selectedMessageIds, editingMessage, pendingDeleteMessageId, messageMenu]
   )
 
@@ -128,7 +123,7 @@ export function useMessageInteractions(input: {
     })
       .then(() => {
         setSelectedMessageIds((ids) => ids.filter((id) => id !== messageId))
-        setEditingMessage((editing) => editing?.messageId === messageId ? null : editing)
+        setEditingMessage((editing) => (editing?.messageId === messageId ? null : editing))
         setPendingDeleteMessageId(null)
         setMessageMenu(null)
       })
@@ -143,7 +138,7 @@ export function useMessageInteractions(input: {
   }
 
   const setEditingDraft = (draft: string) => {
-    setEditingMessage((editing) => editing === null ? null : { ...editing, draft })
+    setEditingMessage((editing) => (editing === null ? null : { ...editing, draft }))
   }
 
   const cancelEditingMessage = () => {
@@ -165,7 +160,7 @@ export function useMessageInteractions(input: {
       .then(() => setEditingMessage(null))
       .catch((cause) => {
         if (operationErrorMessage !== undefined) setOperationError(operationErrorMessage("edit", cause))
-        setEditingMessage((editing) => editing === null ? null : { ...editing, saving: false })
+        setEditingMessage((editing) => (editing === null ? null : { ...editing, saving: false }))
       })
   }
 
@@ -216,12 +211,12 @@ export const createMessageInteractionView = (
     selectedMessageIds: visibleSelectedMessageIds,
     selectedMessageIdSet,
     topSelectedMessageId,
-    menuMessage: messageMenu === null
-      ? null
-      : liveMessages.find((message) => message.id === messageMenu.messageId) ?? null,
-    pendingDeleteMessage: pendingDeleteMessageId === null
-      ? null
-      : liveMessages.find((message) => message.id === pendingDeleteMessageId) ?? null,
+    menuMessage:
+      messageMenu === null ? null : (liveMessages.find((message) => message.id === messageMenu.messageId) ?? null),
+    pendingDeleteMessage:
+      pendingDeleteMessageId === null
+        ? null
+        : (liveMessages.find((message) => message.id === pendingDeleteMessageId) ?? null),
     getRowState: (message) => {
       const actionsPinned = selectionMode && message.id === topSelectedMessageId
       return {
@@ -242,9 +237,7 @@ export const toggleMessageId = (
   messageIds: ReadonlyArray<ChatMessageId>,
   messageId: ChatMessageId
 ): ReadonlyArray<ChatMessageId> =>
-  messageIds.includes(messageId)
-    ? messageIds.filter((id) => id !== messageId)
-    : [...messageIds, messageId]
+  messageIds.includes(messageId) ? messageIds.filter((id) => id !== messageId) : [...messageIds, messageId]
 
 export const pruneSelectedMessageIds = (
   selectedMessageIds: ReadonlyArray<ChatMessageId>,
@@ -253,7 +246,5 @@ export const pruneSelectedMessageIds = (
   if (selectedMessageIds.length === 0) return selectedMessageIds
   const liveMessageIds = new Set(messages.filter(isLiveMessage).map((message) => message.id))
   const nextSelectedMessageIds = selectedMessageIds.filter((id) => liveMessageIds.has(id))
-  return nextSelectedMessageIds.length === selectedMessageIds.length
-    ? selectedMessageIds
-    : nextSelectedMessageIds
+  return nextSelectedMessageIds.length === selectedMessageIds.length ? selectedMessageIds : nextSelectedMessageIds
 }

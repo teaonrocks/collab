@@ -3,7 +3,7 @@ import { type ComponentPropsWithoutRef } from "react"
 import { cn } from "../lib/cn"
 
 const badgeVariants = cva(
-  "inline-flex max-w-full items-center rounded-badge border px-1.5 py-0.5 text-xs font-semibold leading-none",
+  "inline-flex max-w-full items-center rounded-badge border px-1.5 py-0.5 text-xs leading-none font-semibold",
   {
     variants: {
       variant: {
@@ -18,9 +18,7 @@ const badgeVariants = cva(
   }
 )
 
-export type BadgeProps =
-  & ComponentPropsWithoutRef<"span">
-  & VariantProps<typeof badgeVariants>
+export type BadgeProps = ComponentPropsWithoutRef<"span"> & VariantProps<typeof badgeVariants>
 
 export function Badge({ className, variant, ...props }: BadgeProps) {
   return <span className={cn(badgeVariants({ variant }), className)} {...props} />

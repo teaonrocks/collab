@@ -10,10 +10,13 @@ describe("account session policy", () => {
   it("extracts the initiating window and account from an AuthKit callback", () => {
     const url = new URL("aether://auth/callback")
     url.searchParams.set("code", "code-1")
-    url.searchParams.set("state", JSON.stringify({
-      aetherWindowId: "window-1",
-      aetherAccountId: "account-2"
-    }))
+    url.searchParams.set(
+      "state",
+      JSON.stringify({
+        aetherWindowId: "window-1",
+        aetherAccountId: "account-2"
+      })
+    )
 
     expect(parseAuthCallbackState(url.toString())).toEqual({
       windowId: "window-1",
@@ -24,8 +27,14 @@ describe("account session policy", () => {
   it("rejects missing, malformed, and incomplete callback state", () => {
     expect(parseAuthCallbackState("aether://auth/callback?code=abc")).toBeNull()
     expect(parseAuthCallbackState("aether://auth/callback?state=nope")).toBeNull()
-    expect(parseAuthCallbackState(`aether://auth/callback?state=${encodeURIComponent(JSON.stringify({
-      aetherWindowId: "window-1"
-    }))}`)).toBeNull()
+    expect(
+      parseAuthCallbackState(
+        `aether://auth/callback?state=${encodeURIComponent(
+          JSON.stringify({
+            aetherWindowId: "window-1"
+          })
+        )}`
+      )
+    ).toBeNull()
   })
 })

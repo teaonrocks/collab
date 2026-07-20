@@ -24,7 +24,5 @@ export const authProtocolClientRegistration = ({
   if (!defaultApp) return {}
 
   const appEntryPoint = argv[1]
-  return appEntryPoint === undefined
-    ? null
-    : { executablePath, args: [resolve(appEntryPoint)] }
+  return appEntryPoint === undefined ? null : { executablePath, args: [resolve(appEntryPoint)] }
 }

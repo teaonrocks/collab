@@ -8,12 +8,7 @@ const DialogPortal = BaseDialog.Portal
 type DialogBackdropProps = ComponentProps<typeof BaseDialog.Backdrop>
 
 function DialogBackdrop({ className, ...props }: DialogBackdropProps) {
-  return (
-    <BaseDialog.Backdrop
-      className={cn("fixed inset-0 z-50 bg-overlay", className)}
-      {...props}
-    />
-  )
+  return <BaseDialog.Backdrop className={cn("fixed inset-0 z-50 bg-overlay", className)} {...props} />
 }
 
 export type DialogContentProps = ComponentProps<typeof BaseDialog.Popup>
@@ -45,20 +40,12 @@ export type DialogTitleProps = ComponentProps<typeof BaseDialog.Title>
 
 export function DialogTitle({ className, ...props }: DialogTitleProps) {
   return (
-    <BaseDialog.Title
-      className={cn("m-0 text-base font-bold leading-tight text-foreground", className)}
-      {...props}
-    />
+    <BaseDialog.Title className={cn("m-0 text-base leading-tight font-bold text-foreground", className)} {...props} />
   )
 }
 
 export type DialogDescriptionProps = ComponentProps<typeof BaseDialog.Description>
 
 export function DialogDescription({ className, ...props }: DialogDescriptionProps) {
-  return (
-    <BaseDialog.Description
-      className={cn("m-0 text-sm leading-5 text-foreground-subtle", className)}
-      {...props}
-    />
-  )
+  return <BaseDialog.Description className={cn("m-0 text-sm leading-5 text-foreground-subtle", className)} {...props} />
 }

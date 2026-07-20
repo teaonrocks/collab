@@ -18,7 +18,9 @@ const record = (input: {
 }) => {
   let click: (() => void) | null = null
   const notification = {
-    on: vi.fn((_event: "click", listener: () => void) => { click = listener }),
+    on: vi.fn((_event: "click", listener: () => void) => {
+      click = listener
+    }),
     show: vi.fn()
   }
   const window = {
@@ -74,9 +76,9 @@ describe("desktop notification coordinator", () => {
 
     source.click()
     expect(second.value.window.focus).toHaveBeenCalledOnce()
-    expect(second.value.window.webContents.send).toHaveBeenCalledWith(
-      desktopNotificationActivatedChannel,
-      { conversationId: "channel-1", conversationKind: "channel" }
-    )
+    expect(second.value.window.webContents.send).toHaveBeenCalledWith(desktopNotificationActivatedChannel, {
+      conversationId: "channel-1",
+      conversationKind: "channel"
+    })
   })
 })

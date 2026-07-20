@@ -20,9 +20,11 @@ describe("Convex generated binding validation", () => {
   })
 
   it("reads the module set committed in the generated API declaration", () => {
-    expect(generatedConvexModules(`
+    expect(
+      generatedConvexModules(`
       import type * as chat from "../chat.js";
       import type * as nested_search from "../nested/search.js";
-    `)).toEqual(["chat", "nested/search"])
+    `)
+    ).toEqual(["chat", "nested/search"])
   })
 })

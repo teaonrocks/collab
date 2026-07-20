@@ -22,9 +22,9 @@ if (container === null) throw new Error("Missing #root element")
 
 const missingDogfoodConfig = (
   <main className="grid min-h-screen w-full place-items-center overflow-hidden bg-surface-canvas p-6 font-sans text-foreground">
-    <section className="w-full max-w-md space-y-3 rounded-card border border-border bg-surface-panel p-5 shadow-panel">
+    <section className="bg-surface-panel w-full max-w-md space-y-3 rounded-card border border-border p-5 shadow-panel">
       <p className="text-sm font-medium">Dogfood configuration required</p>
-      <p className="text-sm text-muted-foreground">
+      <p className="text-muted-foreground text-sm">
         Set VITE_CONVEX_URL, VITE_WORKOS_CLIENT_ID, and VITE_WORKOS_REDIRECT_URI to start Aether.
       </p>
     </section>
@@ -34,12 +34,18 @@ const missingDogfoodConfig = (
 createRoot(container).render(
   <>
     <TailwindPipelineProbe />
-    {isDogfoodAuthConfigured()
-      ? (
-        <Suspense fallback={<main className="loadingShell grid min-h-screen w-full place-items-center overflow-hidden bg-surface-canvas p-6 font-sans text-foreground"><p>Loading...</p></main>}>
-          <DogfoodApp />
-        </Suspense>
-      )
-      : missingDogfoodConfig}
+    {isDogfoodAuthConfigured() ? (
+      <Suspense
+        fallback={
+          <main className="loadingShell grid min-h-screen w-full place-items-center overflow-hidden bg-surface-canvas p-6 font-sans text-foreground">
+            <p>Loading...</p>
+          </main>
+        }
+      >
+        <DogfoodApp />
+      </Suspense>
+    ) : (
+      missingDogfoodConfig
+    )}
   </>
 )

@@ -1,27 +1,31 @@
 # Agent Instructions
 
 ## Package Manager
+
 - Use **pnpm**: `pnpm install`
 
 ## Commands
-| Task | Command |
-|------|---------|
-| Dev app | `pnpm dev` |
-| Test file | `pnpm vitest run src/path/to/file.test.ts` |
-| Test suite | `pnpm test` |
-| Typecheck | `pnpm typecheck` |
-| Build | `pnpm build` |
-| Preview build | `pnpm start` |
+
+| Task          | Command                                    |
+| ------------- | ------------------------------------------ |
+| Dev app       | `pnpm dev`                                 |
+| Test file     | `pnpm vitest run src/path/to/file.test.ts` |
+| Test suite    | `pnpm test`                                |
+| Typecheck     | `pnpm typecheck`                           |
+| Build         | `pnpm build`                               |
+| Preview build | `pnpm start`                               |
 
 ## External References
-| Need | File |
-|------|------|
-| Architecture, runtime details, and test map | `README.md` |
-| Package scripts and pinned dependencies | `package.json` |
-| Electron/Vite entrypoints | `electron.vite.config.ts` |
-| Vitest setup | `vitest.config.ts` |
+
+| Need                                        | File                      |
+| ------------------------------------------- | ------------------------- |
+| Architecture, runtime details, and test map | `README.md`               |
+| Package scripts and pinned dependencies     | `package.json`            |
+| Electron/Vite entrypoints                   | `electron.vite.config.ts` |
+| Vitest setup                                | `vitest.config.mts`       |
 
 ## Project Layout
+
 - `src/shared/`: transport-neutral policy shared across Electron boundaries.
 - `src/main/`: Electron startup, authentication callback coordination, and security policy.
 - `src/preload/`: isolated bridge for approved native shell operations.
@@ -29,6 +33,7 @@
 - Tests live next to covered code as `*.test.ts` or `*.test.tsx`.
 
 ## Key Conventions
+
 - Treat Convex validators and generated function types as the backend contract source of truth.
 - Keep shared UI code depending on the plain types in `src/renderer/chat-data.ts`; production mapping belongs in `src/renderer/dogfood-chat-adapter.ts`.
 - Build renderer controls from the source-owned shadcn-style component layer in `src/renderer/ui`, backed by Base UI; reuse or extend that layer instead of hand-rolling equivalent controls in feature components.
@@ -36,8 +41,6 @@
 - Keep expected command errors as serializable plain data rather than `Error` instances.
 - Do not edit generated build output under `out/`; regenerate it with `pnpm build`.
 - Add or update colocated tests for changed Convex contracts, Electron boundaries, adapters, or UI behavior.
-
-
 
 <!-- convex-ai-start -->
 

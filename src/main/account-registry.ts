@@ -36,34 +36,55 @@ export type AccountRegistry = {
 
 const isProfile = (value: unknown): value is AccountProfile => {
   if (typeof value !== "object" || value === null) return false
-  return "userId" in value && typeof value.userId === "string" && value.userId.length > 0 &&
-    "displayName" in value && typeof value.displayName === "string" && value.displayName.length > 0 &&
-    "email" in value && typeof value.email === "string" && value.email.length > 0 &&
-    "avatarUrl" in value && (typeof value.avatarUrl === "string" || value.avatarUrl === null)
+  return (
+    "userId" in value &&
+    typeof value.userId === "string" &&
+    value.userId.length > 0 &&
+    "displayName" in value &&
+    typeof value.displayName === "string" &&
+    value.displayName.length > 0 &&
+    "email" in value &&
+    typeof value.email === "string" &&
+    value.email.length > 0 &&
+    "avatarUrl" in value &&
+    (typeof value.avatarUrl === "string" || value.avatarUrl === null)
+  )
 }
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null
 
 const parseRegistry = (raw: string): ReadonlyArray<StoredAccount> => {
   try {
     const parsed: unknown = JSON.parse(raw)
-    if (typeof parsed !== "object" || parsed === null || !("version" in parsed) || parsed.version !== 1 || !("accounts" in parsed) || !Array.isArray(parsed.accounts)) {
+    if (!isRecord(parsed) || parsed.version !== 1) {
       return []
     }
-    return parsed.accounts.flatMap((account): ReadonlyArray<StoredAccount> => {
+    const parsedAccounts: unknown = parsed.accounts
+    if (!Array.isArray(parsedAccounts)) return []
+    return parsedAccounts.flatMap((account: unknown): ReadonlyArray<StoredAccount> => {
       if (
-        typeof account !== "object" || account === null ||
-        !("id" in account) || typeof account.id !== "string" || account.id.length === 0 ||
-        !("createdAt" in account) || typeof account.createdAt !== "number" ||
-        !("lastUsedAt" in account) || typeof account.lastUsedAt !== "number" ||
-        !("profile" in account) || (account.profile !== null && !isProfile(account.profile))
+        typeof account !== "object" ||
+        account === null ||
+        !("id" in account) ||
+        typeof account.id !== "string" ||
+        account.id.length === 0 ||
+        !("createdAt" in account) ||
+        typeof account.createdAt !== "number" ||
+        !("lastUsedAt" in account) ||
+        typeof account.lastUsedAt !== "number" ||
+        !("profile" in account) ||
+        (account.profile !== null && !isProfile(account.profile))
       ) {
         return []
       }
-      return [{
-        id: account.id,
-        createdAt: account.createdAt,
-        lastUsedAt: account.lastUsedAt,
-        profile: account.profile
-      }]
+      return [
+        {
+          id: account.id,
+          createdAt: account.createdAt,
+          lastUsedAt: account.lastUsedAt,
+          profile: account.profile
+        }
+      ]
     })
   } catch {
     return []
@@ -87,12 +108,14 @@ export const createAccountRegistry = (filePath: string, now: () => number = Date
       version: 1,
       accounts: accounts.filter((account) => !pendingAccountIds.has(account.id))
     }
-    persistQueue = persistQueue.catch(() => {}).then(async () => {
-      await mkdir(dirname(filePath), { recursive: true })
-      const temporaryPath = `${filePath}.tmp`
-      await writeFile(temporaryPath, `${JSON.stringify(registry, null, 2)}\n`, { encoding: "utf8", mode: 0o600 })
-      await rename(temporaryPath, filePath)
-    })
+    persistQueue = persistQueue
+      .catch(() => {})
+      .then(async () => {
+        await mkdir(dirname(filePath), { recursive: true })
+        const temporaryPath = `${filePath}.tmp`
+        await writeFile(temporaryPath, `${JSON.stringify(registry, null, 2)}\n`, { encoding: "utf8", mode: 0o600 })
+        await rename(temporaryPath, filePath)
+      })
     return persistQueue
   }
 
@@ -106,8 +129,9 @@ export const createAccountRegistry = (filePath: string, now: () => number = Date
   return {
     initialize: async () => {
       try {
-        accounts = parseRegistry(await readFile(filePath, "utf8"))
-          .filter((account) => account.id === defaultAccountId || account.profile !== null)
+        accounts = parseRegistry(await readFile(filePath, "utf8")).filter(
+          (account) => account.id === defaultAccountId || account.profile !== null
+        )
       } catch {
         accounts = []
       }
@@ -117,29 +141,27 @@ export const createAccountRegistry = (filePath: string, now: () => number = Date
     },
     has: (accountId) => accounts.some((account) => account.id === accountId),
     isPending: (accountId) => pendingAccountIds.has(accountId),
-    create: async () => {
+    create: () => {
       const timestamp = now()
       const accountId = randomUUID()
       accounts = [...accounts, blankAccount(accountId, timestamp)]
       pendingAccountIds.add(accountId)
-      return accountId
+      return Promise.resolve(accountId)
     },
     touch: async (accountId) => {
       if (!accounts.some((account) => account.id === accountId)) return
-      accounts = accounts.map((account) => account.id === accountId
-        ? { ...account, lastUsedAt: now() }
-        : account)
+      accounts = accounts.map((account) => (account.id === accountId ? { ...account, lastUsedAt: now() } : account))
       await persist()
     },
     updateProfile: async (accountId, profile) => {
-      const duplicate = accounts.find((account) => account.id !== accountId && account.profile?.userId === profile.userId)
+      const duplicate = accounts.find(
+        (account) => account.id !== accountId && account.profile?.userId === profile.userId
+      )
       pendingAccountIds.delete(accountId)
       if (duplicate !== undefined) pendingAccountIds.delete(duplicate.id)
       accounts = accounts
         .filter((account) => account.id !== duplicate?.id)
-        .map((account) => account.id === accountId
-          ? { ...account, profile, lastUsedAt: now() }
-          : account)
+        .map((account) => (account.id === accountId ? { ...account, profile, lastUsedAt: now() } : account))
       await persist()
       return duplicate?.id ?? null
     },
@@ -156,9 +178,11 @@ export const createAccountRegistry = (filePath: string, now: () => number = Date
     },
     preferredAccountId: (excluding) => {
       ensureAccount()
-      return [...accounts]
-        .filter((account) => account.id !== excluding)
-        .sort((left, right) => right.lastUsedAt - left.lastUsedAt)[0]?.id ?? defaultAccountId
+      return (
+        [...accounts]
+          .filter((account) => account.id !== excluding)
+          .sort((left, right) => right.lastUsedAt - left.lastUsedAt)[0]?.id ?? defaultAccountId
+      )
     },
     accountIds: () => accounts.map((account) => account.id),
     context: (windowId, currentAccountId) => ({

@@ -26,7 +26,7 @@ export type ChatDirectMessageProfile = {
   readonly directMessagePreference: "all" | "mutuals" | "friends"
 }
 
-type ChatIncomingFriendRequest = {
+export type ChatIncomingFriendRequest = {
   readonly id: string
   readonly requester: { readonly id: string; readonly displayName: string; readonly username: string | null }
 }
@@ -62,7 +62,7 @@ type ChatChannelIndicatorState = {
 
 export type ChatConversationNotificationMode = "all" | "mentions" | "off"
 
-type ChatConversationNotificationPreference = {
+export type ChatConversationNotificationPreference = {
   readonly mode: ChatConversationNotificationMode
   readonly options: ReadonlyArray<ChatConversationNotificationMode>
 }
@@ -112,21 +112,38 @@ export type ChatDataModel = {
   readonly channel: ChatChannel
   readonly activeConversation: ChatActiveConversation
   readonly channels: ReadonlyArray<ChatChannel>
-  readonly directConversations: ReadonlyArray<ChatDirectConversation>
-  readonly directConversationsLoading?: boolean
-  readonly directMessageProfile?: ChatDirectMessageProfile
-  readonly incomingFriendRequests?: ReadonlyArray<ChatIncomingFriendRequest>
-  readonly channelMessages: ReadonlyArray<ChatMessage>
-  readonly channelMembers?: ReadonlyArray<ChatChannelMember>
-  readonly channelMemberInviteCandidates?: ReadonlyArray<ChatChannelInviteCandidate>
-  readonly createChannelInviteCandidates?: ReadonlyArray<ChatChannelInviteCandidate>
-  readonly channelIndicators?: ReadonlyArray<ChatChannelIndicatorState>
-  readonly notificationPreference?: ChatConversationNotificationPreference
-  readonly channelMembersLoading?: boolean
-  readonly channelMessagesLoading?: boolean
-  readonly channelMessagesHasMore?: boolean
-  readonly channelMessagesLoadingMore?: boolean
+  readonly directMessages: {
+    readonly conversations: ChatRemoteData<ReadonlyArray<ChatDirectConversation>>
+    readonly profile: ChatRemoteData<ChatDirectMessageProfile>
+    readonly incomingFriendRequests: ChatRemoteData<ReadonlyArray<ChatIncomingFriendRequest>>
+  }
+  readonly conversation: {
+    readonly messages: ChatPaginatedData<ReadonlyArray<ChatMessage>>
+    readonly members: ChatUnavailableData<ReadonlyArray<ChatChannelMember>>
+    readonly memberInviteCandidates: ChatUnavailableData<ReadonlyArray<ChatChannelInviteCandidate>>
+    readonly notificationPreference: ChatUnavailableData<ChatConversationNotificationPreference>
+  }
+  readonly channelCreation: {
+    readonly inviteCandidates: ChatRemoteData<ReadonlyArray<ChatChannelInviteCandidate>>
+  }
+  readonly indicators: ChatRemoteData<ReadonlyArray<ChatChannelIndicatorState>>
 }
+
+export type ChatRemoteData<Value> =
+  | { readonly status: "loading" }
+  | { readonly status: "refreshing"; readonly data: Value }
+  | { readonly status: "ready"; readonly data: Value }
+
+export type ChatUnavailableData<Value> = { readonly status: "unavailable" } | ChatRemoteData<Value>
+
+export type ChatPaginatedData<Value> =
+  | { readonly status: "loading" }
+  | {
+      readonly status: "ready"
+      readonly data: Value
+      readonly hasMore: boolean
+      readonly loadingMore: boolean
+    }
 
 type CreateChatChannel = (input: {
   readonly name: string
@@ -140,16 +157,16 @@ type StartChatDirectConversation = (recipientUserId: ChatChannelMember["id"]) =>
 type SearchChatDirectConversationCandidates = (query: string) => Promise<ReadonlyArray<ChatChannelMember>>
 type SendChatFriendRequest = (recipientUserId: ChatChannelMember["id"]) => Promise<unknown>
 type UpdateChatDirectMessageProfile = (input: ChatDirectMessageProfile) => Promise<ChatDirectMessageProfile>
-type RespondToChatFriendRequest = (input: { readonly friendRequestId: string; readonly accept: boolean }) => Promise<unknown>
+type RespondToChatFriendRequest = (input: {
+  readonly friendRequestId: string
+  readonly accept: boolean
+}) => Promise<unknown>
 type UpdateChatConversationNotificationPreference = (input: {
   readonly channelId: ChatChannelId
   readonly mode: ChatConversationNotificationMode
 }) => Promise<ChatConversationNotificationPreference>
 
-type EditChatChannel = (input: {
-  readonly channelId: ChatChannelId
-  readonly name: string
-}) => Promise<ChatChannel>
+type EditChatChannel = (input: { readonly channelId: ChatChannelId; readonly name: string }) => Promise<ChatChannel>
 
 type DeleteChatChannel = (input: { readonly channelId: ChatChannelId }) => Promise<unknown>
 
@@ -191,35 +208,45 @@ type SearchChatMessages = (input: {
   readonly query: string
 }) => Promise<ReadonlyArray<ChatMessage>>
 
-export type ChatMessageGuard = (message: ChatMessage) => boolean
+type ChatMessageGuard = (message: ChatMessage) => boolean
 type ChatOperation = "send" | "edit" | "delete" | "react" | "attach"
 export type ChatOperationErrorMessage = (operation: ChatOperation, cause: unknown) => string
 
 export type ChatDataView = {
   readonly model: ChatDataModel
-  readonly createChannel?: CreateChatChannel
-  readonly editChannel?: EditChatChannel
-  readonly deleteChannel?: DeleteChatChannel
-  readonly selectChannel?: SelectChatChannel
-  readonly selectDirectConversation?: SelectChatDirectConversation
-  readonly startDirectConversation?: StartChatDirectConversation
-  readonly searchDirectConversationCandidates?: SearchChatDirectConversationCandidates
-  readonly sendFriendRequest?: SendChatFriendRequest
-  readonly updateDirectMessageProfile?: UpdateChatDirectMessageProfile
-  readonly respondToFriendRequest?: RespondToChatFriendRequest
-  readonly updateNotificationPreference?: UpdateChatConversationNotificationPreference
-  readonly addChannelMember?: AddChatChannelMember
-  readonly removeChannelMember?: RemoveChatChannelMember
-  readonly createChannelMessage: CreateChatMessage
-  readonly uploadMessageAttachment?: UploadChatMessageAttachment
-  readonly discardMessageAttachment?: (attachment: ChatMessageAttachment) => Promise<unknown>
-  readonly deleteChannelMessage: DeleteChatMessage
-  readonly editChannelMessage?: EditChatMessage
-  readonly toggleMessageReaction?: ToggleChatMessageReaction
-  readonly searchChannelMessages?: SearchChatMessages
-  readonly loadOlderChannelMessages?: () => void
-  readonly canDeleteMessages?: boolean
-  readonly canDeleteMessage?: ChatMessageGuard
-  readonly canEditMessage?: ChatMessageGuard
-  readonly operationErrorMessage?: ChatOperationErrorMessage
+  readonly navigation: {
+    readonly selectChannel?: SelectChatChannel
+    readonly selectDirectConversation?: SelectChatDirectConversation
+  }
+  readonly channels?: {
+    readonly create?: CreateChatChannel
+    readonly edit?: EditChatChannel
+    readonly delete?: DeleteChatChannel
+    readonly addMember?: AddChatChannelMember
+    readonly removeMember?: RemoveChatChannelMember
+  }
+  readonly directMessages?: {
+    readonly startConversation?: StartChatDirectConversation
+    readonly searchCandidates?: SearchChatDirectConversationCandidates
+    readonly sendFriendRequest?: SendChatFriendRequest
+    readonly updateProfile?: UpdateChatDirectMessageProfile
+    readonly respondToFriendRequest?: RespondToChatFriendRequest
+  }
+  readonly notifications?: {
+    readonly updatePreference: UpdateChatConversationNotificationPreference
+  }
+  readonly messages: {
+    readonly create: CreateChatMessage
+    readonly upload?: UploadChatMessageAttachment
+    readonly discard?: (attachment: ChatMessageAttachment) => Promise<unknown>
+    readonly delete: DeleteChatMessage
+    readonly edit?: EditChatMessage
+    readonly toggleReaction?: ToggleChatMessageReaction
+    readonly search?: SearchChatMessages
+    readonly loadOlder?: () => void
+    readonly canDeleteMessages: boolean
+    readonly canDelete?: ChatMessageGuard
+    readonly canEdit?: ChatMessageGuard
+    readonly errorMessage?: ChatOperationErrorMessage
+  }
 }

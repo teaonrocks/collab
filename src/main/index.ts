@@ -16,18 +16,10 @@ import { pathToFileURL } from "node:url"
 import { createAccountRegistry, type AccountRegistry } from "./account-registry"
 import { broadcastAccountContexts } from "./account-context-sync"
 import { authProtocolClientRegistration } from "./auth-protocol-client"
-import {
-  retireAccountWindow,
-  revealReplacementThenRetire,
-  selectActiveWindowRecord
-} from "./account-window-lifecycle"
+import { retireAccountWindow, revealReplacementThenRetire, selectActiveWindowRecord } from "./account-window-lifecycle"
 import { createAuthCallbackCoordinator } from "./auth-callback"
 import { createDesktopNotificationCoordinator } from "./desktop-notifications"
-import {
-  cancelNativeAuthSessions,
-  nativeAuthHelperExecutable,
-  runNativeAuthSession
-} from "./native-auth-session"
+import { cancelNativeAuthSessions, nativeAuthHelperExecutable, runNativeAuthSession } from "./native-auth-session"
 import {
   accountPartition,
   defaultAccountId,
@@ -72,14 +64,15 @@ const desktopNotifications = createDesktopNotificationCoordinator({
   createNotification: (input) => new ElectronNotification(input)
 })
 
+const rendererDevServerUrl = process.env.ELECTRON_RENDERER_URL
 const rendererLocationPolicy: RendererLocationPolicy = {
-  rendererDevServerUrl: process.env.ELECTRON_RENDERER_URL,
+  ...(rendererDevServerUrl === undefined ? {} : { rendererDevServerUrl }),
   packagedRendererUrl: pathToFileURL(join(__dirname, "../renderer/index.html")).toString()
 }
 
 const rendererCallbackUrl = (rawUrl: string): string | null => {
   return rendererAuthCallbackUrl(rawUrl, {
-    rendererDevServerUrl: process.env.ELECTRON_RENDERER_URL,
+    ...(rendererDevServerUrl === undefined ? {} : { rendererDevServerUrl }),
     packagedRendererUrl: pathToFileURL(join(__dirname, "../renderer/index.html")).toString()
   })
 }
@@ -105,10 +98,7 @@ const activeRecord = (): WindowRecord | null => {
 
 const recordForEvent = (event: IpcMainInvokeEvent): WindowRecord => {
   const record = [...windows.values()].find((candidate) => candidate.window.webContents === event.sender)
-  if (
-    record === undefined ||
-    !isTrustedPrivilegedIpcSender(event, record.window.webContents, rendererLocationPolicy)
-  ) {
+  if (record === undefined || !isTrustedPrivilegedIpcSender(event, record.window.webContents, rendererLocationPolicy)) {
     throw new Error("Refusing privileged IPC from an untrusted renderer frame.")
   }
   return record
@@ -116,11 +106,19 @@ const recordForEvent = (event: IpcMainInvokeEvent): WindowRecord => {
 
 const parseProfile = (value: unknown): AccountProfile => {
   if (
-    typeof value !== "object" || value === null ||
-    !("userId" in value) || typeof value.userId !== "string" || value.userId.length === 0 ||
-    !("displayName" in value) || typeof value.displayName !== "string" || value.displayName.length === 0 ||
-    !("email" in value) || typeof value.email !== "string" || value.email.length === 0 ||
-    !("avatarUrl" in value) || (typeof value.avatarUrl !== "string" && value.avatarUrl !== null)
+    typeof value !== "object" ||
+    value === null ||
+    !("userId" in value) ||
+    typeof value.userId !== "string" ||
+    value.userId.length === 0 ||
+    !("displayName" in value) ||
+    typeof value.displayName !== "string" ||
+    value.displayName.length === 0 ||
+    !("email" in value) ||
+    typeof value.email !== "string" ||
+    value.email.length === 0 ||
+    !("avatarUrl" in value) ||
+    (typeof value.avatarUrl !== "string" && value.avatarUrl !== null)
   ) {
     throw new Error("Refusing invalid account profile data.")
   }
@@ -161,9 +159,7 @@ const createWindow = (
   options?: { readonly bounds?: Rectangle; readonly show?: boolean; readonly load?: boolean }
 ): BrowserWindow => {
   const accountRegistry = getAccounts()
-  const resolvedAccountId = accountRegistry.has(accountId)
-    ? accountId
-    : accountRegistry.preferredAccountId()
+  const resolvedAccountId = accountRegistry.has(accountId) ? accountId : accountRegistry.preferredAccountId()
   const partition = accountPartition(resolvedAccountId)
   const window = new BrowserWindow({
     width: options?.bounds?.width ?? 960,
@@ -179,10 +175,12 @@ const createWindow = (
   windows.set(window.id, record)
 
   window.webContents.on("will-navigate", createWillNavigateHandler(rendererLocationPolicy))
-  window.webContents.setWindowOpenHandler(createWindowOpenHandler(
-    (url) => shell.openExternal(url),
-    (cause) => console.error("Failed to open external attachment", cause)
-  ))
+  window.webContents.setWindowOpenHandler(
+    createWindowOpenHandler(
+      (url) => shell.openExternal(url),
+      (cause) => console.error("Failed to open external attachment", cause)
+    )
+  )
   window.on("focus", () => {
     lastFocusedWindowId = window.id
     void accountRegistry.touch(resolvedAccountId).catch((cause: unknown) => {
@@ -198,7 +196,8 @@ const createWindow = (
       accountRegistry.isPending(resolvedAccountId) &&
       ![...windows.values()].some((candidate) => candidate.accountId === resolvedAccountId)
     ) {
-      void accountRegistry.remove(resolvedAccountId)
+      void accountRegistry
+        .remove(resolvedAccountId)
         .then(notifyAccountContextChanged)
         .catch((cause: unknown) => {
           console.error("Failed to discard an unfinished Aether account", cause)
@@ -232,27 +231,27 @@ type WindowPlacement = { readonly bounds: Rectangle }
 
 const retireWindowRecords = (records: ReadonlyArray<WindowRecord>): ReadonlyArray<WindowPlacement> => {
   const placements = records.flatMap((record): ReadonlyArray<WindowPlacement> =>
-    record.window.isDestroyed() ? [] : [{ bounds: record.window.getBounds() }])
+    record.window.isDestroyed() ? [] : [{ bounds: record.window.getBounds() }]
+  )
   for (const record of records) retireAccountWindow(record.window)
   return placements
 }
 
-const reopenWindowPlacements = async (
-  placements: ReadonlyArray<WindowPlacement>,
-  accountId: string
-): Promise<void> => {
-  await Promise.all(placements.map(async ({ bounds }) => {
-    const replacement = createWindow(accountId, { bounds, show: false, load: false })
-    try {
-      await loadRendererWithTimeout(replacement)
-      if (replacement.isDestroyed()) throw new Error("The replacement account window closed while loading.")
-      replacement.show()
-    } catch (cause) {
-      retireAccountWindow(replacement)
-      console.error("Failed to load a replacement Aether account window", cause)
-      createWindow(accountId, { bounds })
-    }
-  }))
+const reopenWindowPlacements = async (placements: ReadonlyArray<WindowPlacement>, accountId: string): Promise<void> => {
+  await Promise.all(
+    placements.map(async ({ bounds }) => {
+      const replacement = createWindow(accountId, { bounds, show: false, load: false })
+      try {
+        await loadRendererWithTimeout(replacement)
+        if (replacement.isDestroyed()) throw new Error("The replacement account window closed while loading.")
+        replacement.show()
+      } catch (cause) {
+        retireAccountWindow(replacement)
+        console.error("Failed to load a replacement Aether account window", cause)
+        createWindow(accountId, { bounds })
+      }
+    })
+  )
 }
 
 const withWindowTransition = async <Value>(
@@ -279,8 +278,8 @@ const clearAccountStorage = async (accountId: string): Promise<void> => {
 const callbackRecord = (rawUrl: string): WindowRecord | null => {
   const state = parseAuthCallbackState(rawUrl)
   if (state !== null) {
-    const exactWindow = [...windows.values()].find((record) =>
-      record.id === state.windowId && record.accountId === state.accountId
+    const exactWindow = [...windows.values()].find(
+      (record) => record.id === state.windowId && record.accountId === state.accountId
     )
     return exactWindow ?? null
   }
@@ -330,11 +329,14 @@ const registerIpc = (): void => {
     if (typeof rawUrl !== "string") {
       throw new Error("Refusing to open non-string external URL.")
     }
-    const callbackUrl = await runNativeAuthSession(rawUrl, nativeAuthHelperExecutable({
-      appPath: app.getAppPath(),
-      resourcesPath: process.resourcesPath,
-      packaged: app.isPackaged
-    }))
+    const callbackUrl = await runNativeAuthSession(
+      rawUrl,
+      nativeAuthHelperExecutable({
+        appPath: app.getAppPath(),
+        resourcesPath: process.resourcesPath,
+        packaged: app.isPackaged
+      })
+    )
     if (callbackUrl !== null) setImmediate(() => handleAuthCallback(callbackUrl))
   })
 
@@ -421,10 +423,20 @@ const registerIpc = (): void => {
 const installApplicationMenu = (): void => {
   const template: ReadonlyArray<MenuItemConstructorOptions> = [
     ...(process.platform === "darwin"
-      ? [{
-          label: app.name,
-          submenu: [{ role: "about" as const }, { type: "separator" as const }, { role: "hide" as const }, { role: "hideOthers" as const }, { role: "unhide" as const }, { type: "separator" as const }, { role: "quit" as const }]
-        }]
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              { role: "about" as const },
+              { type: "separator" as const },
+              { role: "hide" as const },
+              { role: "hideOthers" as const },
+              { role: "unhide" as const },
+              { type: "separator" as const },
+              { role: "quit" as const }
+            ]
+          }
+        ]
       : []),
     {
       label: "File",
@@ -456,11 +468,9 @@ if (protocolClientRegistration !== null) {
   if (protocolClientRegistration.executablePath === undefined) {
     app.setAsDefaultProtocolClient(authCallbackScheme)
   } else {
-    app.setAsDefaultProtocolClient(
-      authCallbackScheme,
-      protocolClientRegistration.executablePath,
-      [...(protocolClientRegistration.args ?? [])]
-    )
+    app.setAsDefaultProtocolClient(authCallbackScheme, protocolClientRegistration.executablePath, [
+      ...(protocolClientRegistration.args ?? [])
+    ])
   }
 }
 
@@ -495,7 +505,8 @@ if (!app.requestSingleInstanceLock()) {
     }
   })
 
-  void app.whenReady()
+  void app
+    .whenReady()
     .then(async () => {
       accounts = createAccountRegistry(join(app.getPath("userData"), "accounts.json"))
       await accounts.initialize()
@@ -507,9 +518,8 @@ if (!app.requestSingleInstanceLock()) {
         createWindow(accounts.preferredAccountId())
       } else {
         const state = parseAuthCallbackState(pendingCallback)
-        const accountId = state !== null && accounts.has(state.accountId)
-          ? state.accountId
-          : accounts.preferredAccountId()
+        const accountId =
+          state !== null && accounts.has(state.accountId) ? state.accountId : accounts.preferredAccountId()
         const window = createWindow(accountId)
         if (state === null) {
           authCallbacks.consumePendingAuthCallback(window)

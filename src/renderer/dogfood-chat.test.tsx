@@ -1,9 +1,11 @@
 // @vitest-environment happy-dom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { getFunctionName } from "convex/server"
 import type { ComponentType } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Id } from "../../convex/_generated/dataModel"
+import type { ChatDataModel, ChatPaginatedData, ChatRemoteData, ChatUnavailableData } from "./chat-data"
 import { ConvexDogfoodApp, DogfoodErrorBoundary } from "./dogfood-chat"
 import {
   dogfoodChatToChatData,
@@ -16,6 +18,18 @@ import {
   type DogfoodWorkspaceView
 } from "./dogfood-chat-adapter"
 import type { WorkspaceChatProps } from "./workspace-chat"
+
+const readyData = <Value,>(
+  state: ChatRemoteData<Value> | ChatPaginatedData<Value> | ChatUnavailableData<Value>
+): Value => {
+  if (state.status === "loading" || state.status === "unavailable") {
+    throw new Error(`Expected available test data, received ${state.status}`)
+  }
+  return state.data
+}
+
+const conversationMessages = (model: ChatDataModel) => readyData(model.conversation.messages)
+const conversationMembers = (model: ChatDataModel) => readyData(model.conversation.members)
 
 const mocks = vi.hoisted(() => ({
   auth: {
@@ -68,8 +82,11 @@ const mocks = vi.hoisted(() => ({
   membersByChannel: undefined as Record<string, ReadonlyArray<DogfoodChannelMemberView>> | undefined,
   inviteCandidates: undefined as ReadonlyArray<DogfoodPrivateChannelInviteCandidateView> | undefined,
   managementCandidates: undefined as ReadonlyArray<DogfoodPrivateChannelInviteCandidateView> | undefined,
-  channelIndicators: undefined as ReadonlyArray<{ readonly channelId: string; readonly indicator: "unread" | "mentioned" }> | undefined,
-  notificationPreference: undefined as { readonly mode: "all" | "mentions" | "off"; readonly options: ReadonlyArray<"all" | "mentions" | "off"> } | undefined,
+  channelIndicators: undefined as
+    ReadonlyArray<{ readonly channelId: string; readonly indicator: "unread" | "mentioned" }> | undefined,
+  notificationPreference: undefined as
+    | { readonly mode: "all" | "mentions" | "off"; readonly options: ReadonlyArray<"all" | "mentions" | "off"> }
+    | undefined,
   notificationFeedArgs: [] as Array<{ readonly cursor: number }>,
   workspaceChatProps: null as WorkspaceChatProps | null,
   notificationEvents: {
@@ -327,14 +344,14 @@ const members: ReadonlyArray<DogfoodChannelMemberView> = [
   }
 ]
 
-const inviteCandidates: ReadonlyArray<DogfoodPrivateChannelInviteCandidateView> = [{
-  id: "user-2" as Id<"users">,
-  displayName: "Lee Chen"
-}]
+const inviteCandidates: ReadonlyArray<DogfoodPrivateChannelInviteCandidateView> = [
+  {
+    id: "user-2" as Id<"users">,
+    displayName: "Lee Chen"
+  }
+]
 
-const adapterData = (
-  overrides: Partial<DogfoodChatAdapterInput["data"]> = {}
-): DogfoodChatAdapterInput["data"] => ({
+const adapterData = (overrides: Partial<DogfoodChatAdapterInput["data"]> = {}): DogfoodChatAdapterInput["data"] => ({
   workspace,
   channels,
   selectedConversation: { kind: "channel", id: workspace.channel.id },
@@ -342,20 +359,23 @@ const adapterData = (
   ...overrides
 })
 
-type AuthenticatedDogfoodOverrides = Partial<Pick<typeof mocks,
-  | "workspace"
-  | "channels"
-  | "directConversations"
-  | "messages"
-  | "messagesByChannel"
-  | "members"
-  | "membersByChannel"
-  | "inviteCandidates"
-  | "managementCandidates"
-  | "channelIndicators"
-  | "notificationPreference"
-  | "paginationStatus"
->>
+type AuthenticatedDogfoodOverrides = Partial<
+  Pick<
+    typeof mocks,
+    | "workspace"
+    | "channels"
+    | "directConversations"
+    | "messages"
+    | "messagesByChannel"
+    | "members"
+    | "membersByChannel"
+    | "inviteCandidates"
+    | "managementCandidates"
+    | "channelIndicators"
+    | "notificationPreference"
+    | "paginationStatus"
+  >
+>
 
 const renderAuthenticatedDogfood = (overrides: AuthenticatedDogfoodOverrides = {}) => {
   mocks.auth.user = {
@@ -411,13 +431,13 @@ describe("dogfoodChatToChatData", () => {
       directConversation: { id: "direct-1", otherUser: { id: "user-2", displayName: "Lee Chen" } }
     })
     expect(chatData.model.channels).toHaveLength(2)
-    expect(chatData.model.directConversations).toHaveLength(1)
-    expect(chatData.editChannel).toBeUndefined()
-    expect(chatData.deleteChannel).toBeUndefined()
-    expect(chatData.addChannelMember).toBeUndefined()
-    expect(chatData.removeChannelMember).toBeUndefined()
-    chatData.selectDirectConversation?.("direct-1")
-    await chatData.createChannelMessage({ channelId: "direct-1", body: "Private hello" })
+    expect(readyData(chatData.model.directMessages.conversations)).toHaveLength(1)
+    expect(chatData.channels?.edit).toBeUndefined()
+    expect(chatData.channels?.delete).toBeUndefined()
+    expect(chatData.channels?.addMember).toBeUndefined()
+    expect(chatData.channels?.removeMember).toBeUndefined()
+    chatData.navigation.selectDirectConversation?.("direct-1")
+    await chatData.messages.create({ channelId: "direct-1", body: "Private hello" })
     expect(selections).toEqual([directConversation.id])
     expect(mocks.sendMessage).toHaveBeenCalledWith({
       channelId: directConversation.id,
@@ -449,21 +469,25 @@ describe("dogfoodChatToChatData", () => {
     expect(chatData.model.workspace).toEqual({ name: "Aether Dogfood" })
     expect(chatData.model.channel).toEqual({ id: "channel-1", name: "general", visibility: "private" })
     expect(chatData.model.channels.map((channel) => channel.name)).toEqual(["general", "design"])
-    expect(chatData.model.channelMembers?.map((member) => member.displayName)).toEqual(["Lee Chen", "Maya Patel"])
-    expect(chatData.model.channelMembers?.map((member) => member.role)).toEqual(["member", "admin"])
-    expect(chatData.model.channelMemberInviteCandidates).toEqual([{ id: "user-2", displayName: "Lee Chen" }])
-    expect(chatData.model.createChannelInviteCandidates).toEqual([{ id: "user-2", displayName: "Lee Chen" }])
-    await expect(chatData.startDirectConversation?.("user-2")).resolves.toEqual({
+    expect(conversationMembers(chatData.model)?.map((member) => member.displayName)).toEqual(["Lee Chen", "Maya Patel"])
+    expect(conversationMembers(chatData.model)?.map((member) => member.role)).toEqual(["member", "admin"])
+    expect(readyData(chatData.model.conversation.memberInviteCandidates)).toEqual([
+      { id: "user-2", displayName: "Lee Chen" }
+    ])
+    expect(readyData(chatData.model.channelCreation.inviteCandidates)).toEqual([
+      { id: "user-2", displayName: "Lee Chen" }
+    ])
+    await expect(chatData.directMessages?.startConversation?.("user-2")).resolves.toEqual({
       id: "direct-1",
       otherUser: { id: "user-2", displayName: "Lee Chen" }
     })
-    void chatData.addChannelMember?.({ channelId: "channel-1", userId: "user-2" })
-    void chatData.removeChannelMember?.({ channelId: "channel-1", userId: "user-2" })
+    void chatData.channels?.addMember?.({ channelId: "channel-1", userId: "user-2" })
+    void chatData.channels?.removeMember?.({ channelId: "channel-1", userId: "user-2" })
     expect(mocks.startOrReopenDirectConversation).toHaveBeenCalledWith("user-2")
     expect(mocks.addPrivateChannelMember).toHaveBeenCalledWith({ channelId: "channel-1", userId: "user-2" })
     expect(mocks.removePrivateChannelMember).toHaveBeenCalledWith({ channelId: "channel-1", userId: "user-2" })
-    expect(chatData.model.channelMessages).toHaveLength(1)
-    expect(chatData.model.channelMessages[0]).toMatchObject({
+    expect(conversationMessages(chatData.model)).toHaveLength(1)
+    expect(conversationMessages(chatData.model)[0]).toMatchObject({
       authorType: "human",
       authorDisplayName: "Maya Patel",
       body: "Dogfood chat is live.",
@@ -477,7 +501,7 @@ describe("dogfoodChatToChatData", () => {
   it("falls back to the default Convex channel when selection is stale", () => {
     const chatData = dogfoodChatToChatData({
       data: adapterData({
-        selectedConversation: { kind: "channel", id: "removed-channel" as Id<"channels"> },
+        selectedConversation: { kind: "channel", id: "removed-channel" as Id<"channels"> }
       }),
       commands: {
         sendMessage: mocks.sendMessage,
@@ -492,21 +516,23 @@ describe("dogfoodChatToChatData", () => {
   it("adapts reply parent ids and previews", async () => {
     const chatData = dogfoodChatToChatData({
       data: adapterData({
-        messages: [{
-          ...messages[0]!,
-          id: "message-2" as Id<"messages">,
-          authorUserId: "user-2" as Id<"users">,
-          authorDisplayName: "Lee Chen",
-          body: "Reply body.",
-          parentMessageId: messages[0]!.id,
-          parentMessage: {
-            id: messages[0]!.id,
-            authorDisplayName: "Maya Patel",
-            bodyPreview: "Dogfood chat is live.",
-            deleted: false
-          },
-          createdAt: 43
-        }]
+        messages: [
+          {
+            ...messages[0]!,
+            id: "message-2" as Id<"messages">,
+            authorUserId: "user-2" as Id<"users">,
+            authorDisplayName: "Lee Chen",
+            body: "Reply body.",
+            parentMessageId: messages[0]!.id,
+            parentMessage: {
+              id: messages[0]!.id,
+              authorDisplayName: "Maya Patel",
+              bodyPreview: "Dogfood chat is live.",
+              deleted: false
+            },
+            createdAt: 43
+          }
+        ]
       }),
       commands: {
         sendMessage: mocks.sendMessage,
@@ -515,7 +541,7 @@ describe("dogfoodChatToChatData", () => {
       }
     })
 
-    expect(chatData.model.channelMessages[0]).toMatchObject({
+    expect(conversationMessages(chatData.model)[0]).toMatchObject({
       parentMessageId: String(messages[0]!.id),
       parentMessage: {
         id: String(messages[0]!.id),
@@ -525,10 +551,10 @@ describe("dogfoodChatToChatData", () => {
       }
     })
 
-    await chatData.createChannelMessage({
+    await chatData.messages.create({
       channelId: chatData.model.channel.id,
       body: "Reply through adapter.",
-      parentMessageId: chatData.model.channelMessages[0]!.parentMessageId
+      parentMessageId: conversationMessages(chatData.model)[0]!.parentMessageId
     })
 
     expect(mocks.sendMessage).toHaveBeenCalledWith({
@@ -541,17 +567,21 @@ describe("dogfoodChatToChatData", () => {
   it("adapts attachment metadata and forwards storage ids when sending", async () => {
     const chatData = dogfoodChatToChatData({
       data: adapterData({
-        messages: [{
-          ...messages[0]!,
-          attachments: [{
-            storageId: "storage-1" as Id<"_storage">,
-            name: "brief.png",
-            contentType: "image/png",
-            size: 4096,
-            kind: "image",
-            url: "https://files.example/brief.png"
-          }]
-        }]
+        messages: [
+          {
+            ...messages[0]!,
+            attachments: [
+              {
+                storageId: "storage-1" as Id<"_storage">,
+                name: "brief.png",
+                contentType: "image/png",
+                size: 4096,
+                kind: "image",
+                url: "https://files.example/brief.png"
+              }
+            ]
+          }
+        ]
       }),
       commands: {
         sendMessage: mocks.sendMessage,
@@ -561,7 +591,7 @@ describe("dogfoodChatToChatData", () => {
       }
     })
 
-    expect(chatData.model.channelMessages[0]?.attachments).toEqual([
+    expect(conversationMessages(chatData.model)[0]?.attachments).toEqual([
       {
         id: "storage-1",
         storageId: "storage-1",
@@ -573,10 +603,10 @@ describe("dogfoodChatToChatData", () => {
       }
     ])
 
-    await chatData.createChannelMessage({
+    await chatData.messages.create({
       channelId: chatData.model.channel.id,
       body: "Attachment included.",
-      attachments: chatData.model.channelMessages[0]?.attachments
+      attachments: conversationMessages(chatData.model)[0]!.attachments
     })
 
     expect(mocks.sendMessage).toHaveBeenCalledWith({
@@ -586,7 +616,7 @@ describe("dogfoodChatToChatData", () => {
       attachments: [{ storageId: "storage-1", name: "brief.png" }]
     })
 
-    await chatData.discardMessageAttachment?.(chatData.model.channelMessages[0]!.attachments[0]!)
+    await chatData.messages.discard?.(conversationMessages(chatData.model)[0]!.attachments[0]!)
     expect(mocks.deleteAttachmentUpload).toHaveBeenCalledWith({ storageId: "storage-1" })
   })
 
@@ -603,16 +633,18 @@ describe("dogfoodChatToChatData", () => {
       }
     })
 
-    expect(chatData.model.channelMessages[0]?.editedAt).toBe(45)
+    expect(conversationMessages(chatData.model)[0]?.editedAt).toBe(45)
   })
 
   it("adapts Convex reaction counts and current-user state", async () => {
     const chatData = dogfoodChatToChatData({
       data: adapterData({
-        messages: [{
-          ...messages[0]!,
-          reactions: [{ emoji: "👍", count: 2, reactedByCurrentUser: true }]
-        }]
+        messages: [
+          {
+            ...messages[0]!,
+            reactions: [{ emoji: "👍", count: 2, reactedByCurrentUser: true }]
+          }
+        ]
       }),
       commands: {
         sendMessage: mocks.sendMessage,
@@ -622,13 +654,13 @@ describe("dogfoodChatToChatData", () => {
       }
     })
 
-    expect(chatData.model.channelMessages[0]?.reactions).toEqual([
+    expect(conversationMessages(chatData.model)[0]?.reactions).toEqual([
       { emoji: "👍", count: 2, reactedByCurrentUser: true }
     ])
 
-    await chatData.toggleMessageReaction?.({
+    await chatData.messages.toggleReaction?.({
       channelId: chatData.model.channel.id,
-      messageId: chatData.model.channelMessages[0]!.id,
+      messageId: conversationMessages(chatData.model)[0]!.id,
       emoji: "👍"
     })
 
@@ -652,10 +684,8 @@ describe("dogfoodChatToChatData", () => {
     })
 
     expect(chatData.model.channel.name).toBe("design")
-    expect(chatData.model.channelMessages).toEqual([])
-    expect(chatData.model.channelMessagesLoading).toBe(true)
-    expect(chatData.model.channelMembers).toEqual([])
-    expect(chatData.model.channelMembersLoading).toBe(true)
+    expect(chatData.model.conversation.messages).toEqual({ status: "loading" })
+    expect(chatData.model.conversation.members).toEqual({ status: "loading" })
   })
 
   it("adapts per-channel unread and mention indicators", () => {
@@ -670,7 +700,7 @@ describe("dogfoodChatToChatData", () => {
       }
     })
 
-    expect(chatData.model.channelIndicators).toEqual([{ channelId: channels[1]!.id, indicator: "mentioned" }])
+    expect(readyData(chatData.model.indicators)).toEqual([{ channelId: channels[1]!.id, indicator: "mentioned" }])
   })
 
   it("adapts and updates the active conversation notification preference", async () => {
@@ -690,11 +720,11 @@ describe("dogfoodChatToChatData", () => {
       }
     })
 
-    expect(chatData.model.notificationPreference).toEqual({
+    expect(readyData(chatData.model.conversation.notificationPreference)).toEqual({
       mode: "mentions",
       options: ["all", "mentions", "off"]
     })
-    await chatData.updateNotificationPreference?.({ channelId: workspace.channel.id, mode: "all" })
+    await chatData.notifications?.updatePreference?.({ channelId: workspace.channel.id, mode: "all" })
     expect(updateNotificationPreference).toHaveBeenCalledWith({
       channelId: workspace.channel.id,
       mode: "all"
@@ -711,15 +741,15 @@ describe("dogfoodChatToChatData", () => {
       }
     })
 
-    await chatData.createChannelMessage({ channelId: chatData.model.channel.id, body: "Ship chat first." })
-    await chatData.editChannelMessage?.({
+    await chatData.messages.create({ channelId: chatData.model.channel.id, body: "Ship chat first." })
+    await chatData.messages.edit?.({
       channelId: chatData.model.channel.id,
-      messageId: chatData.model.channelMessages[0]!.id,
+      messageId: conversationMessages(chatData.model)[0]!.id,
       body: "Edited dogfood"
     })
-    await chatData.deleteChannelMessage({
+    await chatData.messages.delete({
       channelId: chatData.model.channel.id,
-      messageId: chatData.model.channelMessages[0]!.id
+      messageId: conversationMessages(chatData.model)[0]!.id
     })
 
     expect(mocks.sendMessage).toHaveBeenCalledWith({
@@ -749,10 +779,10 @@ describe("dogfoodChatToChatData", () => {
       }
     })
 
-    expect(chatData.canEditMessage?.(chatData.model.channelMessages[0]!)).toBe(true)
-    expect(chatData.canDeleteMessage?.(chatData.model.channelMessages[0]!)).toBe(true)
-    expect(chatData.canEditMessage?.(chatData.model.channelMessages[1]!)).toBe(false)
-    expect(chatData.canDeleteMessage?.(chatData.model.channelMessages[1]!)).toBe(false)
+    expect(chatData.messages.canEdit?.(conversationMessages(chatData.model)[0]!)).toBe(true)
+    expect(chatData.messages.canDelete?.(conversationMessages(chatData.model)[0]!)).toBe(true)
+    expect(chatData.messages.canEdit?.(conversationMessages(chatData.model)[1]!)).toBe(false)
+    expect(chatData.messages.canDelete?.(conversationMessages(chatData.model)[1]!)).toBe(false)
   })
 
   it("uses the selected Convex channel and exposes create/select channel commands", async () => {
@@ -769,8 +799,8 @@ describe("dogfoodChatToChatData", () => {
     })
 
     expect(chatData.model.channel.name).toBe("design")
-    chatData.selectChannel?.(chatData.model.channels[0]!.id)
-    await chatData.createChannel?.({
+    chatData.navigation.selectChannel?.(chatData.model.channels[0]!.id)
+    await chatData.channels?.create?.({
       name: "product",
       visibility: "private",
       initialMemberIds: ["user-2"]
@@ -786,8 +816,7 @@ describe("dogfoodChatToChatData", () => {
 })
 
 describe("ConvexDogfoodApp", () => {
-  it("shows the sign-in entry state when signed out", async () => {
-
+  it("shows the sign-in entry state when signed out", () => {
     render(<ConvexDogfoodApp />)
 
     expect(screen.getByRole("heading", { name: "Welcome to Aether" })).toBeTruthy()
@@ -807,15 +836,17 @@ describe("ConvexDogfoodApp", () => {
     mocks.openNotificationFeed.mockResolvedValue({ cursor: 41 })
     mocks.notificationEvents = {
       cursor: 42,
-      notifications: [{
-        id: "event-42",
-        messageId: "message-42",
-        channelId: "channel-1",
-        conversationKind: "channel",
-        title: "#general",
-        body: "Lee Chen: Cursor-backed notification",
-        createdAt: 1
-      }]
+      notifications: [
+        {
+          id: "event-42",
+          messageId: "message-42",
+          channelId: "channel-1",
+          conversationKind: "channel",
+          title: "#general",
+          body: "Lee Chen: Cursor-backed notification",
+          createdAt: 1
+        }
+      ]
     }
     mocks.auth.user = { id: "user-1" }
     mocks.convexAuth.isAuthenticated = true
@@ -832,6 +863,7 @@ describe("ConvexDogfoodApp", () => {
   })
 
   it("binds system-browser sign-in to the initiating account window", async () => {
+    const user = userEvent.setup()
     const openExternal = vi.fn().mockResolvedValue(undefined)
     const openNativeAuth = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(window, "aetherShell", {
@@ -842,27 +874,31 @@ describe("ConvexDogfoodApp", () => {
         accountContext: vi.fn().mockResolvedValue({
           windowId: "window-2",
           currentAccountId: "account-2",
-          accounts: [{
-            id: "account-2",
-            displayName: "Sign in",
-            email: null,
-            avatarUrl: null,
-            current: true,
-            pending: true
-          }]
+          accounts: [
+            {
+              id: "account-2",
+              displayName: "Sign in",
+              email: null,
+              avatarUrl: null,
+              current: true,
+              pending: true
+            }
+          ]
         })
       }
     })
 
     render(<ConvexDogfoodApp />)
-    fireEvent.click(await screen.findByRole("button", { name: "Sign in" }))
+    await user.click(await screen.findByRole("button", { name: "Sign in" }))
 
-    await waitFor(() => expect(mocks.auth.getSignInUrl).toHaveBeenCalledWith({
-      state: {
-        aetherWindowId: "window-2",
-        aetherAccountId: "account-2"
-      }
-    }))
+    await waitFor(() =>
+      expect(mocks.auth.getSignInUrl).toHaveBeenCalledWith({
+        state: {
+          aetherWindowId: "window-2",
+          aetherAccountId: "account-2"
+        }
+      })
+    )
     expect(openExternal).not.toHaveBeenCalled()
     expect(openNativeAuth).toHaveBeenCalledWith("https://api.workos.com/user_management/authorize")
   })
@@ -875,17 +911,21 @@ describe("ConvexDogfoodApp", () => {
 
     render(<ConvexDogfoodApp />)
 
-    expect(await screen.findByRole("heading", { name: "Could Not Join" })).toBeTruthy()
-    expect(screen.getByText("This email is not on the Aether dogfood allowlist")).toBeTruthy()
-    expect(screen.getByText(/^VIEWER-/)).toBeTruthy()
-    expect(screen.getByText("Use Try again after checking the connection or allowlist.")).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy()
-    expect(warnSpy).toHaveBeenCalledWith("Dogfood chat diagnostic", expect.objectContaining({
-      message: "Error: details redacted"
-    }))
+    expect(await screen.findByRole("heading", { name: "Could Not Join" })).toBeInTheDocument()
+    expect(screen.getByText("This email is not on the Aether dogfood allowlist")).toBeInTheDocument()
+    expect(screen.getByText(/^VIEWER-/)).toBeInTheDocument()
+    expect(screen.getByText("Use Try again after checking the connection or allowlist.")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument()
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Dogfood chat diagnostic",
+      expect.objectContaining({
+        message: "Error: details redacted"
+      })
+    )
   })
 
   it("can retry viewer setup after an access setup error", async () => {
+    const user = userEvent.setup()
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
     mocks.auth.user = { id: "user-1" }
     mocks.convexAuth.isAuthenticated = true
@@ -893,16 +933,35 @@ describe("ConvexDogfoodApp", () => {
 
     render(<ConvexDogfoodApp />)
 
-    fireEvent.click(await screen.findByRole("button", { name: "Try again" }))
+    await user.click(await screen.findByRole("button", { name: "Try again" }))
 
     await waitFor(() => expect(mocks.ensureViewer).toHaveBeenCalledTimes(2))
     expect(warnSpy).toHaveBeenCalledTimes(1)
   })
 
+  it("keeps an in-flight viewer setup across an unrelated parent rerender", async () => {
+    let finishSetup!: () => void
+    mocks.ensureViewer.mockReturnValue(
+      new Promise<void>((resolve) => {
+        finishSetup = resolve
+      })
+    )
+    const { rerender } = renderAuthenticatedDogfood({ messages })
+
+    await waitFor(() => expect(mocks.ensureViewer).toHaveBeenCalledTimes(1))
+    rerender(<ConvexDogfoodApp />)
+    expect(mocks.ensureViewer).toHaveBeenCalledTimes(1)
+
+    act(() => finishSetup())
+
+    await screen.findByLabelText("mock workspace chat")
+    expect(mocks.ensureViewer).toHaveBeenCalledTimes(1)
+  })
+
   it("wires the profile sign-out action through the reused chat surface", async () => {
     renderAuthenticatedDogfood({ messages })
     const props = await waitFor(capturedWorkspaceChatProps)
-    await act(async () => props.profileMenuActions?.find(({ label }) => label === "Sign out")?.onSelect())
+    act(() => props.profileMenuActions?.find(({ label }) => label === "Sign out")?.onSelect())
 
     expect(mocks.auth.signOut).toHaveBeenCalledWith({
       returnTo: "http://localhost:3000/"
@@ -918,8 +977,22 @@ describe("ConvexDogfoodApp", () => {
       windowId: "window-1",
       currentAccountId: "default",
       accounts: [
-        { id: "default", displayName: "Maya Patel", email: "maya@example.com", avatarUrl: null, current: true, pending: false },
-        { id: "account-2", displayName: "Archer", email: "archer@example.com", avatarUrl: null, current: false, pending: false }
+        {
+          id: "default",
+          displayName: "Maya Patel",
+          email: "maya@example.com",
+          avatarUrl: null,
+          current: true,
+          pending: false
+        },
+        {
+          id: "account-2",
+          displayName: "Archer",
+          email: "archer@example.com",
+          avatarUrl: null,
+          current: false,
+          pending: false
+        }
       ]
     }
     Object.defineProperty(window, "aetherShell", {
@@ -937,9 +1010,9 @@ describe("ConvexDogfoodApp", () => {
     const props = await waitFor(capturedWorkspaceChatProps)
     props.profileMenuActions?.find(({ label }) => label === "Archer")?.onSelect()
     expect(switchAccount).toHaveBeenCalledWith("account-2")
-    expect(props.profileMenuActions).toEqual(expect.arrayContaining([
-      expect.objectContaining({ label: "Archer", detail: "archer@example.com" })
-    ]))
+    expect(props.profileMenuActions).toEqual(
+      expect.arrayContaining([expect.objectContaining({ label: "Archer", detail: "archer@example.com" })])
+    )
 
     props.profileMenuActions?.find(({ label }) => label === "Add account")?.onSelect()
     expect(addAccount).toHaveBeenCalledTimes(1)
@@ -954,7 +1027,14 @@ describe("ConvexDogfoodApp", () => {
       windowId: "window-1",
       currentAccountId: "default",
       accounts: [
-        { id: "default", displayName: "Maya Patel", email: "maya@example.com", avatarUrl: null, current: true, pending: false }
+        {
+          id: "default",
+          displayName: "Maya Patel",
+          email: "maya@example.com",
+          avatarUrl: null,
+          current: true,
+          pending: false
+        }
       ]
     }
     let accountContextListener!: (context: typeof initialContext) => void
@@ -975,19 +1055,34 @@ describe("ConvexDogfoodApp", () => {
       }
     })
     const { unmount } = renderAuthenticatedDogfood({ messages })
-    await waitFor(() => expect(capturedWorkspaceChatProps().profileMenuActions)
-      .toEqual(expect.arrayContaining([expect.objectContaining({ label: "Maya Patel" })])))
+    await waitFor(() =>
+      expect(capturedWorkspaceChatProps().profileMenuActions).toEqual(
+        expect.arrayContaining([expect.objectContaining({ label: "Maya Patel" })])
+      )
+    )
 
-    await act(async () => accountContextListener({
-      ...initialContext,
-      accounts: [
-        ...initialContext.accounts,
-        { id: "account-2", displayName: "Priya Rao", email: "priya@example.com", avatarUrl: null, current: false, pending: false }
-      ]
-    }))
+    act(() =>
+      accountContextListener({
+        ...initialContext,
+        accounts: [
+          ...initialContext.accounts,
+          {
+            id: "account-2",
+            displayName: "Priya Rao",
+            email: "priya@example.com",
+            avatarUrl: null,
+            current: false,
+            pending: false
+          }
+        ]
+      })
+    )
 
-    await waitFor(() => expect(capturedWorkspaceChatProps().profileMenuActions)
-      .toEqual(expect.arrayContaining([expect.objectContaining({ label: "Priya Rao" })])))
+    await waitFor(() =>
+      expect(capturedWorkspaceChatProps().profileMenuActions).toEqual(
+        expect.arrayContaining([expect.objectContaining({ label: "Priya Rao" })])
+      )
+    )
     unmount()
     expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
@@ -995,10 +1090,12 @@ describe("ConvexDogfoodApp", () => {
   it("sends messages through the Convex mutation using the active channel", async () => {
     renderAuthenticatedDogfood({ messages })
     const props = await waitFor(capturedWorkspaceChatProps)
-    await act(async () => props.createChannelMessage({
-      channelId: String(workspace.channel.id),
-      body: "Hello from dogfood"
-    }))
+    await act(async () =>
+      props.messages.create({
+        channelId: String(workspace.channel.id),
+        body: "Hello from dogfood"
+      })
+    )
 
     await waitFor(() =>
       expect(mocks.sendMessage).toHaveBeenCalledWith({
@@ -1010,11 +1107,14 @@ describe("ConvexDogfoodApp", () => {
 
   it("passes membership-backed channel members to the reused chat surface", async () => {
     renderAuthenticatedDogfood({ messages, members })
-    await waitFor(() => expect(capturedWorkspaceChatProps().model.channelMembers)
-      .toEqual(expect.arrayContaining([
-        expect.objectContaining({ displayName: "Lee Chen" }),
-        expect.objectContaining({ displayName: "Maya Patel" })
-      ])))
+    await waitFor(() =>
+      expect(conversationMembers(capturedWorkspaceChatProps().model)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ displayName: "Lee Chen" }),
+          expect.objectContaining({ displayName: "Maya Patel" })
+        ])
+      )
+    )
   })
 
   it("wires private membership commands and moves a self-removed viewer to the default channel", async () => {
@@ -1045,25 +1145,33 @@ describe("ConvexDogfoodApp", () => {
     })
 
     const initialProps = await waitFor(capturedWorkspaceChatProps)
-    await act(async () => initialProps.selectChannel?.(String(privateChannel.id)))
+    act(() => initialProps.navigation.selectChannel?.(String(privateChannel.id)))
     await waitFor(() => expect(capturedWorkspaceChatProps().model.channel.id).toBe("channel-private"))
-    await act(async () => capturedWorkspaceChatProps().addChannelMember?.({
-      channelId: String(privateChannel.id),
-      userId: String(inviteCandidates[0]!.id)
-    }))
-    await waitFor(() => expect(mocks.addPrivateChannelMember).toHaveBeenCalledWith({
-      channelId: privateChannel.id,
-      userId: inviteCandidates[0]!.id
-    }))
+    await act(async () =>
+      capturedWorkspaceChatProps().channels?.addMember?.({
+        channelId: String(privateChannel.id),
+        userId: String(inviteCandidates[0]!.id)
+      })
+    )
+    await waitFor(() =>
+      expect(mocks.addPrivateChannelMember).toHaveBeenCalledWith({
+        channelId: privateChannel.id,
+        userId: inviteCandidates[0]!.id
+      })
+    )
 
-    await act(async () => capturedWorkspaceChatProps().removeChannelMember?.({
-      channelId: String(privateChannel.id),
-      userId: String(workspace.currentUser.id)
-    }))
-    await waitFor(() => expect(mocks.removePrivateChannelMember).toHaveBeenCalledWith({
-      channelId: privateChannel.id,
-      userId: workspace.currentUser.id
-    }))
+    await act(async () =>
+      capturedWorkspaceChatProps().channels?.removeMember?.({
+        channelId: String(privateChannel.id),
+        userId: String(workspace.currentUser.id)
+      })
+    )
+    await waitFor(() =>
+      expect(mocks.removePrivateChannelMember).toHaveBeenCalledWith({
+        channelId: privateChannel.id,
+        userId: workspace.currentUser.id
+      })
+    )
     await waitFor(() => expect(capturedWorkspaceChatProps().model.channel.id).toBe("channel-safe"))
   })
 
@@ -1071,8 +1179,8 @@ describe("ConvexDogfoodApp", () => {
     renderAuthenticatedDogfood({ messages: undefined, members: undefined })
     const props = await waitFor(capturedWorkspaceChatProps)
     expect(props.model.workspace.name).toBe("Aether Dogfood")
-    expect(props.model.channelMessagesLoading).toBe(true)
-    expect(props.model.channelMembersLoading).toBe(true)
+    expect(props.model.conversation.messages).toEqual({ status: "loading" })
+    expect(props.model.conversation.members).toEqual({ status: "loading" })
     expect(screen.queryByRole("heading", { name: "Loading Chat" })).toBeNull()
   })
 
@@ -1086,24 +1194,32 @@ describe("ConvexDogfoodApp", () => {
       directConversations: [directConversation],
       messagesByChannel: { "channel-1": messages, "direct-1": [] }
     })
-    await waitFor(() => expect(capturedWorkspaceChatProps().model.directConversations).toHaveLength(1))
+    await waitFor(() =>
+      expect(readyData(capturedWorkspaceChatProps().model.directMessages.conversations)).toHaveLength(1)
+    )
     mocks.directConversations = undefined
     rerender(<ConvexDogfoodApp />)
-    expect(capturedWorkspaceChatProps().model.directConversations).toHaveLength(1)
+    expect(readyData(capturedWorkspaceChatProps().model.directMessages.conversations)).toHaveLength(1)
     mocks.ensureChannelMember.mockClear()
-    await act(async () => capturedWorkspaceChatProps().selectDirectConversation?.("direct-1"))
+    act(() => capturedWorkspaceChatProps().navigation.selectDirectConversation?.("direct-1"))
 
-    await waitFor(() => expect(capturedWorkspaceChatProps().model.activeConversation)
-      .toMatchObject({ kind: "direct", directConversation: { id: "direct-1" } }))
+    await waitFor(() =>
+      expect(capturedWorkspaceChatProps().model.activeConversation).toMatchObject({
+        kind: "direct",
+        directConversation: { id: "direct-1" }
+      })
+    )
     expect(mocks.ensureChannelMember).not.toHaveBeenCalled()
   })
 
   it("uses server-side user search without subscribing to the legacy candidate scan", async () => {
-    mocks.convexQuery.mockResolvedValue([{ id: "user-2", displayName: "Lee Chen", username: "lee", canStartDirectMessage: true }])
+    mocks.convexQuery.mockResolvedValue([
+      { id: "user-2", displayName: "Lee Chen", username: "lee", canStartDirectMessage: true }
+    ])
 
     renderAuthenticatedDogfood({ directConversations: [], messagesByChannel: { "channel-1": messages } })
     const props = await waitFor(capturedWorkspaceChatProps)
-    await props.searchDirectConversationCandidates?.("lee")
+    await props.directMessages?.searchCandidates?.("lee")
 
     await waitFor(() => expect(mocks.convexQuery).toHaveBeenCalledTimes(1))
     const [query, args] = mocks.convexQuery.mock.calls[0]!
@@ -1114,25 +1230,30 @@ describe("ConvexDogfoodApp", () => {
   it("exposes incremental history loading from the Convex pagination state", async () => {
     renderAuthenticatedDogfood({ messages, paginationStatus: "CanLoadMore" })
     const props = await waitFor(capturedWorkspaceChatProps)
-    props.loadOlderChannelMessages?.()
+    props.messages.loadOlder?.()
     expect(mocks.loadMore).toHaveBeenCalledWith(50)
   })
 
   it("switches channels and scopes messages and sends to the active channel", async () => {
-    renderAuthenticatedDogfood({ messagesByChannel: {
-      "channel-1": messages,
-      "channel-2": designMessages
-    } })
+    renderAuthenticatedDogfood({
+      messagesByChannel: {
+        "channel-1": messages,
+        "channel-2": designMessages
+      }
+    })
 
     const initialProps = await waitFor(capturedWorkspaceChatProps)
-    await act(async () => initialProps.selectChannel?.(String(channels[1]!.id)))
+    act(() => initialProps.navigation.selectChannel?.(String(channels[1]!.id)))
     await waitFor(() => expect(mocks.ensureChannelMember).toHaveBeenCalledWith({ channelId: channels[1]!.id }))
-    await waitFor(() => expect(capturedWorkspaceChatProps().model.channelMessages[0]?.body)
-      .toBe("Design kickoff is scoped here."))
-    await act(async () => capturedWorkspaceChatProps().createChannelMessage({
-      channelId: String(channels[1]!.id),
-      body: "Hello from dogfood"
-    }))
+    await waitFor(() =>
+      expect(conversationMessages(capturedWorkspaceChatProps().model)[0]?.body).toBe("Design kickoff is scoped here.")
+    )
+    await act(async () =>
+      capturedWorkspaceChatProps().messages.create({
+        channelId: String(channels[1]!.id),
+        body: "Hello from dogfood"
+      })
+    )
 
     await waitFor(() =>
       expect(mocks.sendMessage).toHaveBeenCalledWith({
@@ -1160,7 +1281,7 @@ describe("ConvexDogfoodApp", () => {
   })
 
   it("does not mark a background conversation read until the window becomes active", async () => {
-    vi.mocked(document.hasFocus).mockReturnValue(false)
+    vi.spyOn(document, "hasFocus").mockReturnValue(false)
     mocks.auth.user = { id: "user-1" }
     mocks.convexAuth.isAuthenticated = true
     mocks.workspace = workspace
@@ -1171,12 +1292,14 @@ describe("ConvexDogfoodApp", () => {
     await screen.findByLabelText("mock workspace chat")
     expect(mocks.markChannelRead).not.toHaveBeenCalled()
 
-    vi.mocked(document.hasFocus).mockReturnValue(true)
-    act(() => window.dispatchEvent(new Event("focus")))
-    await waitFor(() => expect(mocks.markChannelRead).toHaveBeenCalledWith({
-      channelId: workspace.channel.id,
-      readThroughMessageId: messages[0]!.id
-    }))
+    vi.spyOn(document, "hasFocus").mockReturnValue(true)
+    await act(() => window.dispatchEvent(new Event("focus")))
+    await waitFor(() =>
+      expect(mocks.markChannelRead).toHaveBeenCalledWith({
+        channelId: workspace.channel.id,
+        readThroughMessageId: messages[0]!.id
+      })
+    )
   })
 
   it("marks the active channel read through the newest loaded message without repeating the same marker", async () => {
@@ -1206,14 +1329,17 @@ describe("ConvexDogfoodApp", () => {
       messages,
       channelIndicators: [{ channelId: channels[1]!.id, indicator: "unread" }]
     })
-    await waitFor(() => expect(capturedWorkspaceChatProps().model.channelIndicators)
-      .toEqual([{ channelId: String(channels[1]!.id), indicator: "unread" }]))
+    await waitFor(() =>
+      expect(readyData(capturedWorkspaceChatProps().model.indicators)).toEqual([
+        { channelId: String(channels[1]!.id), indicator: "unread" }
+      ])
+    )
   })
 
   it("creates channels through the Convex mutation", async () => {
     renderAuthenticatedDogfood({ messages })
     const props = await waitFor(capturedWorkspaceChatProps)
-    await act(async () => props.createChannel?.({ name: "design" }))
+    await act(async () => props.channels?.create?.({ name: "design" }))
 
     await waitFor(() => expect(mocks.createChannel).toHaveBeenCalledWith({ name: "design" }))
   })
@@ -1221,54 +1347,99 @@ describe("ConvexDogfoodApp", () => {
   it("loads eligible invitees and sends private creation through the typed adapter", async () => {
     renderAuthenticatedDogfood({ messages, inviteCandidates })
     const props = await waitFor(capturedWorkspaceChatProps)
-    await act(async () => props.createChannel?.({
-      name: "leadership",
-      visibility: "private",
-      initialMemberIds: [String(inviteCandidates[0]!.id)]
-    }))
+    await act(async () =>
+      props.channels?.create?.({
+        name: "leadership",
+        visibility: "private",
+        initialMemberIds: [String(inviteCandidates[0]!.id)]
+      })
+    )
 
-    await waitFor(() => expect(mocks.createChannel).toHaveBeenCalledWith({
-      name: "leadership",
-      visibility: "private",
-      initialMemberIds: [inviteCandidates[0]!.id]
-    }))
+    await waitFor(() =>
+      expect(mocks.createChannel).toHaveBeenCalledWith({
+        name: "leadership",
+        visibility: "private",
+        initialMemberIds: [inviteCandidates[0]!.id]
+      })
+    )
   })
 
   it("joins a selected shared channel before loading its messages", async () => {
     let finishJoin!: () => void
-    mocks.ensureChannelMember.mockReturnValue(new Promise<void>((resolve) => { finishJoin = resolve }))
-    renderAuthenticatedDogfood({ messagesByChannel: {
-      "channel-1": messages,
-      "channel-2": designMessages
-    } })
+    mocks.ensureChannelMember.mockReturnValue(
+      new Promise<void>((resolve) => {
+        finishJoin = resolve
+      })
+    )
+    renderAuthenticatedDogfood({
+      messagesByChannel: {
+        "channel-1": messages,
+        "channel-2": designMessages
+      }
+    })
 
     const initialProps = await waitFor(capturedWorkspaceChatProps)
-    await act(async () => initialProps.selectChannel?.(String(channels[1]!.id)))
-    await waitFor(() => expect(capturedWorkspaceChatProps().model.channelMessagesLoading).toBe(true))
+    act(() => initialProps.navigation.selectChannel?.(String(channels[1]!.id)))
+    await waitFor(() => expect(capturedWorkspaceChatProps().model.conversation.messages).toEqual({ status: "loading" }))
     await waitFor(() => expect(mocks.ensureChannelMember).toHaveBeenCalledWith({ channelId: channels[1]!.id }))
-    await act(async () => finishJoin())
-    await waitFor(() => expect(capturedWorkspaceChatProps().model.channelMessages[0]?.body)
-      .toBe("Design kickoff is scoped here."))
+    act(() => finishJoin())
+    await waitFor(() =>
+      expect(conversationMessages(capturedWorkspaceChatProps().model)[0]?.body).toBe("Design kickoff is scoped here.")
+    )
+  })
+
+  it("keeps an in-flight channel join across an unrelated parent rerender", async () => {
+    let finishJoin!: () => void
+    const { rerender } = renderAuthenticatedDogfood({
+      messagesByChannel: {
+        "channel-1": messages,
+        "channel-2": designMessages
+      }
+    })
+
+    const initialProps = await waitFor(capturedWorkspaceChatProps)
+    await waitFor(() => expect(mocks.ensureChannelMember).toHaveBeenCalledWith({ channelId: workspace.channel.id }))
+    mocks.ensureChannelMember.mockClear()
+    mocks.ensureChannelMember.mockReturnValue(
+      new Promise<void>((resolve) => {
+        finishJoin = resolve
+      })
+    )
+    act(() => initialProps.navigation.selectChannel?.(String(channels[1]!.id)))
+    await waitFor(() => expect(mocks.ensureChannelMember).toHaveBeenCalledTimes(1))
+    rerender(<ConvexDogfoodApp />)
+    expect(mocks.ensureChannelMember).toHaveBeenCalledTimes(1)
+
+    act(() => finishJoin())
+
+    await waitFor(() =>
+      expect(conversationMessages(capturedWorkspaceChatProps().model)[0]?.body).toBe("Design kickoff is scoped here.")
+    )
+    expect(mocks.ensureChannelMember).toHaveBeenCalledTimes(1)
   })
 
   it("wires edit and hard delete mutations for the current author only", async () => {
     renderAuthenticatedDogfood({ messages: messagesWithAnotherAuthor })
-    await waitFor(() => expect(capturedWorkspaceChatProps().model.channelMessages).toHaveLength(2))
+    await waitFor(() => expect(conversationMessages(capturedWorkspaceChatProps().model)).toHaveLength(2))
     const props = capturedWorkspaceChatProps()
-    expect(props.canEditMessage?.(props.model.channelMessages[0]!)).toBe(true)
-    expect(props.canDeleteMessage?.(props.model.channelMessages[0]!)).toBe(true)
-    expect(props.canEditMessage?.(props.model.channelMessages[1]!)).toBe(false)
-    expect(props.canDeleteMessage?.(props.model.channelMessages[1]!)).toBe(false)
+    expect(props.messages.canEdit?.(conversationMessages(props.model)[0]!)).toBe(true)
+    expect(props.messages.canDelete?.(conversationMessages(props.model)[0]!)).toBe(true)
+    expect(props.messages.canEdit?.(conversationMessages(props.model)[1]!)).toBe(false)
+    expect(props.messages.canDelete?.(conversationMessages(props.model)[1]!)).toBe(false)
 
-    await act(async () => props.editChannelMessage?.({
-      channelId: String(workspace.channel.id),
-      messageId: String(messages[0]!.id),
-      body: "Edited dogfood"
-    }))
-    await act(async () => props.deleteChannelMessage({
-      channelId: String(workspace.channel.id),
-      messageId: String(messages[0]!.id)
-    }))
+    await act(async () =>
+      props.messages.edit?.({
+        channelId: String(workspace.channel.id),
+        messageId: String(messages[0]!.id),
+        body: "Edited dogfood"
+      })
+    )
+    await act(async () =>
+      props.messages.delete({
+        channelId: String(workspace.channel.id),
+        messageId: String(messages[0]!.id)
+      })
+    )
 
     await waitFor(() =>
       expect(mocks.editMessage).toHaveBeenCalledWith({
@@ -1286,11 +1457,13 @@ describe("ConvexDogfoodApp", () => {
   it("wires reaction toggles through the Convex mutation", async () => {
     renderAuthenticatedDogfood({ messages })
     const props = await waitFor(capturedWorkspaceChatProps)
-    await act(async () => props.toggleMessageReaction?.({
-      channelId: String(workspace.channel.id),
-      messageId: String(messages[0]!.id),
-      emoji: "👍"
-    }))
+    await act(async () =>
+      props.messages.toggleReaction?.({
+        channelId: String(workspace.channel.id),
+        messageId: String(messages[0]!.id),
+        emoji: "👍"
+      })
+    )
 
     await waitFor(() =>
       expect(mocks.toggleMessageReaction).toHaveBeenCalledWith({
@@ -1306,16 +1479,17 @@ describe("ConvexDogfoodApp", () => {
       .mockRejectedValueOnce(new Error("temporary registration failure"))
       .mockRejectedValueOnce(new Error("temporary registration failure"))
       .mockResolvedValueOnce({ status: "registered", storageId: "storage-1" })
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ storageId: "storage-1" })
-    }))
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ storageId: "storage-1" })
+      })
+    )
 
     renderAuthenticatedDogfood({ messages })
     const props = await waitFor(capturedWorkspaceChatProps)
-    await props.uploadMessageAttachment?.(
-      new File(["file"], "brief.txt", { type: "text/plain" })
-    ).catch(() => {})
+    await props.messages.upload?.(new File(["file"], "brief.txt", { type: "text/plain" })).catch(() => {})
 
     await waitFor(() => expect(mocks.registerAttachmentUpload).toHaveBeenCalledTimes(3))
     expect(mocks.deleteAttachmentUpload).not.toHaveBeenCalled()
@@ -1323,21 +1497,24 @@ describe("ConvexDogfoodApp", () => {
 
   it("cleans up a direct upload after terminal registration failure", async () => {
     mocks.registerAttachmentUpload.mockRejectedValue(new Error("registration unavailable"))
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ storageId: "storage-1" })
-    }))
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ storageId: "storage-1" })
+      })
+    )
 
     renderAuthenticatedDogfood({ messages })
     const props = await waitFor(capturedWorkspaceChatProps)
-    await props.uploadMessageAttachment?.(
-      new File(["file"], "brief.txt", { type: "text/plain" })
-    ).catch(() => {})
+    await props.messages.upload?.(new File(["file"], "brief.txt", { type: "text/plain" })).catch(() => {})
 
-    await waitFor(() => expect(mocks.deleteAttachmentUpload).toHaveBeenCalledWith({
-      intentId: "intent-1",
-      storageId: "storage-1"
-    }))
+    await waitFor(() =>
+      expect(mocks.deleteAttachmentUpload).toHaveBeenCalledWith({
+        intentId: "intent-1",
+        storageId: "storage-1"
+      })
+    )
     expect(mocks.registerAttachmentUpload).toHaveBeenCalledTimes(3)
   })
 
@@ -1345,10 +1522,7 @@ describe("ConvexDogfoodApp", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
     renderAuthenticatedDogfood({ messages })
     const props = await waitFor(capturedWorkspaceChatProps)
-    const message = props.operationErrorMessage?.(
-      "send",
-      new Error("secret mutation details")
-    )
+    const message = props.messages.errorMessage?.("send", new Error("secret mutation details"))
     expect(message).toMatch(/^Could not send message\. Check your connection and try again\. Diagnostic: MUTATION-/)
     const logs = JSON.stringify(warnSpy.mock.calls)
     expect(logs).toContain("details redacted")
@@ -1359,13 +1533,17 @@ describe("ConvexDogfoodApp", () => {
     expect(logs).not.toContain("api_key")
   })
 
-  it("sanitizes render-boundary failures and offers a recovery action", async () => {
+  it("sanitizes render-boundary failures and offers a recovery action", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
     const BrokenChat = () => {
       throw new Error("secret render text https://private.example friend@example.com Bearer token api_key=oops")
     }
 
-    render(<DogfoodErrorBoundary><BrokenChat /></DogfoodErrorBoundary>)
+    render(
+      <DogfoodErrorBoundary>
+        <BrokenChat />
+      </DogfoodErrorBoundary>
+    )
 
     expect(screen.getByRole("heading", { name: "Chat Failed" })).toBeTruthy()
     expect(screen.getByText("Something unexpected interrupted chat.")).toBeTruthy()
@@ -1380,7 +1558,7 @@ describe("ConvexDogfoodApp", () => {
     expect(logs).not.toContain("api_key")
   })
 
-  it("waits for Convex to authenticate before initializing the viewer", async () => {
+  it("waits for Convex to authenticate before initializing the viewer", () => {
     mocks.auth.user = { id: "user-1" }
     mocks.convexAuth.isLoading = true
     mocks.convexAuth.isAuthenticated = false

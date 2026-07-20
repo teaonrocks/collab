@@ -1,19 +1,12 @@
 import { v } from "convex/values"
 import type { Doc, Id } from "./_generated/dataModel"
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server"
-import {
-  isEmailAllowlisted,
-  requireAllowedCurrentUser,
-  requireChannelMember
-} from "./chat_access"
+import { isEmailAllowlisted, requireAllowedCurrentUser, requireChannelMember } from "./chat_access"
 import { canStartDirectMessage, canonicalPairKey } from "./social"
 
 const MAX_DIRECT_CONVERSATIONS = 100
 
-export const listDirectConversationRecords = async (
-  ctx: QueryCtx,
-  actorId: Id<"users">
-) => {
+export const listDirectConversationRecords = async (ctx: QueryCtx, actorId: Id<"users">) => {
   const memberships = await ctx.db
     .query("channelMemberships")
     .withIndex("by_user_and_channel_kind", (q) => q.eq("userId", actorId).eq("channelKind", "direct"))
@@ -37,10 +30,7 @@ export const listDirectConversationRecords = async (
   return conversations.sort((a, b) => b.channel.createdAt - a.channel.createdAt)
 }
 
-const directConversationView = (
-  channel: Doc<"channels">,
-  otherUser: Doc<"users">
-) => ({
+const directConversationView = (channel: Doc<"channels">, otherUser: Doc<"users">) => ({
   id: channel._id,
   otherUser: {
     id: otherUser._id,
@@ -80,7 +70,10 @@ const requireEligibleRecipient = async (
 }
 
 const directParticipants = async (ctx: QueryCtx | MutationCtx, channelId: Id<"channels">) =>
-  ctx.db.query("channelMemberships").withIndex("by_channel", (q) => q.eq("channelId", channelId)).take(3)
+  ctx.db
+    .query("channelMemberships")
+    .withIndex("by_channel", (q) => q.eq("channelId", channelId))
+    .take(3)
 
 const ensureDirectMembershipTags = async (
   ctx: MutationCtx,

@@ -44,43 +44,50 @@ describe("conversation notification preferences", () => {
     const channelId = mayaViewer.channelId
     const { cursor } = await t.withIdentity(lee).mutation(api.notification_preferences.openFeed, {})
 
-    await expect(t.withIdentity(lee).query(api.notification_preferences.preference, { channelId }))
-      .resolves.toEqual({ mode: "mentions", options: ["all", "mentions", "off"] })
+    await expect(t.withIdentity(lee).query(api.notification_preferences.preference, { channelId })).resolves.toEqual({
+      mode: "mentions",
+      options: ["all", "mentions", "off"]
+    })
 
     await t.withIdentity(maya).mutation(api.chat.sendMessage, {
       channelId,
       body: "A regular channel update"
     })
-    await expect(t.withIdentity(lee).query(api.notification_preferences.feed, { cursor }))
-      .resolves.toEqual({ cursor, notifications: [] })
+    await expect(t.withIdentity(lee).query(api.notification_preferences.feed, { cursor })).resolves.toEqual({
+      cursor,
+      notifications: []
+    })
 
     await t.withIdentity(maya).mutation(api.chat.sendMessage, {
       channelId,
       body: "@Lee please review this"
     })
-    await expect(t.withIdentity(lee).query(api.notification_preferences.feed, { cursor }))
-      .resolves.toEqual({
-        cursor: cursor + 1,
-        notifications: [
-          expect.objectContaining({
-            conversationKind: "channel",
-            channelId,
-            title: "#general",
-            body: "Maya Patel: @Lee please review this"
-          })
-        ]
-      })
+    await expect(t.withIdentity(lee).query(api.notification_preferences.feed, { cursor })).resolves.toEqual({
+      cursor: cursor + 1,
+      notifications: [
+        expect.objectContaining({
+          conversationKind: "channel",
+          channelId,
+          title: "#general",
+          body: "Maya Patel: @Lee please review this"
+        })
+      ]
+    })
 
-    await expect(t.withIdentity(lee).mutation(api.notification_preferences.updatePreference, {
-      channelId,
-      mode: "all"
-    })).resolves.toEqual({ mode: "all", options: ["all", "mentions", "off"] })
+    await expect(
+      t.withIdentity(lee).mutation(api.notification_preferences.updatePreference, {
+        channelId,
+        mode: "all"
+      })
+    ).resolves.toEqual({ mode: "all", options: ["all", "mentions", "off"] })
     await t.withIdentity(maya).mutation(api.chat.sendMessage, {
       channelId,
       body: "All-message preference update"
     })
-    await expect(t.withIdentity(lee).query(api.notification_preferences.feed, { cursor }))
-      .resolves.toMatchObject({ cursor: cursor + 2, notifications: [{}, {}] })
+    await expect(t.withIdentity(lee).query(api.notification_preferences.feed, { cursor })).resolves.toMatchObject({
+      cursor: cursor + 2,
+      notifications: [{}, {}]
+    })
 
     await t.withIdentity(lee).mutation(api.notification_preferences.updatePreference, {
       channelId,
@@ -90,11 +97,15 @@ describe("conversation notification preferences", () => {
       channelId,
       body: "Muted update"
     })
-    await expect(t.withIdentity(lee).query(api.notification_preferences.feed, { cursor }))
-      .resolves.toMatchObject({ cursor: cursor + 2, notifications: [{}, {}] })
+    await expect(t.withIdentity(lee).query(api.notification_preferences.feed, { cursor })).resolves.toMatchObject({
+      cursor: cursor + 2,
+      notifications: [{}, {}]
+    })
 
-    await expect(t.withIdentity(maya).query(api.notification_preferences.feed, { cursor: 0 }))
-      .resolves.toEqual({ cursor: 0, notifications: [] })
+    await expect(t.withIdentity(maya).query(api.notification_preferences.feed, { cursor: 0 })).resolves.toEqual({
+      cursor: 0,
+      notifications: []
+    })
   })
 
   it("defaults direct messages to all, rejects mention-only mode, and ignores backfilled rows", async () => {
@@ -105,15 +116,19 @@ describe("conversation notification preferences", () => {
       recipientUserId: leeViewer.userId
     })
 
-    await expect(t.withIdentity(lee).query(api.notification_preferences.preference, { channelId: direct.id }))
-      .resolves.toEqual({ mode: "all", options: ["all", "off"] })
-    await expect(t.withIdentity(lee).mutation(api.notification_preferences.updatePreference, {
-      channelId: direct.id,
-      mode: "mentions"
-    })).rejects.toThrow("Direct conversations do not support mention-only notifications")
+    await expect(
+      t.withIdentity(lee).query(api.notification_preferences.preference, { channelId: direct.id })
+    ).resolves.toEqual({ mode: "all", options: ["all", "off"] })
+    await expect(
+      t.withIdentity(lee).mutation(api.notification_preferences.updatePreference, {
+        channelId: direct.id,
+        mode: "mentions"
+      })
+    ).rejects.toThrow("Direct conversations do not support mention-only notifications")
 
     await t.run(async (ctx) => {
-      const mayaUser = await ctx.db.query("users")
+      const mayaUser = await ctx.db
+        .query("users")
         .withIndex("by_token_identifier", (q) => q.eq("tokenIdentifier", maya.tokenIdentifier))
         .unique()
       if (mayaUser === null) throw new Error("Maya missing")
@@ -126,25 +141,26 @@ describe("conversation notification preferences", () => {
         createdAt: 1
       })
     })
-    await expect(t.withIdentity(lee).query(api.notification_preferences.feed, { cursor: 0 }))
-      .resolves.toEqual({ cursor: 0, notifications: [] })
+    await expect(t.withIdentity(lee).query(api.notification_preferences.feed, { cursor: 0 })).resolves.toEqual({
+      cursor: 0,
+      notifications: []
+    })
 
     await t.withIdentity(maya).mutation(api.chat.sendMessage, {
       channelId: direct.id,
       body: "A new direct message"
     })
-    await expect(t.withIdentity(lee).query(api.notification_preferences.feed, { cursor: 0 }))
-      .resolves.toEqual({
-        cursor: 1,
-        notifications: [
-          expect.objectContaining({
-            conversationKind: "direct",
-            channelId: direct.id,
-            title: "Maya Patel",
-            body: "A new direct message"
-          })
-        ]
-      })
+    await expect(t.withIdentity(lee).query(api.notification_preferences.feed, { cursor: 0 })).resolves.toEqual({
+      cursor: 1,
+      notifications: [
+        expect.objectContaining({
+          conversationKind: "direct",
+          channelId: direct.id,
+          title: "Maya Patel",
+          body: "A new direct message"
+        })
+      ]
+    })
   })
 
   it("opens at a server-issued cursor and replays equal-timestamp events until that cursor advances", async () => {
@@ -181,10 +197,10 @@ describe("conversation notification preferences", () => {
     ])
     expect(new Set(firstRead.notifications.map((notification) => notification.createdAt)).size).toBe(1)
 
-    await expect(t.withIdentity(lee).query(api.notification_preferences.feed, opened))
-      .resolves.toEqual(firstRead)
-    await expect(t.withIdentity(lee).query(api.notification_preferences.feed, { cursor: firstRead.cursor }))
-      .resolves.toEqual({ cursor: 3, notifications: [] })
+    await expect(t.withIdentity(lee).query(api.notification_preferences.feed, opened)).resolves.toEqual(firstRead)
+    await expect(
+      t.withIdentity(lee).query(api.notification_preferences.feed, { cursor: firstRead.cursor })
+    ).resolves.toEqual({ cursor: 3, notifications: [] })
   })
 
   it("pages forward without rehydrating acknowledged events", async () => {
@@ -208,17 +224,18 @@ describe("conversation notification preferences", () => {
     expect(firstPage.notifications).toHaveLength(100)
 
     const replay = await t.withIdentity(lee).query(api.notification_preferences.feed, opened)
-    expect(replay.notifications.map((notification) => notification.id))
-      .toEqual(firstPage.notifications.map((notification) => notification.id))
+    expect(replay.notifications.map((notification) => notification.id)).toEqual(
+      firstPage.notifications.map((notification) => notification.id)
+    )
 
     const secondPage = await t.withIdentity(lee).query(api.notification_preferences.feed, {
       cursor: firstPage.cursor
     })
     expect(secondPage.cursor).toBe(101)
-    expect(secondPage.notifications.map((notification) => notification.body))
-      .toEqual(["Queued notification 101"])
-    await expect(t.withIdentity(lee).query(api.notification_preferences.feed, { cursor: secondPage.cursor }))
-      .resolves.toEqual({ cursor: 101, notifications: [] })
+    expect(secondPage.notifications.map((notification) => notification.body)).toEqual(["Queued notification 101"])
+    await expect(
+      t.withIdentity(lee).query(api.notification_preferences.feed, { cursor: secondPage.cursor })
+    ).resolves.toEqual({ cursor: 101, notifications: [] })
   })
 
   it("expires transient notification rows after the bounded retention window", async () => {
@@ -235,12 +252,10 @@ describe("conversation notification preferences", () => {
       channelId: direct.id,
       body: "Transient notification"
     })
-    await expect(t.run(async (ctx) => ctx.db.query("messageNotificationEvents").take(10)))
-      .resolves.toHaveLength(1)
+    await expect(t.run(async (ctx) => ctx.db.query("messageNotificationEvents").take(10))).resolves.toHaveLength(1)
 
     await t.finishAllScheduledFunctions(vi.runAllTimers)
 
-    await expect(t.run(async (ctx) => ctx.db.query("messageNotificationEvents").take(10)))
-      .resolves.toEqual([])
+    await expect(t.run(async (ctx) => ctx.db.query("messageNotificationEvents").take(10))).resolves.toEqual([])
   })
 })

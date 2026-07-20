@@ -8,8 +8,7 @@ import type {
 } from "./chat-data"
 
 const ATTACHMENT_REGISTRATION_ATTEMPTS = 3
-const attachmentPolicyError =
-  "Attachments must be PNG, JPEG, GIF, WebP, PDF, or plain text and no larger than 25 MB."
+const attachmentPolicyError = "Attachments must be PNG, JPEG, GIF, WebP, PDF, or plain text and no larger than 25 MB."
 
 type AttachmentDraftOptions = {
   readonly channelId: ChatChannelId
@@ -57,51 +56,63 @@ export const useAttachmentDraft = (options: AttachmentDraftOptions): AttachmentD
 
   useEffect(() => () => discardAll(attachmentsRef.current), [discardAll])
 
-  const choose = useCallback((files: ReadonlyArray<File>) => {
-    if (upload === undefined || files.length === 0) return
-    const slots = MESSAGE_ATTACHMENT_POLICY.maxFiles - attachmentsRef.current.length
-    const selectedFiles = files.slice(0, Math.max(0, slots))
-    if (selectedFiles.length === 0 || selectedFiles.length < files.length) {
-      reportError(`Messages can include at most ${MESSAGE_ATTACHMENT_POLICY.maxFiles} attachments.`)
-      if (selectedFiles.length === 0) return
-    } else {
-      reportError(null)
-    }
-    if (selectedFiles.some((file) =>
-      file.size > MESSAGE_ATTACHMENT_POLICY.maxSizeBytes || !isAcceptedAttachmentContentType(file.type)
-    )) {
-      reportError(attachmentPolicyError)
-      return
-    }
-
-    const generation = scopeRef.current.generation
-    setUploading(true)
-    void Promise.allSettled(selectedFiles.map((file) => upload(file)))
-      .then(async (results) => {
-        const uploaded = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : [])
-        if (scopeRef.current.generation !== generation) {
-          await Promise.allSettled(uploaded.map((attachment) => discardRef.current?.(attachment)))
-          return
-        }
-        if (results.some((result) => result.status === "rejected")) {
-          await Promise.allSettled(uploaded.map((attachment) => discardRef.current?.(attachment)))
-          throw new Error("One or more attachment uploads failed")
-        }
-        const next = [...attachmentsRef.current, ...uploaded].slice(0, MESSAGE_ATTACHMENT_POLICY.maxFiles)
-        attachmentsRef.current = next
-        setAttachments(next)
+  const choose = useCallback(
+    (files: ReadonlyArray<File>) => {
+      if (upload === undefined || files.length === 0) return
+      const slots = MESSAGE_ATTACHMENT_POLICY.maxFiles - attachmentsRef.current.length
+      const selectedFiles = files.slice(0, Math.max(0, slots))
+      if (selectedFiles.length === 0 || selectedFiles.length < files.length) {
+        reportError(`Messages can include at most ${MESSAGE_ATTACHMENT_POLICY.maxFiles} attachments.`)
+        if (selectedFiles.length === 0) return
+      } else {
         reportError(null)
-      })
-      .catch((cause: unknown) => {
-        if (scopeRef.current.generation === generation) {
-          reportError(operationErrorMessage?.("attach", cause) ??
-            "Could not upload attachment. Check your connection and try again.")
-        }
-      })
-      .finally(() => {
-        if (scopeRef.current.generation === generation) setUploading(false)
-      })
-  }, [operationErrorMessage, reportError, upload])
+      }
+      if (
+        selectedFiles.some(
+          (file) => file.size > MESSAGE_ATTACHMENT_POLICY.maxSizeBytes || !isAcceptedAttachmentContentType(file.type)
+        )
+      ) {
+        reportError(attachmentPolicyError)
+        return
+      }
+
+      const generation = scopeRef.current.generation
+      setUploading(true)
+      void Promise.allSettled(selectedFiles.map((file) => upload(file)))
+        .then(async (results) => {
+          const uploaded = results.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []))
+          const discardUploaded = async () => {
+            const discard = discardRef.current
+            if (discard === undefined) return
+            await Promise.allSettled(uploaded.map((attachment) => discard(attachment)))
+          }
+          if (scopeRef.current.generation !== generation) {
+            await discardUploaded()
+            return
+          }
+          if (results.some((result) => result.status === "rejected")) {
+            await discardUploaded()
+            throw new Error("One or more attachment uploads failed")
+          }
+          const next = [...attachmentsRef.current, ...uploaded].slice(0, MESSAGE_ATTACHMENT_POLICY.maxFiles)
+          attachmentsRef.current = next
+          setAttachments(next)
+          reportError(null)
+        })
+        .catch((cause: unknown) => {
+          if (scopeRef.current.generation === generation) {
+            reportError(
+              operationErrorMessage?.("attach", cause) ??
+                "Could not upload attachment. Check your connection and try again."
+            )
+          }
+        })
+        .finally(() => {
+          if (scopeRef.current.generation === generation) setUploading(false)
+        })
+    },
+    [operationErrorMessage, reportError, upload]
+  )
 
   const remove = useCallback((attachmentId: string) => {
     const removed = attachmentsRef.current.find((attachment) => attachment.id === attachmentId)
@@ -112,24 +123,27 @@ export const useAttachmentDraft = (options: AttachmentDraftOptions): AttachmentD
     void discardRef.current?.(removed).catch(() => {})
   }, [])
 
-  const send = useCallback(async (
-    operation: (items: ReadonlyArray<ChatMessageAttachment>) => Promise<unknown>
-  ): Promise<"success" | "failure" | "stale"> => {
-    const generation = scopeRef.current.generation
-    const items = attachmentsRef.current
-    reportError(null)
-    try {
-      await operation(items)
-      if (scopeRef.current.generation !== generation) return "stale"
-      attachmentsRef.current = []
-      setAttachments([])
-      return "success"
-    } catch (cause) {
-      if (scopeRef.current.generation !== generation) return "stale"
-      reportError(operationErrorMessage?.("send", cause) ?? null)
-      return "failure"
-    }
-  }, [operationErrorMessage, reportError])
+  const send = useCallback(
+    async (
+      operation: (items: ReadonlyArray<ChatMessageAttachment>) => Promise<unknown>
+    ): Promise<"success" | "failure" | "stale"> => {
+      const generation = scopeRef.current.generation
+      const items = attachmentsRef.current
+      reportError(null)
+      try {
+        await operation(items)
+        if (scopeRef.current.generation !== generation) return "stale"
+        attachmentsRef.current = []
+        setAttachments([])
+        return "success"
+      } catch (cause) {
+        if (scopeRef.current.generation !== generation) return "stale"
+        reportError(operationErrorMessage?.("send", cause) ?? null)
+        return "failure"
+      }
+    },
+    [operationErrorMessage, reportError]
+  )
 
   return {
     attachments,

@@ -24,7 +24,10 @@ const validateUsername = (rawUsername: string): string => {
 
 const usernameBaseFromEmail = (email: string): string => {
   const localPart = email.split("@", 1)[0] ?? "user"
-  const normalized = localPart.toLowerCase().replace(/[^a-z0-9_]/g, "_").replace(/^_+|_+$/g, "")
+  const normalized = localPart
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "_")
+    .replace(/^_+|_+$/g, "")
   return (normalized.length >= 3 ? normalized : `user_${normalized}`).slice(0, 28)
 }
 
@@ -32,21 +35,24 @@ export const seededUsername = async (ctx: QueryCtx | MutationCtx, email: string)
   const base = usernameBaseFromEmail(email)
   for (let suffix = 0; suffix < 10_000; suffix += 1) {
     const candidate = suffix === 0 ? base : `${base.slice(0, 32 - String(suffix).length - 1)}_${suffix}`
-    const existing = await ctx.db.query("users").withIndex("by_username", (q) => q.eq("username", candidate)).unique()
+    const existing = await ctx.db
+      .query("users")
+      .withIndex("by_username", (q) => q.eq("username", candidate))
+      .unique()
     if (existing === null) return candidate
   }
   throw new Error("Could not allocate a username")
 }
 
-const effectiveDirectMessagePreference = (user: Doc<"users">): DirectMessagePreference =>
-  user.directMessagePreference
+const effectiveDirectMessagePreference = (user: Doc<"users">): DirectMessagePreference => user.directMessagePreference
 
 export const areFriends = async (
   ctx: QueryCtx | MutationCtx,
   left: Id<"users">,
   right: Id<"users">
 ): Promise<boolean> => {
-  const request = await ctx.db.query("friendRequests")
+  const request = await ctx.db
+    .query("friendRequests")
     .withIndex("by_pair_key", (q) => q.eq("pairKey", canonicalPairKey(left, right)))
     .unique()
   return request?.status === "accepted"
@@ -57,10 +63,13 @@ export const shareWorkspace = async (
   left: Id<"users">,
   right: Id<"users">
 ): Promise<boolean> => {
-  const memberships = await ctx.db.query("workspaceMemberships")
-    .withIndex("by_user", (q) => q.eq("userId", left)).take(MAX_WORKSPACE_SCAN)
+  const memberships = await ctx.db
+    .query("workspaceMemberships")
+    .withIndex("by_user", (q) => q.eq("userId", left))
+    .take(MAX_WORKSPACE_SCAN)
   for (const membership of memberships) {
-    const otherMembership = await ctx.db.query("workspaceMemberships")
+    const otherMembership = await ctx.db
+      .query("workspaceMemberships")
       .withIndex("by_workspace_user", (q) => q.eq("workspaceId", membership.workspaceId).eq("userId", right))
       .unique()
     if (otherMembership !== null) return true
@@ -75,9 +84,12 @@ export const canStartDirectMessage = async (
 ): Promise<boolean> => {
   if (recipient.deletedAt !== undefined || !(await isEmailAllowlisted(ctx, recipient.email))) return false
   switch (effectiveDirectMessagePreference(recipient)) {
-    case "all": return true
-    case "friends": return areFriends(ctx, senderId, recipient._id)
-    case "mutuals": return shareWorkspace(ctx, senderId, recipient._id)
+    case "all":
+      return true
+    case "friends":
+      return areFriends(ctx, senderId, recipient._id)
+    case "mutuals":
+      return shareWorkspace(ctx, senderId, recipient._id)
   }
 }
 
@@ -105,7 +117,10 @@ export const updateProfile = mutation({
     const patch: { username?: string; directMessagePreference?: DirectMessagePreference } = {}
     if (args.username !== undefined) {
       const username = validateUsername(args.username)
-      const existing = await ctx.db.query("users").withIndex("by_username", (q) => q.eq("username", username)).unique()
+      const existing = await ctx.db
+        .query("users")
+        .withIndex("by_username", (q) => q.eq("username", username))
+        .unique()
       if (existing !== null && existing._id !== user._id) throw new Error("That username is already taken")
       patch.username = username
     }
@@ -123,18 +138,27 @@ export const searchUsers = query({
     const actor = await requireAllowedCurrentUser(ctx)
     const search = normalizeUsername(args.query)
     if (search.length === 0) return []
-    const users = await ctx.db.query("users").withSearchIndex("search_username", (q) => q.search("username", search)).take(MAX_USER_SEARCH_RESULTS)
+    const users = await ctx.db
+      .query("users")
+      .withSearchIndex("search_username", (q) => q.search("username", search))
+      .take(MAX_USER_SEARCH_RESULTS)
     const results = []
     for (const user of users) {
-      if (user._id === actor._id || user.deletedAt !== undefined || !(await isEmailAllowlisted(ctx, user.email))) continue
-      const request = await ctx.db.query("friendRequests")
-        .withIndex("by_pair_key", (q) => q.eq("pairKey", canonicalPairKey(actor._id, user._id))).unique()
+      if (user._id === actor._id || user.deletedAt !== undefined || !(await isEmailAllowlisted(ctx, user.email)))
+        continue
+      const request = await ctx.db
+        .query("friendRequests")
+        .withIndex("by_pair_key", (q) => q.eq("pairKey", canonicalPairKey(actor._id, user._id)))
+        .unique()
       results.push({
         ...toUserView(user),
         friendship: request?.status ?? null,
-        friendRequestDirection: request?.status === "pending"
-          ? request.requesterUserId === actor._id ? "outgoing" as const : "incoming" as const
-          : null,
+        friendRequestDirection:
+          request?.status === "pending"
+            ? request.requesterUserId === actor._id
+              ? ("outgoing" as const)
+              : ("incoming" as const)
+            : null,
         canStartDirectMessage: await canStartDirectMessage(ctx, actor._id, user)
       })
     }
@@ -152,7 +176,10 @@ export const sendFriendRequest = mutation({
       throw new Error("Friend request recipient is not available")
     }
     const pairKey = canonicalPairKey(requester._id, recipient._id)
-    const existing = await ctx.db.query("friendRequests").withIndex("by_pair_key", (q) => q.eq("pairKey", pairKey)).unique()
+    const existing = await ctx.db
+      .query("friendRequests")
+      .withIndex("by_pair_key", (q) => q.eq("pairKey", pairKey))
+      .unique()
     if (existing?.status === "accepted") return { id: existing._id, status: existing.status }
     if (existing?.status === "pending") {
       if (existing.recipientUserId === requester._id) {
@@ -163,10 +190,22 @@ export const sendFriendRequest = mutation({
     }
     const now = Date.now()
     if (existing !== null) {
-      await ctx.db.patch(existing._id, { requesterUserId: requester._id, recipientUserId: recipient._id, status: "pending", createdAt: now, respondedAt: undefined })
+      await ctx.db.patch(existing._id, {
+        requesterUserId: requester._id,
+        recipientUserId: recipient._id,
+        status: "pending",
+        createdAt: now,
+        respondedAt: undefined
+      })
       return { id: existing._id, status: "pending" as const }
     }
-    const id = await ctx.db.insert("friendRequests", { pairKey, requesterUserId: requester._id, recipientUserId: recipient._id, status: "pending", createdAt: now })
+    const id = await ctx.db.insert("friendRequests", {
+      pairKey,
+      requesterUserId: requester._id,
+      recipientUserId: recipient._id,
+      status: "pending",
+      createdAt: now
+    })
     return { id, status: "pending" as const }
   }
 })
@@ -179,7 +218,7 @@ export const respondToFriendRequest = mutation({
     if (request === null || request.recipientUserId !== recipient._id || request.status !== "pending") {
       throw new Error("Friend request is not available")
     }
-    const status = args.accept ? "accepted" as const : "declined" as const
+    const status = args.accept ? ("accepted" as const) : ("declined" as const)
     await ctx.db.patch(request._id, { status, respondedAt: Date.now() })
     return { id: request._id, status }
   }
@@ -189,13 +228,15 @@ export const incomingFriendRequests = query({
   args: {},
   handler: async (ctx) => {
     const recipient = await requireAllowedCurrentUser(ctx)
-    const requests = await ctx.db.query("friendRequests")
+    const requests = await ctx.db
+      .query("friendRequests")
       .withIndex("by_recipient_and_status", (q) => q.eq("recipientUserId", recipient._id).eq("status", "pending"))
       .take(MAX_USER_SEARCH_RESULTS)
     const results = []
     for (const request of requests) {
       const requester = await ctx.db.get(request.requesterUserId)
-      if (requester !== null && requester.deletedAt === undefined) results.push({ id: request._id, requester: toUserView(requester), createdAt: request.createdAt })
+      if (requester !== null && requester.deletedAt === undefined)
+        results.push({ id: request._id, requester: toUserView(requester), createdAt: request.createdAt })
     }
     return results
   }

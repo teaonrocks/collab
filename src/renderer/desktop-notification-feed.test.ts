@@ -26,7 +26,8 @@ describe("desktop notification subscription deduplication", () => {
       cursor: 2,
       notifications: []
     })
-    expect(consumeNotificationFeedPage({ cursor: 3, notifications: [{ id: "event-3", body: "Third" }] }, seen))
-      .toEqual({ cursor: 3, notifications: [{ id: "event-3", body: "Third" }] })
+    expect(consumeNotificationFeedPage({ cursor: 3, notifications: [{ id: "event-3", body: "Third" }] }, seen)).toEqual(
+      { cursor: 3, notifications: [{ id: "event-3", body: "Third" }] }
+    )
   })
 })

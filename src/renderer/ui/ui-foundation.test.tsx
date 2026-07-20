@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it } from "vitest"
 import { cn } from "../lib/cn"
 import {
@@ -75,18 +76,15 @@ describe("renderer UI foundation", () => {
       </section>
     )
 
-    expect(screen.getByRole("button", { name: "Send" })).toBeTruthy()
-    expect(screen.getByRole("switch", { name: "Enable notifications" })).toBeTruthy()
-    expect(screen.getByRole("switch", { name: "Enable notifications" }).className).toContain("rounded-full")
-    expect(screen.getByRole("checkbox", { name: "Select message" }).getAttribute("aria-checked")).toBe("true")
-    expect(screen.getByRole("radio", { name: "Private" }).getAttribute("aria-checked")).toBe("true")
-    expect(screen.getByRole("button", { name: "Send" }).className).toContain("bg-foreground")
-    expect(screen.getByRole("textbox", { name: "Channel name" })).toBeTruthy()
-    expect(screen.getByRole("textbox", { name: "Channel name" }).className).toContain("border-border-strong")
-    expect(screen.getByRole("textbox", { name: "Message" })).toBeTruthy()
-    expect(screen.getByText("Beta")).toBeTruthy()
-    expect(screen.getByText("Beta").className).toContain("bg-surface-muted")
-    expect(screen.getByLabelText("Maya Patel").textContent).toBe("MP")
+    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument()
+    expect(screen.getByRole("switch", { name: "Enable notifications" })).toHaveClass("rounded-full")
+    expect(screen.getByRole("checkbox", { name: "Select message" })).toBeChecked()
+    expect(screen.getByRole("radio", { name: "Private" })).toBeChecked()
+    expect(screen.getByRole("button", { name: "Send" })).toHaveClass("bg-foreground")
+    expect(screen.getByRole("textbox", { name: "Channel name" })).toHaveClass("border-border-strong")
+    expect(screen.getByRole("textbox", { name: "Message" })).toBeInTheDocument()
+    expect(screen.getByText("Beta")).toHaveClass("bg-surface-muted")
+    expect(screen.getByLabelText("Maya Patel")).toHaveTextContent("MP")
   })
 
   it("wraps Base UI dialog parts", () => {
@@ -99,8 +97,8 @@ describe("renderer UI foundation", () => {
       </Dialog>
     )
 
-    expect(screen.getByRole("dialog", { name: "Delete message" })).toBeTruthy()
-    expect(screen.getByText("Confirm before removing this message.")).toBeTruthy()
+    expect(screen.getByRole("dialog", { name: "Delete message" })).toBeInTheDocument()
+    expect(screen.getByText("Confirm before removing this message.")).toBeInTheDocument()
   })
 
   it("wraps Base UI menu, tooltip, and scroll area parts", () => {
@@ -124,12 +122,13 @@ describe("renderer UI foundation", () => {
       </TooltipProvider>
     )
 
-    expect(screen.getByRole("menuitem", { name: "Copy" })).toBeTruthy()
-    expect(screen.getByText("Helpful context").textContent).toBe("Helpful context")
-    expect(screen.getByText("Scrollable content")).toBeTruthy()
+    expect(screen.getByRole("menuitem", { name: "Copy" })).toBeInTheDocument()
+    expect(screen.getByText("Helpful context")).toHaveTextContent("Helpful context")
+    expect(screen.getByText("Scrollable content")).toBeInTheDocument()
   })
 
   it("wraps Base UI select and context menu behavior", async () => {
+    const user = userEvent.setup()
     render(
       <>
         <Select defaultValue="mentions">
@@ -151,11 +150,15 @@ describe("renderer UI foundation", () => {
       </>
     )
 
-    fireEvent.click(screen.getByRole("combobox", { name: "Notifications" }))
-    expect(await screen.findByRole("option", { name: "Mentions only" })).toBeTruthy()
-    expect(screen.getByRole("option", { name: "All messages" }).firstElementChild?.classList.contains("selectItemIndicatorSlot")).toBe(true)
+    await user.click(screen.getByRole("combobox", { name: "Notifications" }))
+    expect(await screen.findByRole("option", { name: "Mentions only" })).toBeInTheDocument()
+    expect(
+      screen
+        .getByRole("option", { name: "All messages" })
+        .firstElementChild?.classList.contains("selectItemIndicatorSlot")
+    ).toBe(true)
 
-    fireEvent.contextMenu(screen.getByLabelText("Message surface"), { clientX: 20, clientY: 20 })
-    expect(await screen.findByRole("menuitem", { name: "Copy" })).toBeTruthy()
+    await user.pointer({ keys: "[MouseRight]", target: screen.getByLabelText("Message surface") })
+    expect(await screen.findByRole("menuitem", { name: "Copy" })).toBeInTheDocument()
   })
 })

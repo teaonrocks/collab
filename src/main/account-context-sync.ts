@@ -22,9 +22,6 @@ export const broadcastAccountContexts = (
 ): void => {
   for (const record of records) {
     if (record.window.isDestroyed()) continue
-    record.window.webContents.send(
-      accountContextChangedChannel,
-      registry.context(record.id, record.accountId)
-    )
+    record.window.webContents.send(accountContextChangedChannel, registry.context(record.id, record.accountId))
   }
 }

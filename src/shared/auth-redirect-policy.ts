@@ -87,10 +87,7 @@ export const isAllowedExternalAuthUrl = (rawUrl: string): boolean => {
   }
 }
 
-export const rendererAuthCallbackUrl = (
-  rawUrl: string,
-  target: RendererAuthCallbackTarget
-): string | null => {
+export const rendererAuthCallbackUrl = (rawUrl: string, target: RendererAuthCallbackTarget): string | null => {
   const callback = parseAuthCallbackUrl(rawUrl)
   if (callback === null) return null
 

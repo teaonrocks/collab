@@ -22,7 +22,10 @@ describe("account window lifecycle", () => {
   it("uses the last-focused window when the application has no focused window", () => {
     const first = { accountId: "account-1" }
     const second = { accountId: "account-2" }
-    const records = new Map([[1, first], [2, second]])
+    const records = new Map([
+      [1, first],
+      [2, second]
+    ])
 
     expect(selectActiveWindowRecord(records, null, 1)).toBe(first)
     expect(selectActiveWindowRecord(records, null, null)).toBeNull()
@@ -44,11 +47,13 @@ describe("account window lifecycle", () => {
     const source = makeWindow()
     const replacement = makeWindow()
 
-    await expect(revealReplacementThenRetire({
-      source,
-      replacement,
-      loadReplacement: () => Promise.reject(new Error("renderer unavailable"))
-    })).rejects.toThrow("renderer unavailable")
+    await expect(
+      revealReplacementThenRetire({
+        source,
+        replacement,
+        loadReplacement: () => Promise.reject(new Error("renderer unavailable"))
+      })
+    ).rejects.toThrow("renderer unavailable")
 
     expect(source.hide).not.toHaveBeenCalled()
     expect(source.destroy).not.toHaveBeenCalled()

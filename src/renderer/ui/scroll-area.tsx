@@ -10,10 +10,13 @@ export function ScrollArea({ className, children, ...props }: ScrollAreaProps) {
       <BaseScrollArea.Viewport className="size-full">
         <BaseScrollArea.Content>{children}</BaseScrollArea.Content>
       </BaseScrollArea.Viewport>
-      <BaseScrollArea.Scrollbar className="flex w-2 touch-none select-none bg-transparent p-px">
+      <BaseScrollArea.Scrollbar className="flex w-2 touch-none bg-transparent p-px select-none">
         <BaseScrollArea.Thumb className="relative flex-1 rounded-full bg-border-strong" />
       </BaseScrollArea.Scrollbar>
-      <BaseScrollArea.Scrollbar orientation="horizontal" className="flex h-2 touch-none select-none bg-transparent p-px">
+      <BaseScrollArea.Scrollbar
+        orientation="horizontal"
+        className="flex h-2 touch-none bg-transparent p-px select-none"
+      >
         <BaseScrollArea.Thumb className="relative flex-1 rounded-full bg-border-strong" />
       </BaseScrollArea.Scrollbar>
       <BaseScrollArea.Corner />

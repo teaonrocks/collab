@@ -28,8 +28,7 @@ export type AuthCallbackState = {
   readonly accountId: string
 }
 
-const isNonEmptyString = (value: unknown): value is string =>
-  typeof value === "string" && value.trim().length > 0
+const isNonEmptyString = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0
 
 export const parseAuthCallbackState = (rawUrl: string): AuthCallbackState | null => {
   try {

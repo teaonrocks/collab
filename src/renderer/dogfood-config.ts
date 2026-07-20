@@ -1,5 +1,4 @@
-const hasValue = (value: string | undefined): value is string =>
-  value !== undefined && value.trim().length > 0
+const hasValue = (value: string | undefined): value is string => value !== undefined && value.trim().length > 0
 
 export const isDogfoodAuthConfigured = (): boolean =>
   hasValue(import.meta.env.VITE_CONVEX_URL) &&

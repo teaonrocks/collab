@@ -34,19 +34,18 @@ describe("attachment draft lifecycle", () => {
     act(() => result.current.choose([oversized]))
     expect(upload).not.toHaveBeenCalled()
 
-    act(() => result.current.choose(Array.from(
-      { length: MESSAGE_ATTACHMENT_POLICY.maxFiles + 1 },
-      (_, index) => imageFile(`${index}.png`)
-    )))
+    act(() =>
+      result.current.choose(
+        Array.from({ length: MESSAGE_ATTACHMENT_POLICY.maxFiles + 1 }, (_, index) => imageFile(`${index}.png`))
+      )
+    )
     await waitFor(() => expect(upload).toHaveBeenCalledTimes(MESSAGE_ATTACHMENT_POLICY.maxFiles))
     await waitFor(() => expect(result.current.attachments).toHaveLength(MESSAGE_ATTACHMENT_POLICY.maxFiles))
   })
 
   it("adds a successful upload batch", async () => {
     const reportError = vi.fn()
-    const upload = vi.fn()
-      .mockResolvedValueOnce(attachment("one"))
-      .mockResolvedValueOnce(attachment("two"))
+    const upload = vi.fn().mockResolvedValueOnce(attachment("one")).mockResolvedValueOnce(attachment("two"))
     const { result } = renderHook(() => useAttachmentDraft({ channelId: "general", upload, reportError }))
 
     act(() => result.current.choose([imageFile("one.png"), imageFile("two.png")]))
@@ -57,9 +56,7 @@ describe("attachment draft lifecycle", () => {
 
   it("cleans successful uploads when a batch partially fails", async () => {
     const uploaded = attachment("one")
-    const upload = vi.fn()
-      .mockResolvedValueOnce(uploaded)
-      .mockRejectedValueOnce(new Error("upload failed"))
+    const upload = vi.fn().mockResolvedValueOnce(uploaded).mockRejectedValueOnce(new Error("upload failed"))
     const discard = vi.fn(() => Promise.resolve())
     const reportError = vi.fn()
     const { result } = renderHook(() => useAttachmentDraft({ channelId: "general", upload, discard, reportError }))
@@ -73,7 +70,12 @@ describe("attachment draft lifecycle", () => {
 
   it("discards an upload that completes after a channel switch", async () => {
     let finishUpload!: (value: ChatMessageAttachment) => void
-    const upload = vi.fn(() => new Promise<ChatMessageAttachment>((resolve) => { finishUpload = resolve }))
+    const upload = vi.fn(
+      () =>
+        new Promise<ChatMessageAttachment>((resolve) => {
+          finishUpload = resolve
+        })
+    )
     const discard = vi.fn(() => Promise.resolve())
     const reportError = vi.fn()
     const { result, rerender } = renderHook(
@@ -83,7 +85,7 @@ describe("attachment draft lifecycle", () => {
     act(() => result.current.choose([imageFile("late.png")]))
 
     rerender({ channelId: "design" })
-    await act(async () => finishUpload(attachment("late")))
+    act(() => finishUpload(attachment("late")))
 
     await waitFor(() => expect(discard).toHaveBeenCalledWith(attachment("late")))
     expect(result.current.attachments).toEqual([])
@@ -95,7 +97,9 @@ describe("attachment draft lifecycle", () => {
     const upload = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second)
     const discard = vi.fn(() => Promise.resolve())
     const reportError = vi.fn()
-    const { result, unmount } = renderHook(() => useAttachmentDraft({ channelId: "general", upload, discard, reportError }))
+    const { result, unmount } = renderHook(() =>
+      useAttachmentDraft({ channelId: "general", upload, discard, reportError })
+    )
     act(() => result.current.choose([imageFile("one.png"), imageFile("two.png")]))
     await waitFor(() => expect(result.current.attachments).toHaveLength(2))
 
@@ -110,12 +114,14 @@ describe("attachment draft lifecycle", () => {
     const upload = vi.fn().mockResolvedValue(uploaded)
     const errorMessage = vi.fn(() => "Could not send message.")
     const reportError = vi.fn()
-    const { result } = renderHook(() => useAttachmentDraft({
-      channelId: "general",
-      upload,
-      operationErrorMessage: errorMessage,
-      reportError
-    }))
+    const { result } = renderHook(() =>
+      useAttachmentDraft({
+        channelId: "general",
+        upload,
+        operationErrorMessage: errorMessage,
+        reportError
+      })
+    )
     act(() => result.current.choose([imageFile("one.png")]))
     await waitFor(() => expect(result.current.attachments).toEqual([uploaded]))
 
@@ -135,19 +141,24 @@ describe("attachment draft lifecycle", () => {
   it("retries registration and deletes the unshared object after terminal failure", async () => {
     const register = vi.fn().mockRejectedValue(new Error("registration unavailable"))
     const deleteUpload = vi.fn(() => Promise.resolve())
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ storageId: "storage-1" })
-    }))
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ storageId: "storage-1" })
+      })
+    )
 
-    await expect(uploadAttachment({
-      file: imageFile("brief.png"),
-      generateUploadUrl: () => Promise.resolve({ uploadUrl: "https://upload.example", intentId: "intent-1" }),
-      register,
-      deleteUpload,
-      storageIdFromResponse: (body) => (body as { storageId: string }).storageId,
-      storageIdToString: String
-    })).rejects.toThrow("registration unavailable")
+    await expect(
+      uploadAttachment({
+        file: imageFile("brief.png"),
+        generateUploadUrl: () => Promise.resolve({ uploadUrl: "https://upload.example", intentId: "intent-1" }),
+        register,
+        deleteUpload,
+        storageIdFromResponse: (body) => (body as { storageId: string }).storageId,
+        storageIdToString: String
+      })
+    ).rejects.toThrow("registration unavailable")
 
     expect(register).toHaveBeenCalledTimes(3)
     expect(deleteUpload).toHaveBeenCalledWith({ intentId: "intent-1", storageId: "storage-1" })

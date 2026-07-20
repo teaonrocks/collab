@@ -19,10 +19,7 @@ const attachmentName = (name: string): string => {
 const attachmentKind = (contentType: string): "file" | "image" =>
   contentType.toLowerCase().startsWith("image/") ? "image" : "file"
 
-const validateMessageBody = (
-  rawBody: string,
-  options?: { readonly allowEmpty?: boolean }
-): string => {
+const validateMessageBody = (rawBody: string, options?: { readonly allowEmpty?: boolean }): string => {
   const body = rawBody.trim()
   if (body.length === 0 && options?.allowEmpty !== true) throw new Error("Message body is required")
   if (body.length > MAX_MESSAGE_BODY_LENGTH) {
@@ -34,12 +31,12 @@ const validateMessageBody = (
 const mentionCandidates = (displayName: string): ReadonlyArray<string> => {
   const normalized = displayName.trim().toLowerCase()
   const firstName = normalized.split(/\s+/)[0] ?? ""
-  return Array.from(new Set([`@${normalized}`, firstName.length === 0 ? "" : `@${firstName}`]))
-    .filter((value) => value.length > 1)
+  return Array.from(new Set([`@${normalized}`, firstName.length === 0 ? "" : `@${firstName}`])).filter(
+    (value) => value.length > 1
+  )
 }
 
-const escapeRegExp = (value: string): string =>
-  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
 const mentionsDisplayName = (body: string, displayName: string): boolean =>
   mentionCandidates(displayName).some((candidate) => {
@@ -90,10 +87,12 @@ const syncMessageMentions = async (
 const validateMessageAttachments = async (
   ctx: MutationCtx,
   userId: Id<"users">,
-  attachments: ReadonlyArray<{
-    readonly storageId: Id<"_storage">
-    readonly name: string
-  }> | undefined
+  attachments:
+    | ReadonlyArray<{
+        readonly storageId: Id<"_storage">
+        readonly name: string
+      }>
+    | undefined
 ) => {
   if (attachments === undefined) return []
   if (attachments.length > MESSAGE_ATTACHMENT_POLICY.maxFiles) {
@@ -156,10 +155,7 @@ export const sendMessageTransaction = async (
   const channel = await requireChannelMember(ctx, { channelId: args.channelId, userId: user._id })
   if (args.parentMessageId !== undefined) {
     const parent = await ctx.db.get(args.parentMessageId)
-    if (
-      parent === null ||
-      parent.channelId !== args.channelId
-    ) {
+    if (parent === null || parent.channelId !== args.channelId) {
       throw new Error("Parent message not found")
     }
   }
@@ -186,14 +182,9 @@ export const sendMessageTransaction = async (
   await queueMessageNotifications(ctx, { channel, message, mentionedUserIds })
   const senderMembership = await ctx.db
     .query("channelMemberships")
-    .withIndex("by_channel_user", (q) =>
-      q.eq("channelId", message.channelId).eq("userId", user._id)
-    )
+    .withIndex("by_channel_user", (q) => q.eq("channelId", message.channelId).eq("userId", user._id))
     .unique()
-  if (
-    senderMembership !== null &&
-    (senderMembership.lastReadAt ?? senderMembership.createdAt) < message.createdAt
-  ) {
+  if (senderMembership !== null && (senderMembership.lastReadAt ?? senderMembership.createdAt) < message.createdAt) {
     await ctx.db.patch(senderMembership._id, { lastReadAt: message.createdAt })
   }
   for (const attachment of attachments) {
@@ -296,7 +287,7 @@ export const toggleMessageReactionTransaction = async (
   const message = await ctx.db.get(args.messageId)
   if (message === null || message.channelId !== args.channelId) throw new Error("Message not found")
 
-  const channel = await requireChannelMember(ctx, { channelId: message.channelId, userId: user._id })
+  await requireChannelMember(ctx, { channelId: message.channelId, userId: user._id })
   const existing = await ctx.db
     .query("messageReactions")
     .withIndex("by_message_user_emoji", (q) =>

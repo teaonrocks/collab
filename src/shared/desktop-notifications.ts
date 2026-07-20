@@ -23,18 +23,25 @@ const nonEmptyString = (value: unknown, maxLength: number): value is string =>
 export const isDesktopNotificationRequest = (value: unknown): value is DesktopNotificationRequest => {
   if (typeof value !== "object" || value === null) return false
   return (
-    "messageId" in value && nonEmptyString(value.messageId, 200) &&
-    "conversationId" in value && nonEmptyString(value.conversationId, 200) &&
-    "conversationKind" in value && (value.conversationKind === "channel" || value.conversationKind === "direct") &&
-    "title" in value && nonEmptyString(value.title, 200) &&
-    "body" in value && nonEmptyString(value.body, 500)
+    "messageId" in value &&
+    nonEmptyString(value.messageId, 200) &&
+    "conversationId" in value &&
+    nonEmptyString(value.conversationId, 200) &&
+    "conversationKind" in value &&
+    (value.conversationKind === "channel" || value.conversationKind === "direct") &&
+    "title" in value &&
+    nonEmptyString(value.title, 200) &&
+    "body" in value &&
+    nonEmptyString(value.body, 500)
   )
 }
 
 export const isDesktopNotificationActivation = (value: unknown): value is DesktopNotificationActivation => {
   if (typeof value !== "object" || value === null) return false
   return (
-    "conversationId" in value && nonEmptyString(value.conversationId, 200) &&
-    "conversationKind" in value && (value.conversationKind === "channel" || value.conversationKind === "direct")
+    "conversationId" in value &&
+    nonEmptyString(value.conversationId, 200) &&
+    "conversationKind" in value &&
+    (value.conversationKind === "channel" || value.conversationKind === "direct")
   )
 }

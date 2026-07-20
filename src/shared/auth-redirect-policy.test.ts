@@ -60,8 +60,9 @@ describe("auth redirect policy", () => {
   })
 
   it("finds the first auth callback URL in process arguments", () => {
-    expect(findAuthCallbackUrl(["--flag", "aether://auth/callback?code=abc", "aether://auth/callback?code=next"]))
-      .toBe("aether://auth/callback?code=abc")
+    expect(findAuthCallbackUrl(["--flag", "aether://auth/callback?code=abc", "aether://auth/callback?code=next"])).toBe(
+      "aether://auth/callback?code=abc"
+    )
     expect(findAuthCallbackUrl(["--flag", "https://example.test"])).toBeNull()
   })
 

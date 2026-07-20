@@ -26,7 +26,9 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
     deletedAt: v.optional(v.number())
-  }).index("by_token_identifier", ["tokenIdentifier"]).index("by_email", ["email"])
+  })
+    .index("by_token_identifier", ["tokenIdentifier"])
+    .index("by_email", ["email"])
     .index("by_username", ["username"])
     .searchIndex("search_username", { searchField: "username" }),
 
@@ -37,7 +39,8 @@ export default defineSchema({
     status: friendRequestStatus,
     createdAt: v.number(),
     respondedAt: v.optional(v.number())
-  }).index("by_pair_key", ["pairKey"])
+  })
+    .index("by_pair_key", ["pairKey"])
     .index("by_recipient_and_status", ["recipientUserId", "status"]),
 
   workspaces: defineTable({
@@ -51,10 +54,10 @@ export default defineSchema({
     userId: v.id("users"),
     role: workspaceRole,
     createdAt: v.number()
-  }).index("by_workspace", ["workspaceId"]).index("by_user", ["userId"]).index("by_workspace_user", [
-    "workspaceId",
-    "userId"
-  ]),
+  })
+    .index("by_workspace", ["workspaceId"])
+    .index("by_user", ["userId"])
+    .index("by_workspace_user", ["workspaceId", "userId"]),
 
   channels: defineTable({
     // Workspace channels require this; global direct conversations omit it.
@@ -67,7 +70,8 @@ export default defineSchema({
     createdByUserId: v.optional(v.id("users")),
     deletedAt: v.optional(v.number()),
     createdAt: v.number()
-  }).index("by_workspace", ["workspaceId"])
+  })
+    .index("by_workspace", ["workspaceId"])
     .index("by_workspace_kind_and_deleted_at", ["workspaceId", "kind", "deletedAt"])
     .index("by_workspace_key", ["workspaceId", "key"])
     .index("by_direct_pair_key", ["directPairKey"]),
@@ -80,12 +84,11 @@ export default defineSchema({
     createdAt: v.number(),
     lastReadAt: v.optional(v.number()),
     mentionTrackingStartedAt: v.optional(v.number())
-  }).index("by_channel", ["channelId"]).index("by_user", ["userId"])
+  })
+    .index("by_channel", ["channelId"])
+    .index("by_user", ["userId"])
     .index("by_user_and_channel_kind", ["userId", "channelKind"])
-    .index("by_channel_user", [
-    "channelId",
-    "userId"
-  ]),
+    .index("by_channel_user", ["channelId", "userId"]),
 
   messages: defineTable({
     workspaceId: v.optional(v.id("workspaces")),
@@ -98,17 +101,20 @@ export default defineSchema({
     reactionBatchReady: v.optional(v.boolean()),
     createdAt: v.number(),
     editedAt: v.optional(v.number())
-  }).index("by_channel_created_at", ["channelId", "createdAt"]).searchIndex("search_body", {
-    searchField: "body",
-    filterFields: ["channelId"]
-  }),
+  })
+    .index("by_channel_created_at", ["channelId", "createdAt"])
+    .searchIndex("search_body", {
+      searchField: "body",
+      filterFields: ["channelId"]
+    }),
 
   messageMentions: defineTable({
     channelId: v.id("channels"),
     messageId: v.id("messages"),
     userId: v.id("users"),
     messageCreatedAt: v.number()
-  }).index("by_channel_user_created_at", ["channelId", "userId", "messageCreatedAt"])
+  })
+    .index("by_channel_user_created_at", ["channelId", "userId", "messageCreatedAt"])
     .index("by_message", ["messageId"]),
 
   conversationNotificationPreferences: defineTable({
@@ -125,7 +131,8 @@ export default defineSchema({
     sequence: v.number(),
     createdAt: v.number(),
     expiresAt: v.number()
-  }).index("by_recipient_and_sequence", ["recipientUserId", "sequence"])
+  })
+    .index("by_recipient_and_sequence", ["recipientUserId", "sequence"])
     .index("by_message", ["messageId"]),
 
   messageNotificationFeedStates: defineTable({
@@ -153,14 +160,10 @@ export default defineSchema({
     emoji: v.string(),
     messageCreatedAt: v.optional(v.number()),
     createdAt: v.number()
-  }).index("by_message", ["messageId"]).index("by_message_user_emoji", [
-    "messageId",
-    "userId",
-    "emoji"
-  ]).index("by_channel_and_message_created_at", [
-    "channelId",
-    "messageCreatedAt"
-  ]),
+  })
+    .index("by_message", ["messageId"])
+    .index("by_message_user_emoji", ["messageId", "userId", "emoji"])
+    .index("by_channel_and_message_created_at", ["channelId", "messageCreatedAt"]),
 
   dogfoodAllowlistEntries: defineTable({
     email: v.string(),

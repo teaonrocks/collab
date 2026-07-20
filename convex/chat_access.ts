@@ -34,18 +34,13 @@ const displayNameFromIdentity = (identity: ViewerIdentity, email: string): strin
   return displayNameFromEmail(email)
 }
 
-export const requireIdentity = async (
-  ctx: QueryCtx | MutationCtx | ActionCtx
-): Promise<ViewerIdentity> => {
+export const requireIdentity = async (ctx: QueryCtx | MutationCtx | ActionCtx): Promise<ViewerIdentity> => {
   const identity = await ctx.auth.getUserIdentity()
   if (identity === null) throw new Error("Not authenticated")
   return identity
 }
 
-export const isEmailAllowlisted = async (
-  ctx: QueryCtx | MutationCtx,
-  email: string
-): Promise<boolean> => {
+export const isEmailAllowlisted = async (ctx: QueryCtx | MutationCtx, email: string): Promise<boolean> => {
   const entry = await ctx.db
     .query("dogfoodAllowlistEntries")
     .withIndex("by_email", (q) => q.eq("email", email))
@@ -54,10 +49,7 @@ export const isEmailAllowlisted = async (
   return bootstrapAllowedEmails().has(email)
 }
 
-export const requireAllowedEmail = async (
-  ctx: QueryCtx | MutationCtx,
-  rawEmail: string
-): Promise<string> => {
+export const requireAllowedEmail = async (ctx: QueryCtx | MutationCtx, rawEmail: string): Promise<string> => {
   if (rawEmail === undefined || rawEmail.trim().length === 0) {
     throw new Error("Authenticated user is missing an email address")
   }
@@ -76,20 +68,19 @@ export const normalizeViewerEmail = (rawEmail: string | undefined): string => {
   return normalizeEmail(rawEmail)
 }
 
-export const getUserByTokenIdentifier = (
-  ctx: QueryCtx | MutationCtx,
-  tokenIdentifier: string
-) => ctx.db
-  .query("users")
-  .withIndex("by_token_identifier", (q) => q.eq("tokenIdentifier", tokenIdentifier))
-  .unique()
+export const getUserByTokenIdentifier = (ctx: QueryCtx | MutationCtx, tokenIdentifier: string) =>
+  ctx.db
+    .query("users")
+    .withIndex("by_token_identifier", (q) => q.eq("tokenIdentifier", tokenIdentifier))
+    .unique()
 
 export const getUserByEmail = (ctx: QueryCtx | MutationCtx, email: string) =>
-  ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", email)).unique()
+  ctx.db
+    .query("users")
+    .withIndex("by_email", (q) => q.eq("email", email))
+    .unique()
 
-export const requireAllowedCurrentUser = async (
-  ctx: QueryCtx | MutationCtx
-): Promise<Doc<"users">> => {
+export const requireAllowedCurrentUser = async (ctx: QueryCtx | MutationCtx): Promise<Doc<"users">> => {
   const identity = await requireIdentity(ctx)
   const user = await getUserByTokenIdentifier(ctx, identity.tokenIdentifier)
   if (user === null) throw new Error("Current user has not been initialized")
@@ -125,7 +116,7 @@ export const resolveWorkOsViewer = async (
     throw new Error(`Could not load WorkOS user profile (${response.status})`)
   }
 
-  const body = await response.json() as unknown
+  const body = (await response.json()) as unknown
   const rawEmail = workOsField(body, "email")
   if (rawEmail === undefined) throw new Error("WorkOS user profile is missing an email address")
   const email = normalizeViewerEmail(rawEmail)
@@ -141,9 +132,7 @@ export const requireWorkspaceMember = async (
 ) => {
   const membership = await ctx.db
     .query("workspaceMemberships")
-    .withIndex("by_workspace_user", (q) =>
-      q.eq("workspaceId", input.workspaceId).eq("userId", input.userId)
-    )
+    .withIndex("by_workspace_user", (q) => q.eq("workspaceId", input.workspaceId).eq("userId", input.userId))
     .unique()
 
   if (membership === null) throw new Error("Current user is not a member of this workspace")
@@ -167,9 +156,7 @@ export const requireChannelMember = async (
   }
   const channelMembership = await ctx.db
     .query("channelMemberships")
-    .withIndex("by_channel_user", (q) =>
-      q.eq("channelId", input.channelId).eq("userId", input.userId)
-    )
+    .withIndex("by_channel_user", (q) => q.eq("channelId", input.channelId).eq("userId", input.userId))
     .unique()
 
   if (channelMembership === null) throw new Error("Current user is not a member of this channel")

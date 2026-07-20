@@ -20,8 +20,7 @@ const signInUrl = (): string => {
   return url.toString()
 }
 
-const launchWith = (child: FakeChildProcess) =>
-  vi.fn(() => child as unknown as ChildProcessWithoutNullStreams)
+const launchWith = (child: FakeChildProcess) => vi.fn(() => child as unknown as ChildProcessWithoutNullStreams)
 
 describe.runIf(process.platform === "darwin")("native authentication session", () => {
   it("sends an ephemeral AuthKit request over stdin and returns its native callback", async () => {
@@ -52,7 +51,9 @@ describe.runIf(process.platform === "darwin")("native authentication session", (
 
   it("rejects unsafe authorization URLs and callbacks", async () => {
     const launch = vi.fn()
-    await expect(runNativeAuthSession("https://example.com/phishing", "/path/to/helper", launch)).rejects.toThrow("unsupported external URL")
+    await expect(runNativeAuthSession("https://example.com/phishing", "/path/to/helper", launch)).rejects.toThrow(
+      "unsupported external URL"
+    )
     expect(launch).not.toHaveBeenCalled()
 
     const child = new FakeChildProcess()
@@ -63,15 +64,19 @@ describe.runIf(process.platform === "darwin")("native authentication session", (
   })
 
   it("resolves development and packaged helper locations", () => {
-    expect(nativeAuthHelperExecutable({
-      appPath: "/project",
-      resourcesPath: "/Aether.app/Contents/Resources",
-      packaged: false
-    })).toBe("/project/build/native/AetherWebAuthHelper.app/Contents/MacOS/AetherWebAuthHelper")
-    expect(nativeAuthHelperExecutable({
-      appPath: "/project",
-      resourcesPath: "/Aether.app/Contents/Resources",
-      packaged: true
-    })).toBe("/Aether.app/Contents/Resources/native/AetherWebAuthHelper.app/Contents/MacOS/AetherWebAuthHelper")
+    expect(
+      nativeAuthHelperExecutable({
+        appPath: "/project",
+        resourcesPath: "/Aether.app/Contents/Resources",
+        packaged: false
+      })
+    ).toBe("/project/build/native/AetherWebAuthHelper.app/Contents/MacOS/AetherWebAuthHelper")
+    expect(
+      nativeAuthHelperExecutable({
+        appPath: "/project",
+        resourcesPath: "/Aether.app/Contents/Resources",
+        packaged: true
+      })
+    ).toBe("/Aether.app/Contents/Resources/native/AetherWebAuthHelper.app/Contents/MacOS/AetherWebAuthHelper")
   })
 })

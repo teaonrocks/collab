@@ -25,7 +25,12 @@ describe("Electron renderer security policy", () => {
   it("allows only the configured renderer location for top-level navigation", () => {
     expect(isTrustedRendererUrl(`${packagedPolicy.packagedRendererUrl}?code=abc`, packagedPolicy)).toBe(true)
     expect(isTrustedRendererUrl("file:///tmp/copied-index.html", packagedPolicy)).toBe(false)
-    expect(isTrustedRendererUrl("file://remote-host/Applications/Aether.app/Contents/Resources/app.asar/out/renderer/index.html", packagedPolicy)).toBe(false)
+    expect(
+      isTrustedRendererUrl(
+        "file://remote-host/Applications/Aether.app/Contents/Resources/app.asar/out/renderer/index.html",
+        packagedPolicy
+      )
+    ).toBe(false)
     expect(isTrustedRendererUrl("https://evil.example/app", packagedPolicy)).toBe(false)
 
     const devPolicy = {
@@ -61,25 +66,33 @@ describe("Electron renderer security policy", () => {
     const mainFrame = { url: packagedPolicy.packagedRendererUrl }
     const expectedWebContents = { mainFrame }
 
-    expect(isTrustedPrivilegedIpcSender(
-      { sender: expectedWebContents, senderFrame: mainFrame },
-      expectedWebContents,
-      packagedPolicy
-    )).toBe(true)
-    expect(isTrustedPrivilegedIpcSender(
-      { sender: expectedWebContents, senderFrame: { url: packagedPolicy.packagedRendererUrl } },
-      expectedWebContents,
-      packagedPolicy
-    )).toBe(false)
-    expect(isTrustedPrivilegedIpcSender(
-      { sender: { mainFrame }, senderFrame: mainFrame },
-      expectedWebContents,
-      packagedPolicy
-    )).toBe(false)
-    expect(isTrustedPrivilegedIpcSender(
-      { sender: expectedWebContents, senderFrame: null },
-      expectedWebContents,
-      packagedPolicy
-    )).toBe(false)
+    expect(
+      isTrustedPrivilegedIpcSender(
+        { sender: expectedWebContents, senderFrame: mainFrame },
+        expectedWebContents,
+        packagedPolicy
+      )
+    ).toBe(true)
+    expect(
+      isTrustedPrivilegedIpcSender(
+        { sender: expectedWebContents, senderFrame: { url: packagedPolicy.packagedRendererUrl } },
+        expectedWebContents,
+        packagedPolicy
+      )
+    ).toBe(false)
+    expect(
+      isTrustedPrivilegedIpcSender(
+        { sender: { mainFrame }, senderFrame: mainFrame },
+        expectedWebContents,
+        packagedPolicy
+      )
+    ).toBe(false)
+    expect(
+      isTrustedPrivilegedIpcSender(
+        { sender: expectedWebContents, senderFrame: null },
+        expectedWebContents,
+        packagedPolicy
+      )
+    ).toBe(false)
   })
 })

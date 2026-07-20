@@ -114,21 +114,21 @@ operator paths.
 
 ## Commands
 
-| Task | Command |
-| --- | --- |
-| Run the development app | `pnpm dev` |
-| Run Convex development/code sync | `pnpm convex:dev` |
-| Regenerate Convex types | `pnpm convex:codegen` |
-| Run one test file | `pnpm vitest run path/to/file.test.ts` |
-| Run all tests | `pnpm test` |
-| Typecheck the Electron/renderer project | `pnpm typecheck` |
-| Typecheck Convex and validate generated bindings | `pnpm convex:check` |
-| Run ESLint, Hooks checks, and unused production dependency analysis | `pnpm lint` |
-| Build Electron/Vite output | `pnpm build` |
-| Preview the build | `pnpm start` |
-| Build an unsigned macOS app with the native callback | `pnpm package:mac` |
-| Launch the locally packaged macOS app | `pnpm start:mac` |
-| Run the dogfood verification gate | `pnpm dogfood:verify` |
+| Task                                                                | Command                                |
+| ------------------------------------------------------------------- | -------------------------------------- |
+| Run the development app                                             | `pnpm dev`                             |
+| Run Convex development/code sync                                    | `pnpm convex:dev`                      |
+| Regenerate Convex types                                             | `pnpm convex:codegen`                  |
+| Run one test file                                                   | `pnpm vitest run path/to/file.test.ts` |
+| Run all tests                                                       | `pnpm test`                            |
+| Typecheck the Electron/renderer project                             | `pnpm typecheck`                       |
+| Typecheck Convex and validate generated bindings                    | `pnpm convex:check`                    |
+| Run ESLint, Hooks checks, and unused production dependency analysis | `pnpm lint`                            |
+| Build Electron/Vite output                                          | `pnpm build`                           |
+| Preview the build                                                   | `pnpm start`                           |
+| Build an unsigned macOS app with the native callback                | `pnpm package:mac`                     |
+| Launch the locally packaged macOS app                               | `pnpm start:mac`                       |
+| Run the dogfood verification gate                                   | `pnpm dogfood:verify`                  |
 
 Run `pnpm convex:codegen` with development-deployment access after adding or removing a Convex
 function module. The release gate detects a stale committed module map without requiring CI or a

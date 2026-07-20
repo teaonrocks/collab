@@ -1,15 +1,16 @@
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 
-const readRepoFile = (path: string): string =>
-  readFileSync(new URL(`../../${path}`, import.meta.url), "utf8")
+const readRepoFile = (path: string): string => readFileSync(new URL(`../../${path}`, import.meta.url), "utf8")
 
 describe("friend dogfood distribution", () => {
   it("ships only public renderer configuration", () => {
-    const entries = Object.fromEntries(readRepoFile(".env.example")
-      .split("\n")
-      .filter((line) => line.trim().length > 0 && !line.startsWith("#"))
-      .map((line) => line.split("=", 2)))
+    const entries = Object.fromEntries(
+      readRepoFile(".env.example")
+        .split("\n")
+        .filter((line) => line.trim().length > 0 && !line.startsWith("#"))
+        .map((line) => line.split("=", 2))
+    )
 
     expect(entries).toEqual({
       VITE_CONVEX_URL: "https://polished-bison-174.convex.cloud",
@@ -32,5 +33,4 @@ describe("friend dogfood distribution", () => {
     expect(manifest.build.appId).toBe("com.aether.chat")
     expect(manifest.build.protocols.some(({ schemes }) => schemes.includes("aether"))).toBe(true)
   })
-
 })

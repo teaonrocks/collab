@@ -35,14 +35,16 @@ describe("account registry", () => {
     expect(registry.context("window-1", "default")).toEqual({
       windowId: "window-1",
       currentAccountId: "default",
-      accounts: [{
-        id: "default",
-        displayName: "Maya Patel",
-        email: "maya@example.com",
-        avatarUrl: null,
-        current: true,
-        pending: false
-      }]
+      accounts: [
+        {
+          id: "default",
+          displayName: "Maya Patel",
+          email: "maya@example.com",
+          avatarUrl: null,
+          current: true,
+          pending: false
+        }
+      ]
     })
     expect(await readFile(path, "utf8")).not.toContain("refresh")
   })
@@ -110,12 +112,14 @@ describe("account registry", () => {
     })
     const secondAccountId = await registry.create()
 
-    await expect(registry.updateProfile(secondAccountId, {
-      userId: "user-1",
-      displayName: "Maya Patel",
-      email: "maya@example.com",
-      avatarUrl: null
-    })).resolves.toBe("default")
+    await expect(
+      registry.updateProfile(secondAccountId, {
+        userId: "user-1",
+        displayName: "Maya Patel",
+        email: "maya@example.com",
+        avatarUrl: null
+      })
+    ).resolves.toBe("default")
     expect(registry.has("default")).toBe(false)
     expect(registry.has(secondAccountId)).toBe(true)
   })

@@ -16,7 +16,16 @@ export type DropdownMenuContentProps = ComponentProps<typeof BaseMenu.Popup> & {
   readonly positionMethod?: ComponentProps<typeof BaseMenu.Positioner>["positionMethod"]
 }
 
-export function DropdownMenuContent({ className, keepMounted, sideOffset = 6, side, align, anchor, positionMethod, ...props }: DropdownMenuContentProps) {
+export function DropdownMenuContent({
+  className,
+  keepMounted,
+  sideOffset = 6,
+  side,
+  align,
+  anchor,
+  positionMethod,
+  ...props
+}: DropdownMenuContentProps) {
   return (
     <DropdownMenuPortal keepMounted={keepMounted}>
       <BaseMenu.Positioner
@@ -45,7 +54,7 @@ export function DropdownMenuItem({ className, ...props }: DropdownMenuItemProps)
   return (
     <BaseMenu.Item
       className={cn(
-        "flex min-h-control-sm cursor-default select-none items-center gap-2 rounded-control px-2 text-foreground outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[highlighted]:bg-surface-muted",
+        "flex min-h-control-sm cursor-default items-center gap-2 rounded-control px-2 text-foreground outline-none select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[highlighted]:bg-surface-muted",
         className
       )}
       {...props}
@@ -56,7 +65,9 @@ export function DropdownMenuItem({ className, ...props }: DropdownMenuItemProps)
 export type DropdownMenuLabelProps = ComponentProps<typeof BaseMenu.GroupLabel>
 
 export function DropdownMenuLabel({ className, ...props }: DropdownMenuLabelProps) {
-  return <BaseMenu.GroupLabel className={cn("px-2 py-1 text-xs font-bold text-foreground-subtle", className)} {...props} />
+  return (
+    <BaseMenu.GroupLabel className={cn("px-2 py-1 text-xs font-bold text-foreground-subtle", className)} {...props} />
+  )
 }
 
 export type DropdownMenuSeparatorProps = ComponentProps<typeof BaseMenu.Separator>

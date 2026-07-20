@@ -43,10 +43,7 @@ const messageReactionRank = (emoji: string): number => {
   return index === -1 ? MESSAGE_REACTION_EMOJIS.length : index
 }
 
-export const aggregateReactionRows = (
-  reactions: ReadonlyArray<ReactionRow>,
-  currentUserId: Id<"users">
-) => {
+export const aggregateReactionRows = (reactions: ReadonlyArray<ReactionRow>, currentUserId: Id<"users">) => {
   const counts = new Map<string, ReactionCount>()
 
   for (const reaction of reactions) {
@@ -65,9 +62,9 @@ export const aggregateReactionRows = (
     emoji,
     count: state.userIds.size,
     reactedByCurrentUser: state.reactedByCurrentUser
-  })).sort((left, right) =>
-    messageReactionRank(left.emoji) - messageReactionRank(right.emoji) ||
-    left.emoji.localeCompare(right.emoji)
+  })).sort(
+    (left, right) =>
+      messageReactionRank(left.emoji) - messageReactionRank(right.emoji) || left.emoji.localeCompare(right.emoji)
   )
 }
 
@@ -93,23 +90,31 @@ const reactionsForMessages = async (
   const byMessageId = new Map<Id<"messages">, ReturnType<typeof aggregateReactionRows>>()
   if (messages.length === 0) return byMessageId
   if (messages.length === 1) {
-    byMessageId.set(messages[0]!._id, await reactionsForMessage(ctx, {
-      messageId: messages[0]!._id,
-      currentUserId
-    }))
+    const message = messages[0]
+    if (message === undefined) return byMessageId
+    byMessageId.set(
+      message._id,
+      await reactionsForMessage(ctx, {
+        messageId: message._id,
+        currentUserId
+      })
+    )
     return byMessageId
   }
 
   const batchReady = messages.filter((message) => message.reactionBatchReady === true)
   const fallback = messages.filter((message) => message.reactionBatchReady !== true)
   if (batchReady.length > 0) {
-    const channelId = batchReady[0]!.channelId
+    const firstBatchMessage = batchReady[0]
+    if (firstBatchMessage === undefined) return byMessageId
+    const channelId = firstBatchMessage.channelId
     const createdAt = batchReady.map((message) => message.createdAt)
     const messageIds = new Set(batchReady.map((message) => message._id))
     const rows = await ctx.db
       .query("messageReactions")
       .withIndex("by_channel_and_message_created_at", (q) =>
-        q.eq("channelId", channelId)
+        q
+          .eq("channelId", channelId)
           .gte("messageCreatedAt", Math.min(...createdAt))
           .lte("messageCreatedAt", Math.max(...createdAt))
       )
@@ -124,20 +129,19 @@ const reactionsForMessages = async (
         rowsByMessageId.set(row.messageId, messageRows)
       }
       for (const message of batchReady) {
-        byMessageId.set(
-          message._id,
-          aggregateReactionRows(rowsByMessageId.get(message._id) ?? [], currentUserId)
-        )
+        byMessageId.set(message._id, aggregateReactionRows(rowsByMessageId.get(message._id) ?? [], currentUserId))
       }
     } else {
       fallback.push(...batchReady)
     }
   }
 
-  const fallbackReactions = await Promise.all(fallback.map(async (message) => [
-    message._id,
-    await reactionsForMessage(ctx, { messageId: message._id, currentUserId })
-  ] as const))
+  const fallbackReactions = await Promise.all(
+    fallback.map(
+      async (message) =>
+        [message._id, await reactionsForMessage(ctx, { messageId: message._id, currentUserId })] as const
+    )
+  )
   fallbackReactions.forEach(([messageId, reactions]) => byMessageId.set(messageId, reactions))
   return byMessageId
 }
@@ -148,10 +152,7 @@ export const trimParentPreview = (body: string): string => {
   return `${normalized.slice(0, MESSAGE_PARENT_PREVIEW_MAX_LENGTH - 3)}...`
 }
 
-const attachmentsForMessage = async (
-  ctx: QueryCtx | MutationCtx,
-  message: Doc<"messages">
-) => {
+const attachmentsForMessage = async (ctx: QueryCtx | MutationCtx, message: Doc<"messages">) => {
   const attachments = message.attachments ?? []
   const views: Array<{
     readonly storageId: Id<"_storage">
@@ -182,12 +183,14 @@ export const toMessageViews = async (
   const attachmentsByMessageId = new Map<Id<"messages">, Awaited<ReturnType<typeof attachmentsForMessage>>>()
   const parentsById = new Map<Id<"messages">, Doc<"messages"> | null>()
 
-  const missingAuthorIds = Array.from(new Set(
-    messages.filter((message) => message.authorDisplayName === undefined).map((message) => message.authorUserId)
-  ))
-  const parentIds = Array.from(new Set(
-    messages.flatMap((message) => message.parentMessageId === undefined ? [] : [message.parentMessageId])
-  ))
+  const missingAuthorIds = Array.from(
+    new Set(
+      messages.filter((message) => message.authorDisplayName === undefined).map((message) => message.authorUserId)
+    )
+  )
+  const parentIds = Array.from(
+    new Set(messages.flatMap((message) => (message.parentMessageId === undefined ? [] : [message.parentMessageId])))
+  )
 
   const [authors, reactionsByMessage, attachmentViews, parents] = await Promise.all([
     Promise.all(missingAuthorIds.map(async (authorId) => [authorId, await ctx.db.get(authorId)] as const)),
@@ -197,32 +200,26 @@ export const toMessageViews = async (
   ])
 
   authors.forEach(([authorId, author]) => authorNamesById.set(authorId, author?.displayName ?? "Unknown"))
-  reactionsByMessage.forEach((messageReactions, messageId) =>
-    reactionsByMessageId.set(messageId, messageReactions)
-  )
-  attachmentViews.forEach(([messageId, attachments]) =>
-    attachmentsByMessageId.set(messageId, attachments)
-  )
+  reactionsByMessage.forEach((messageReactions, messageId) => reactionsByMessageId.set(messageId, messageReactions))
+  attachmentViews.forEach(([messageId, attachments]) => attachmentsByMessageId.set(messageId, attachments))
   parents.forEach(([parentId, parent]) => parentsById.set(parentId, parent))
 
-  const missingParentAuthorIds = Array.from(new Set(
-    parents.flatMap(([, parent]) =>
-      parent !== null && parent.authorDisplayName === undefined && !authorNamesById.has(parent.authorUserId)
-        ? [parent.authorUserId]
-        : []
+  const missingParentAuthorIds = Array.from(
+    new Set(
+      parents.flatMap(([, parent]) =>
+        parent !== null && parent.authorDisplayName === undefined && !authorNamesById.has(parent.authorUserId)
+          ? [parent.authorUserId]
+          : []
+      )
     )
-  ))
+  )
   const parentAuthors = await Promise.all(
     missingParentAuthorIds.map(async (authorId) => [authorId, await ctx.db.get(authorId)] as const)
   )
-  parentAuthors.forEach(([authorId, author]) =>
-    authorNamesById.set(authorId, author?.displayName ?? "Unknown")
-  )
+  parentAuthors.forEach(([authorId, author]) => authorNamesById.set(authorId, author?.displayName ?? "Unknown"))
 
   return messages.map((message) => {
-    const parent = message.parentMessageId === undefined
-      ? null
-      : parentsById.get(message.parentMessageId) ?? null
+    const parent = message.parentMessageId === undefined ? null : (parentsById.get(message.parentMessageId) ?? null)
     return {
       id: message._id,
       channelId: message.channelId,
@@ -230,21 +227,22 @@ export const toMessageViews = async (
       authorDisplayName: message.authorDisplayName ?? authorNamesById.get(message.authorUserId) ?? "Unknown",
       body: message.body,
       parentMessageId: message.parentMessageId ?? null,
-      parentMessage: message.parentMessageId === undefined
-        ? null
-        : parent === null
-          ? {
-            id: message.parentMessageId,
-            authorDisplayName: "Original message",
-            bodyPreview: "",
-            deleted: true
-          }
-          : {
-            id: parent._id,
-            authorDisplayName: parent.authorDisplayName ?? authorNamesById.get(parent.authorUserId) ?? "Unknown",
-            bodyPreview: trimParentPreview(parent.body),
-            deleted: false
-          },
+      parentMessage:
+        message.parentMessageId === undefined
+          ? null
+          : parent === null
+            ? {
+                id: message.parentMessageId,
+                authorDisplayName: "Original message",
+                bodyPreview: "",
+                deleted: true
+              }
+            : {
+                id: parent._id,
+                authorDisplayName: parent.authorDisplayName ?? authorNamesById.get(parent.authorUserId) ?? "Unknown",
+                bodyPreview: trimParentPreview(parent.body),
+                deleted: false
+              },
       createdAt: message.createdAt,
       editedAt: message.editedAt ?? null,
       reactions: reactionsByMessageId.get(message._id) ?? [],
@@ -259,5 +257,6 @@ export const toMessageView = async (
   currentUserId: Id<"users">
 ): Promise<MessageView> => {
   const [view] = await toMessageViews(ctx, [message], currentUserId)
-  return view!
+  if (view === undefined) throw new Error("Message projection did not return a view")
+  return view
 }

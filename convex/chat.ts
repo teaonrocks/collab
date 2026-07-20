@@ -43,12 +43,8 @@ const ATTACHMENT_UPLOAD_TTL_MS = 24 * 60 * 60 * 1000
 const MAX_ALLOWLIST_REASON_LENGTH = 240
 // Keep Convex's literal-union type while making additions to the shared policy
 // fail typechecking until this validator covers them too.
-const [
-  thumbsUpReactionEmoji,
-  celebrationReactionEmoji,
-  eyesReactionEmoji,
-  ...unvalidatedReactionEmojis
-] = MESSAGE_REACTION_EMOJIS
+const [thumbsUpReactionEmoji, celebrationReactionEmoji, eyesReactionEmoji, ...unvalidatedReactionEmojis] =
+  MESSAGE_REACTION_EMOJIS
 const noUnvalidatedReactionEmojis: readonly [] = unvalidatedReactionEmojis
 void noUnvalidatedReactionEmojis
 const messageReactionEmoji = v.union(
@@ -67,8 +63,7 @@ const allowlistReason = (reason: string | undefined): string | undefined => {
   return normalized === undefined || normalized.length === 0 ? undefined : normalized
 }
 
-const normalizeChannelName = (name: string): string =>
-  name.trim().replace(/^#+/, "").replace(/\s+/g, "-").toLowerCase()
+const normalizeChannelName = (name: string): string => name.trim().replace(/^#+/, "").replace(/\s+/g, "-").toLowerCase()
 
 const validateChannelName = (rawName: string): string => {
   const name = normalizeChannelName(rawName)
@@ -113,7 +108,10 @@ const withDogfoodDiagnostics = async <Result>(
 }
 
 const getDefaultWorkspace = (ctx: QueryCtx | MutationCtx) =>
-  ctx.db.query("workspaces").withIndex("by_key", (q) => q.eq("key", DOGFOOD_WORKSPACE_KEY)).unique()
+  ctx.db
+    .query("workspaces")
+    .withIndex("by_key", (q) => q.eq("key", DOGFOOD_WORKSPACE_KEY))
+    .unique()
 
 const getDefaultChannel = (ctx: QueryCtx | MutationCtx, workspaceId: Id<"workspaces">) =>
   ctx.db
@@ -125,16 +123,15 @@ const listWorkspaceChannels = async (ctx: QueryCtx | MutationCtx, workspaceId: I
   const channels = await ctx.db
     .query("channels")
     .withIndex("by_workspace_kind_and_deleted_at", (q) =>
-      q.eq("workspaceId", workspaceId).eq("kind", undefined).eq("deletedAt", undefined))
+      q.eq("workspaceId", workspaceId).eq("kind", undefined).eq("deletedAt", undefined)
+    )
     .take(MAX_CHANNELS)
 
-  return channels
-    .map(toChannelView)
-    .sort((left, right) => {
-      if (left.key === DOGFOOD_CHANNEL_KEY) return -1
-      if (right.key === DOGFOOD_CHANNEL_KEY) return 1
-      return left.name.localeCompare(right.name)
-    })
+  return channels.map(toChannelView).sort((left, right) => {
+    if (left.key === DOGFOOD_CHANNEL_KEY) return -1
+    if (right.key === DOGFOOD_CHANNEL_KEY) return 1
+    return left.name.localeCompare(right.name)
+  })
 }
 
 const listVisibleWorkspaceChannels = async (
@@ -156,10 +153,7 @@ const listVisibleWorkspaceChannels = async (
   return channels.filter((channel) => channel.visibility === "public" || memberChannelIds.has(channel.id))
 }
 
-const listChannelMembers = async (
-  ctx: QueryCtx | MutationCtx,
-  channelId: Id<"channels">
-) => {
+const listChannelMembers = async (ctx: QueryCtx | MutationCtx, channelId: Id<"channels">) => {
   const memberships = await ctx.db
     .query("channelMemberships")
     .withIndex("by_channel", (q) => q.eq("channelId", channelId))
@@ -182,13 +176,12 @@ const listChannelMembers = async (
     })
   }
 
-  return members.sort((left, right) => left.displayName.localeCompare(right.displayName) || left.joinedAt - right.joinedAt)
+  return members.sort(
+    (left, right) => left.displayName.localeCompare(right.displayName) || left.joinedAt - right.joinedAt
+  )
 }
 
-const listWorkspaceMembers = async (
-  ctx: QueryCtx | MutationCtx,
-  workspaceId: Id<"workspaces">
-) => {
+const listWorkspaceMembers = async (ctx: QueryCtx | MutationCtx, workspaceId: Id<"workspaces">) => {
   const memberships = await ctx.db
     .query("workspaceMemberships")
     .withIndex("by_workspace", (q) => q.eq("workspaceId", workspaceId))
@@ -211,37 +204,42 @@ const listWorkspaceMembers = async (
     })
   }
 
-  return members.sort((left, right) => left.displayName.localeCompare(right.displayName) || left.joinedAt - right.joinedAt)
+  return members.sort(
+    (left, right) => left.displayName.localeCompare(right.displayName) || left.joinedAt - right.joinedAt
+  )
 }
 
 const listPublicWorkspaceChannelIds = async (ctx: QueryCtx | MutationCtx, workspaceId: Id<"workspaces">) => {
   const channels = await ctx.db
     .query("channels")
     .withIndex("by_workspace_kind_and_deleted_at", (q) =>
-      q.eq("workspaceId", workspaceId).eq("kind", undefined).eq("deletedAt", undefined))
+      q.eq("workspaceId", workspaceId).eq("kind", undefined).eq("deletedAt", undefined)
+    )
     .take(MAX_CHANNELS)
 
-  return channels
-    .filter((channel) => channel.visibility === "public")
-    .map((channel) => channel._id)
+  return channels.filter((channel) => channel.visibility === "public").map((channel) => channel._id)
 }
 
 const ensureDefaultSpace = async (ctx: MutationCtx, now: number) => {
   const workspace = await getDefaultWorkspace(ctx)
-  const workspaceId = workspace?._id ?? (await ctx.db.insert("workspaces", {
-    key: DOGFOOD_WORKSPACE_KEY,
-    name: DOGFOOD_WORKSPACE_NAME,
-    createdAt: now
-  }))
+  const workspaceId =
+    workspace?._id ??
+    (await ctx.db.insert("workspaces", {
+      key: DOGFOOD_WORKSPACE_KEY,
+      name: DOGFOOD_WORKSPACE_NAME,
+      createdAt: now
+    }))
 
   const channel = await getDefaultChannel(ctx, workspaceId)
-  const channelId = channel?._id ?? (await ctx.db.insert("channels", {
-    workspaceId,
-    key: DOGFOOD_CHANNEL_KEY,
-    name: DOGFOOD_CHANNEL_NAME,
-    visibility: "private",
-    createdAt: now
-  }))
+  const channelId =
+    channel?._id ??
+    (await ctx.db.insert("channels", {
+      workspaceId,
+      key: DOGFOOD_CHANNEL_KEY,
+      name: DOGFOOD_CHANNEL_NAME,
+      visibility: "private",
+      createdAt: now
+    }))
 
   return { workspaceId, channelId }
 }
@@ -383,17 +381,18 @@ const requireEligiblePrivateChannelMember = async (
 
 export const generateAttachmentUploadUrl = mutation({
   args: {},
-  handler: (ctx) => withDogfoodDiagnostics("generateAttachmentUploadUrl", {}, async () => {
-    const user = await requireAllowedCurrentUser(ctx)
-    const intentId = await ctx.db.insert("attachmentUploadIntents", {
-      uploaderUserId: user._id,
-      createdAt: Date.now()
+  handler: (ctx) =>
+    withDogfoodDiagnostics("generateAttachmentUploadUrl", {}, async () => {
+      const user = await requireAllowedCurrentUser(ctx)
+      const intentId = await ctx.db.insert("attachmentUploadIntents", {
+        uploaderUserId: user._id,
+        createdAt: Date.now()
+      })
+      await ctx.scheduler.runAfter(ATTACHMENT_UPLOAD_TTL_MS, internal.chat.cleanupAttachmentUploadIntent, {
+        intentId
+      })
+      return { uploadUrl: await ctx.storage.generateUploadUrl(), intentId }
     })
-    await ctx.scheduler.runAfter(ATTACHMENT_UPLOAD_TTL_MS, internal.chat.cleanupAttachmentUploadIntent, {
-      intentId
-    })
-    return { uploadUrl: await ctx.storage.generateUploadUrl(), intentId }
-  })
 })
 
 export const registerAttachmentUpload = mutation({
@@ -402,48 +401,51 @@ export const registerAttachmentUpload = mutation({
     storageId: v.id("_storage"),
     contentType: v.string()
   },
-  handler: (ctx, args) => withDogfoodDiagnostics("registerAttachmentUpload", { storageId: args.storageId }, async () => {
-    const user = await requireAllowedCurrentUser(ctx)
-    const existing = await ctx.db.query("attachmentUploads")
-      .withIndex("by_storage_id", (q) => q.eq("storageId", args.storageId)).unique()
-    if (existing !== null) {
-      if (existing.uploaderUserId !== user._id) throw new Error("Attachment upload is already registered")
-      if (existing.contentType !== args.contentType.toLowerCase()) {
-        throw new Error("Attachment upload is already registered with a different content type")
+  handler: (ctx, args) =>
+    withDogfoodDiagnostics("registerAttachmentUpload", { storageId: args.storageId }, async () => {
+      const user = await requireAllowedCurrentUser(ctx)
+      const existing = await ctx.db
+        .query("attachmentUploads")
+        .withIndex("by_storage_id", (q) => q.eq("storageId", args.storageId))
+        .unique()
+      if (existing !== null) {
+        if (existing.uploaderUserId !== user._id) throw new Error("Attachment upload is already registered")
+        if (existing.contentType !== args.contentType.toLowerCase()) {
+          throw new Error("Attachment upload is already registered with a different content type")
+        }
+        return { status: "registered" as const, storageId: args.storageId }
       }
-      return { status: "registered" as const, storageId: args.storageId }
-    }
 
-    const intent = await ctx.db.get(args.intentId)
-    if (intent === null || intent.uploaderUserId !== user._id) {
-      throw new Error("Attachment upload intent is missing or is not owned by the current user")
-    }
+      const intent = await ctx.db.get(args.intentId)
+      if (intent === null || intent.uploaderUserId !== user._id) {
+        throw new Error("Attachment upload intent is missing or is not owned by the current user")
+      }
 
-    const metadata = await ctx.db.system.get("_storage", args.storageId)
-    if (metadata === null) throw new Error("Attachment upload was not found")
-    let contentType: string
-    try {
-      contentType = validateAttachmentMetadata(metadata, args.contentType)
-    } catch (cause) {
-      await ctx.storage.delete(args.storageId)
+      const metadata = await ctx.db.system.get("_storage", args.storageId)
+      if (metadata === null) throw new Error("Attachment upload was not found")
+      let contentType: string
+      try {
+        contentType = validateAttachmentMetadata(metadata, args.contentType)
+      } catch (cause) {
+        await ctx.storage.delete(args.storageId)
+        await ctx.db.delete(intent._id)
+        return {
+          status: "rejected" as const,
+          reason: cause instanceof Error ? cause.message : "Attachment upload was rejected"
+        }
+      }
+      await ctx.db.insert("attachmentUploads", {
+        storageId: args.storageId,
+        uploaderUserId: user._id,
+        contentType,
+        createdAt: Date.now()
+      })
       await ctx.db.delete(intent._id)
-      return {
-        status: "rejected" as const,
-        reason: cause instanceof Error ? cause.message : "Attachment upload was rejected"
-      }
-    }
-    await ctx.db.insert("attachmentUploads", {
-      storageId: args.storageId,
-      uploaderUserId: user._id,
-      contentType,
-      createdAt: Date.now()
+      await ctx.scheduler.runAfter(ATTACHMENT_UPLOAD_TTL_MS, internal.chat.cleanupAbandonedAttachmentUpload, {
+        storageId: args.storageId
+      })
+      return { status: "registered" as const, storageId: args.storageId }
     })
-    await ctx.db.delete(intent._id)
-    await ctx.scheduler.runAfter(ATTACHMENT_UPLOAD_TTL_MS, internal.chat.cleanupAbandonedAttachmentUpload, {
-      storageId: args.storageId
-    })
-    return { status: "registered" as const, storageId: args.storageId }
-  })
 })
 
 export const deleteAttachmentUpload = mutation({
@@ -451,25 +453,29 @@ export const deleteAttachmentUpload = mutation({
     storageId: v.id("_storage"),
     intentId: v.optional(v.id("attachmentUploadIntents"))
   },
-  handler: (ctx, args) => withDogfoodDiagnostics("deleteAttachmentUpload", { storageId: args.storageId }, async () => {
-    const user = await requireAllowedCurrentUser(ctx)
-    const upload = await ctx.db.query("attachmentUploads")
-      .withIndex("by_storage_id", (q) => q.eq("storageId", args.storageId)).unique()
-    if (upload === null) {
-      if (args.intentId === undefined) return { storageId: args.storageId }
-      const intent = await ctx.db.get(args.intentId)
-      if (intent === null) return { storageId: args.storageId }
-      if (intent.uploaderUserId !== user._id) throw new Error("Only the uploader can delete this upload")
+  handler: (ctx, args) =>
+    withDogfoodDiagnostics("deleteAttachmentUpload", { storageId: args.storageId }, async () => {
+      const user = await requireAllowedCurrentUser(ctx)
+      const upload = await ctx.db
+        .query("attachmentUploads")
+        .withIndex("by_storage_id", (q) => q.eq("storageId", args.storageId))
+        .unique()
+      if (upload === null) {
+        if (args.intentId === undefined) return { storageId: args.storageId }
+        const intent = await ctx.db.get(args.intentId)
+        if (intent === null) return { storageId: args.storageId }
+        if (intent.uploaderUserId !== user._id) throw new Error("Only the uploader can delete this upload")
+        await ctx.storage.delete(args.storageId)
+        await ctx.db.delete(intent._id)
+        return { storageId: args.storageId }
+      }
+      if (upload.uploaderUserId !== user._id) throw new Error("Only the uploader can delete this upload")
+      if (upload.claimedMessageId !== undefined)
+        throw new Error("Claimed attachments cannot be deleted as abandoned uploads")
       await ctx.storage.delete(args.storageId)
-      await ctx.db.delete(intent._id)
+      await ctx.db.delete(upload._id)
       return { storageId: args.storageId }
-    }
-    if (upload.uploaderUserId !== user._id) throw new Error("Only the uploader can delete this upload")
-    if (upload.claimedMessageId !== undefined) throw new Error("Claimed attachments cannot be deleted as abandoned uploads")
-    await ctx.storage.delete(args.storageId)
-    await ctx.db.delete(upload._id)
-    return { storageId: args.storageId }
-  })
+    })
 })
 
 export const cleanupAttachmentUploadIntent = internalMutation({
@@ -484,8 +490,10 @@ export const cleanupAttachmentUploadIntent = internalMutation({
 export const cleanupAbandonedAttachmentUpload = internalMutation({
   args: { storageId: v.id("_storage") },
   handler: async (ctx, args) => {
-    const upload = await ctx.db.query("attachmentUploads")
-      .withIndex("by_storage_id", (q) => q.eq("storageId", args.storageId)).unique()
+    const upload = await ctx.db
+      .query("attachmentUploads")
+      .withIndex("by_storage_id", (q) => q.eq("storageId", args.storageId))
+      .unique()
     if (upload === null || upload.claimedMessageId !== undefined) return null
     await ctx.storage.delete(args.storageId)
     await ctx.db.delete(upload._id)
@@ -500,69 +508,75 @@ export const administerDogfoodAllowlist = internalMutation({
     action: v.union(v.literal("add"), v.literal("remove")),
     reason: v.optional(v.string())
   },
-  handler: (ctx, args) => withDogfoodDiagnostics("administerDogfoodAllowlist", {
-    action: args.action,
-    reasonLength: args.reason?.trim().length ?? 0
-  }, async () => {
-    const operator = args.operator.trim().replace(/\s+/g, " ")
-    if (operator.length === 0 || operator.length > 120) {
-      throw new Error("Operator identity must contain between 1 and 120 characters")
-    }
-    const email = normalizeViewerEmail(args.email)
-    const now = Date.now()
-    const reason = allowlistReason(args.reason)
-    const existing = await ctx.db
-      .query("dogfoodAllowlistEntries")
-      .withIndex("by_email", (q) => q.eq("email", email))
-      .unique()
+  handler: (ctx, args) =>
+    withDogfoodDiagnostics(
+      "administerDogfoodAllowlist",
+      {
+        action: args.action,
+        reasonLength: args.reason?.trim().length ?? 0
+      },
+      async () => {
+        const operator = args.operator.trim().replace(/\s+/g, " ")
+        if (operator.length === 0 || operator.length > 120) {
+          throw new Error("Operator identity must contain between 1 and 120 characters")
+        }
+        const email = normalizeViewerEmail(args.email)
+        const now = Date.now()
+        const reason = allowlistReason(args.reason)
+        const existing = await ctx.db
+          .query("dogfoodAllowlistEntries")
+          .withIndex("by_email", (q) => q.eq("email", email))
+          .unique()
 
-    if (existing === null) {
-      await ctx.db.insert("dogfoodAllowlistEntries", {
-        email,
-        active: args.action === "add",
-        createdAt: now,
-        createdBy: operator,
-        updatedAt: now,
-        updatedBy: operator
-      })
-    } else {
-      await ctx.db.patch(existing._id, {
-        active: args.action === "add",
-        updatedAt: now,
-        updatedBy: operator
-      })
-    }
+        if (existing === null) {
+          await ctx.db.insert("dogfoodAllowlistEntries", {
+            email,
+            active: args.action === "add",
+            createdAt: now,
+            createdBy: operator,
+            updatedAt: now,
+            updatedBy: operator
+          })
+        } else {
+          await ctx.db.patch(existing._id, {
+            active: args.action === "add",
+            updatedAt: now,
+            updatedBy: operator
+          })
+        }
 
-    await ctx.db.insert("dogfoodAllowlistAudit", {
-      email,
-      action: args.action,
-      operator,
-      ...(reason === undefined ? {} : { reason }),
-      createdAt: now
-    })
+        await ctx.db.insert("dogfoodAllowlistAudit", {
+          email,
+          action: args.action,
+          operator,
+          ...(reason === undefined ? {} : { reason }),
+          createdAt: now
+        })
 
-    return { email, active: args.action === "add" }
-  })
+        return { email, active: args.action === "add" }
+      }
+    )
 })
 
 export const ensureViewer = action({
   args: {},
-  handler: (ctx) => withDogfoodDiagnostics("ensureViewer", {}, async () => {
-    const identity = await requireIdentity(ctx)
-    const { email, displayName } = await resolveWorkOsViewer(identity)
-    const result: {
-      readonly userId: Id<"users">
-      readonly workspaceId: Id<"workspaces">
-      readonly channelId: Id<"channels">
-      readonly displayName: string
-    } = await ctx.runMutation(internal.chat.ensureViewerForIdentity, {
-      tokenIdentifier: identity.tokenIdentifier,
-      email,
-      displayName
-    })
+  handler: (ctx) =>
+    withDogfoodDiagnostics("ensureViewer", {}, async () => {
+      const identity = await requireIdentity(ctx)
+      const { email, displayName } = await resolveWorkOsViewer(identity)
+      const result: {
+        readonly userId: Id<"users">
+        readonly workspaceId: Id<"workspaces">
+        readonly channelId: Id<"channels">
+        readonly displayName: string
+      } = await ctx.runMutation(internal.chat.ensureViewerForIdentity, {
+        tokenIdentifier: identity.tokenIdentifier,
+        email,
+        displayName
+      })
 
-    return result
-  })
+      return result
+    })
 })
 
 export const ensureViewerForIdentity = internalMutation({
@@ -577,16 +591,18 @@ export const ensureViewerForIdentity = internalMutation({
     const existingUser =
       (await getUserByTokenIdentifier(ctx, args.tokenIdentifier)) ?? (await getUserByEmail(ctx, email))
 
-    const username = existingUser?.username ?? await seededUsername(ctx, email)
-    const userId = existingUser?._id ?? (await ctx.db.insert("users", {
-      tokenIdentifier: args.tokenIdentifier,
-      email,
-      displayName: args.displayName,
-      username,
-      directMessagePreference: "mutuals",
-      createdAt: now,
-      updatedAt: now
-    }))
+    const username = existingUser?.username ?? (await seededUsername(ctx, email))
+    const userId =
+      existingUser?._id ??
+      (await ctx.db.insert("users", {
+        tokenIdentifier: args.tokenIdentifier,
+        email,
+        displayName: args.displayName,
+        username,
+        directMessagePreference: "mutuals",
+        createdAt: now,
+        updatedAt: now
+      }))
 
     if (
       existingUser !== null &&
@@ -612,121 +628,130 @@ export const ensureViewerForIdentity = internalMutation({
 
 export const defaultWorkspace = query({
   args: {},
-  handler: (ctx) => withDogfoodDiagnostics("defaultWorkspace", {}, async () => {
-    const user = await requireAllowedCurrentUser(ctx)
-    const workspace = await getDefaultWorkspace(ctx)
+  handler: (ctx) =>
+    withDogfoodDiagnostics("defaultWorkspace", {}, async () => {
+      const user = await requireAllowedCurrentUser(ctx)
+      const workspace = await getDefaultWorkspace(ctx)
 
-    if (workspace === null) return null
+      if (workspace === null) return null
 
-    const channel = await getDefaultChannel(ctx, workspace._id)
-    if (channel === null) return null
+      const channel = await getDefaultChannel(ctx, workspace._id)
+      if (channel === null) return null
 
-    await requireChannelMember(ctx, { channelId: channel._id, userId: user._id })
+      await requireChannelMember(ctx, { channelId: channel._id, userId: user._id })
 
-    return {
-      currentUser: { id: user._id, displayName: user.displayName },
-      workspace: { id: workspace._id, name: workspace.name },
-      channel: { id: channel._id, name: channel.name, visibility: channel.visibility }
-    }
-  })
+      return {
+        currentUser: { id: user._id, displayName: user.displayName },
+        workspace: { id: workspace._id, name: workspace.name },
+        channel: { id: channel._id, name: channel.name, visibility: channel.visibility }
+      }
+    })
 })
 
 export const channels = query({
   args: {
     workspaceId: v.id("workspaces")
   },
-  handler: (ctx, args) => withDogfoodDiagnostics("channels", { workspaceId: args.workspaceId }, async () => {
-    const user = await requireAllowedCurrentUser(ctx)
-    const workspace = await ctx.db.get(args.workspaceId)
-    if (workspace === null) return []
+  handler: (ctx, args) =>
+    withDogfoodDiagnostics("channels", { workspaceId: args.workspaceId }, async () => {
+      const user = await requireAllowedCurrentUser(ctx)
+      const workspace = await ctx.db.get(args.workspaceId)
+      if (workspace === null) return []
 
-    await requireWorkspaceMember(ctx, { workspaceId: workspace._id, userId: user._id })
-    return listVisibleWorkspaceChannels(ctx, { workspaceId: workspace._id, userId: user._id })
-  })
+      await requireWorkspaceMember(ctx, { workspaceId: workspace._id, userId: user._id })
+      return listVisibleWorkspaceChannels(ctx, { workspaceId: workspace._id, userId: user._id })
+    })
 })
 
 export const conversationIndicators = query({
   args: {
     workspaceId: v.id("workspaces")
   },
-  handler: (ctx, args) => withDogfoodDiagnostics("conversationIndicators", { workspaceId: args.workspaceId }, async () => {
-    const user = await requireAllowedCurrentUser(ctx)
-    const workspace = await ctx.db.get(args.workspaceId)
-    if (workspace === null) return []
+  handler: (ctx, args) =>
+    withDogfoodDiagnostics("conversationIndicators", { workspaceId: args.workspaceId }, async () => {
+      const user = await requireAllowedCurrentUser(ctx)
+      const workspace = await ctx.db.get(args.workspaceId)
+      if (workspace === null) return []
 
-    await requireWorkspaceMember(ctx, { workspaceId: workspace._id, userId: user._id })
-    const workspaceChannels = await listWorkspaceChannels(ctx, workspace._id)
-    const conversations: Array<{
-      readonly channelId: Id<"channels">
-      readonly membership: Doc<"channelMemberships">
-      readonly kind: "workspace" | "direct"
-    }> = []
-    for (const channel of workspaceChannels) {
-      const membership = await ctx.db
-        .query("channelMemberships")
-        .withIndex("by_channel_user", (q) => q.eq("channelId", channel.id).eq("userId", user._id))
-        .unique()
-      if (membership !== null) conversations.push({ channelId: channel.id, membership, kind: "workspace" })
-    }
-    const directConversations = await listDirectConversationRecords(ctx, user._id)
-    conversations.push(...directConversations.map(({ channel, membership }) => ({
-      channelId: channel._id,
-      membership,
-      kind: "direct" as const
-    })))
-    const indicators: Array<{
-      readonly channelId: Id<"channels">
-      readonly indicator: "unread" | "mentioned"
-    }> = []
+      await requireWorkspaceMember(ctx, { workspaceId: workspace._id, userId: user._id })
+      const workspaceChannels = await listWorkspaceChannels(ctx, workspace._id)
+      const conversations: Array<{
+        readonly channelId: Id<"channels">
+        readonly membership: Doc<"channelMemberships">
+        readonly kind: "workspace" | "direct"
+      }> = []
+      for (const channel of workspaceChannels) {
+        const membership = await ctx.db
+          .query("channelMemberships")
+          .withIndex("by_channel_user", (q) => q.eq("channelId", channel.id).eq("userId", user._id))
+          .unique()
+        if (membership !== null) conversations.push({ channelId: channel.id, membership, kind: "workspace" })
+      }
+      const directConversations = await listDirectConversationRecords(ctx, user._id)
+      conversations.push(
+        ...directConversations.map(({ channel, membership }) => ({
+          channelId: channel._id,
+          membership,
+          kind: "direct" as const
+        }))
+      )
+      const indicators: Array<{
+        readonly channelId: Id<"channels">
+        readonly indicator: "unread" | "mentioned"
+      }> = []
 
-    for (const { channelId, membership, kind } of conversations) {
-      const lastReadAt = membership.lastReadAt ?? membership.createdAt
-      const newestUnread = await ctx.db
-        .query("messages")
-        .withIndex("by_channel_created_at", (q) => q.eq("channelId", channelId).gt("createdAt", lastReadAt))
-        .order("desc")
-        .first()
-      if (newestUnread === null) continue
+      for (const { channelId, membership, kind } of conversations) {
+        const lastReadAt = membership.lastReadAt ?? membership.createdAt
+        const newestUnread = await ctx.db
+          .query("messages")
+          .withIndex("by_channel_created_at", (q) => q.eq("channelId", channelId).gt("createdAt", lastReadAt))
+          .order("desc")
+          .first()
+        if (newestUnread === null) continue
 
-      // Pre-index history intentionally degrades to `unread` rather than scanning an
-      // unbounded message range. New mentions are maintained in messageMentions.
-      const mentioned = kind === "workspace" && await ctx.db
-        .query("messageMentions")
-        .withIndex("by_channel_user_created_at", (q) =>
-          q.eq("channelId", channelId).eq("userId", user._id).gt("messageCreatedAt", lastReadAt))
-        .first() !== null
-      indicators.push({ channelId, indicator: mentioned ? "mentioned" : "unread" })
-    }
+        // Pre-index history intentionally degrades to `unread` rather than scanning an
+        // unbounded message range. New mentions are maintained in messageMentions.
+        const mentioned =
+          kind === "workspace" &&
+          (await ctx.db
+            .query("messageMentions")
+            .withIndex("by_channel_user_created_at", (q) =>
+              q.eq("channelId", channelId).eq("userId", user._id).gt("messageCreatedAt", lastReadAt)
+            )
+            .first()) !== null
+        indicators.push({ channelId, indicator: mentioned ? "mentioned" : "unread" })
+      }
 
-    return indicators
-  })
+      return indicators
+    })
 })
 
 export const ensureChannelMember = mutation({
   args: {
     channelId: v.id("channels")
   },
-  handler: (ctx, args) => withDogfoodDiagnostics("ensureChannelMember", { channelId: args.channelId }, async () => {
-    const user = await requireAllowedCurrentUser(ctx)
-    const channel = await ctx.db.get(args.channelId)
-    if (channel === null) throw new Error("Channel not found")
-    if (channel.kind === "direct") {
-      await requireChannelMember(ctx, { channelId: channel._id, userId: user._id })
-      return toChannelView(channel)
-    }
+  handler: (ctx, args) =>
+    withDogfoodDiagnostics("ensureChannelMember", { channelId: args.channelId }, async () => {
+      const user = await requireAllowedCurrentUser(ctx)
+      const channel = await ctx.db.get(args.channelId)
+      if (channel === null) throw new Error("Channel not found")
+      if (channel.kind === "direct") {
+        await requireChannelMember(ctx, { channelId: channel._id, userId: user._id })
+        return toChannelView(channel)
+      }
 
-    if (channel.kind !== "direct") {
-      if (channel.workspaceId === undefined) throw new Error("Channel is missing its workspace")
-      await requireWorkspaceMember(ctx, { workspaceId: channel.workspaceId, userId: user._id })
-    }
-    if (channel.visibility !== "public") {
-      await requireChannelMember(ctx, { channelId: channel._id, userId: user._id })
-      return toChannelView(channel)
-    }
+      if (channel.kind !== "direct") {
+        if (channel.workspaceId === undefined) throw new Error("Channel is missing its workspace")
+        await requireWorkspaceMember(ctx, { workspaceId: channel.workspaceId, userId: user._id })
+      }
+      if (channel.visibility !== "public") {
+        await requireChannelMember(ctx, { channelId: channel._id, userId: user._id })
+        return toChannelView(channel)
+      }
 
-    await ensureChannelMembership(ctx, { channelId: channel._id, userId: user._id, now: Date.now() })
-    return toChannelView(channel)
-  })
+      await ensureChannelMembership(ctx, { channelId: channel._id, userId: user._id, now: Date.now() })
+      return toChannelView(channel)
+    })
 })
 
 export const markChannelRead = mutation({
@@ -734,33 +759,39 @@ export const markChannelRead = mutation({
     channelId: v.id("channels"),
     readThroughMessageId: v.id("messages")
   },
-  handler: (ctx, args) => withDogfoodDiagnostics("markChannelRead", {
-    channelId: args.channelId,
-    readThroughMessageId: args.readThroughMessageId
-  }, async () => {
-    const user = await requireAllowedCurrentUser(ctx)
-    const channel = await ctx.db.get(args.channelId)
-    if (channel === null) throw new Error("Channel not found")
+  handler: (ctx, args) =>
+    withDogfoodDiagnostics(
+      "markChannelRead",
+      {
+        channelId: args.channelId,
+        readThroughMessageId: args.readThroughMessageId
+      },
+      async () => {
+        const user = await requireAllowedCurrentUser(ctx)
+        const channel = await ctx.db.get(args.channelId)
+        if (channel === null) throw new Error("Channel not found")
 
-    if (channel.kind !== "direct") {
-      if (channel.workspaceId === undefined) throw new Error("Channel is missing its workspace")
-      await requireWorkspaceMember(ctx, { workspaceId: channel.workspaceId, userId: user._id })
-    }
-    const membership = await ctx.db
-      .query("channelMemberships")
-      .withIndex("by_channel_user", (q) => q.eq("channelId", args.channelId).eq("userId", user._id))
-      .unique()
-    if (membership === null) throw new Error("Current user is not a member of this channel")
+        if (channel.kind !== "direct") {
+          if (channel.workspaceId === undefined) throw new Error("Channel is missing its workspace")
+          await requireWorkspaceMember(ctx, { workspaceId: channel.workspaceId, userId: user._id })
+        }
+        const membership = await ctx.db
+          .query("channelMemberships")
+          .withIndex("by_channel_user", (q) => q.eq("channelId", args.channelId).eq("userId", user._id))
+          .unique()
+        if (membership === null) throw new Error("Current user is not a member of this channel")
 
-    const readThroughMessage = await ctx.db.get(args.readThroughMessageId)
-    if (readThroughMessage === null || readThroughMessage.channelId !== args.channelId) {
-      throw new Error("Read-through message not found in this channel")
-    }
+        const readThroughMessage = await ctx.db.get(args.readThroughMessageId)
+        if (readThroughMessage === null || readThroughMessage.channelId !== args.channelId) {
+          throw new Error("Read-through message not found in this channel")
+        }
 
-    if ((membership.lastReadAt ?? membership.createdAt) >= readThroughMessage.createdAt) return toChannelView(channel)
-    await ctx.db.patch(membership._id, { lastReadAt: readThroughMessage.createdAt })
-    return toChannelView(channel)
-  })
+        if ((membership.lastReadAt ?? membership.createdAt) >= readThroughMessage.createdAt)
+          return toChannelView(channel)
+        await ctx.db.patch(membership._id, { lastReadAt: readThroughMessage.createdAt })
+        return toChannelView(channel)
+      }
+    )
 })
 
 export const createChannel = mutation({
@@ -769,159 +800,174 @@ export const createChannel = mutation({
     visibility: v.optional(v.union(v.literal("public"), v.literal("private"))),
     initialMemberIds: v.optional(v.array(v.id("users")))
   },
-  handler: (ctx, args) => withDogfoodDiagnostics("createChannel", {
-    visibility: args.visibility ?? "public",
-    nameLength: args.name.trim().length
-  }, async () => {
-    const user = await requireAllowedCurrentUser(ctx)
-    const workspace = await getDefaultWorkspace(ctx)
-    if (workspace === null) throw new Error("Workspace not found")
+  handler: (ctx, args) =>
+    withDogfoodDiagnostics(
+      "createChannel",
+      {
+        visibility: args.visibility ?? "public",
+        nameLength: args.name.trim().length
+      },
+      async () => {
+        const user = await requireAllowedCurrentUser(ctx)
+        const workspace = await getDefaultWorkspace(ctx)
+        if (workspace === null) throw new Error("Workspace not found")
 
-    await requireWorkspaceMember(ctx, { workspaceId: workspace._id, userId: user._id })
+        await requireWorkspaceMember(ctx, { workspaceId: workspace._id, userId: user._id })
 
-    const visibility = args.visibility ?? "public"
-    const initialMemberIds = [...new Set(args.initialMemberIds ?? [])]
-    if (visibility === "public" && initialMemberIds.length > 0) {
-      throw new Error("Initial members can only be specified for private channels")
-    }
-    if (new Set<Id<"users">>([user._id, ...initialMemberIds]).size > MAX_PRIVATE_CHANNEL_MEMBERS) {
-      throw new Error(`Private channels can contain at most ${MAX_PRIVATE_CHANNEL_MEMBERS} initial members`)
-    }
-    if (visibility === "private") {
-      for (const userId of initialMemberIds) {
-        await requireEligiblePrivateChannelMember(ctx, { workspaceId: workspace._id, userId })
-      }
-    }
+        const visibility = args.visibility ?? "public"
+        const initialMemberIds = [...new Set(args.initialMemberIds ?? [])]
+        if (visibility === "public" && initialMemberIds.length > 0) {
+          throw new Error("Initial members can only be specified for private channels")
+        }
+        if (new Set<Id<"users">>([user._id, ...initialMemberIds]).size > MAX_PRIVATE_CHANNEL_MEMBERS) {
+          throw new Error(`Private channels can contain at most ${MAX_PRIVATE_CHANNEL_MEMBERS} initial members`)
+        }
+        if (visibility === "private") {
+          for (const userId of initialMemberIds) {
+            await requireEligiblePrivateChannelMember(ctx, { workspaceId: workspace._id, userId })
+          }
+        }
 
-    const name = validateChannelName(args.name)
+        const name = validateChannelName(args.name)
 
-    const key = channelKeyFromName(name)
-    const existing = await ctx.db
-      .query("channels")
-      .withIndex("by_workspace_key", (q) => q.eq("workspaceId", workspace._id).eq("key", key))
-      .unique()
-    if (existing !== null) throw new Error("Channel already exists")
+        const key = channelKeyFromName(name)
+        const existing = await ctx.db
+          .query("channels")
+          .withIndex("by_workspace_key", (q) => q.eq("workspaceId", workspace._id).eq("key", key))
+          .unique()
+        if (existing !== null) throw new Error("Channel already exists")
 
-    const existingChannels = await ctx.db
-      .query("channels")
-      .withIndex("by_workspace_kind_and_deleted_at", (q) =>
-        q.eq("workspaceId", workspace._id).eq("kind", undefined).eq("deletedAt", undefined))
-      .take(MAX_CHANNELS)
-    if (existingChannels.length >= MAX_CHANNELS) {
-      throw new Error(`Workspaces can contain at most ${MAX_CHANNELS} channels`)
-    }
+        const existingChannels = await ctx.db
+          .query("channels")
+          .withIndex("by_workspace_kind_and_deleted_at", (q) =>
+            q.eq("workspaceId", workspace._id).eq("kind", undefined).eq("deletedAt", undefined)
+          )
+          .take(MAX_CHANNELS)
+        if (existingChannels.length >= MAX_CHANNELS) {
+          throw new Error(`Workspaces can contain at most ${MAX_CHANNELS} channels`)
+        }
 
-    const now = Date.now()
-    const channelId = await ctx.db.insert("channels", {
-      workspaceId: workspace._id,
-      key,
-      name,
-      visibility,
-      createdByUserId: user._id,
-      createdAt: now
-    })
+        const now = Date.now()
+        const channelId = await ctx.db.insert("channels", {
+          workspaceId: workspace._id,
+          key,
+          name,
+          visibility,
+          createdByUserId: user._id,
+          createdAt: now
+        })
 
-    await ctx.db.insert("channelMemberships", {
-      channelId,
-      userId: user._id,
-      role: visibility === "private" ? "admin" : "member",
-      createdAt: now,
-      lastReadAt: now
-    })
-
-    if (visibility === "private") {
-      for (const userId of initialMemberIds) {
-        if (userId === user._id) continue
         await ctx.db.insert("channelMemberships", {
           channelId,
-          userId,
-          role: "member",
+          userId: user._id,
+          role: visibility === "private" ? "admin" : "member",
           createdAt: now,
           lastReadAt: now
         })
-      }
-    }
 
-    const channel = await ctx.db.get(channelId)
-    if (channel === null) throw new Error("Channel not found after insert")
-    return toChannelView(channel)
-  })
+        if (visibility === "private") {
+          for (const userId of initialMemberIds) {
+            if (userId === user._id) continue
+            await ctx.db.insert("channelMemberships", {
+              channelId,
+              userId,
+              role: "member",
+              createdAt: now,
+              lastReadAt: now
+            })
+          }
+        }
+
+        const channel = await ctx.db.get(channelId)
+        if (channel === null) throw new Error("Channel not found after insert")
+        return toChannelView(channel)
+      }
+    )
 })
 
 export const editChannel = mutation({
   args: { channelId: v.id("channels"), name: v.string() },
-  handler: (ctx, args) => withDogfoodDiagnostics("editChannel", { channelId: args.channelId }, async () => {
-    const user = await requireAllowedCurrentUser(ctx)
-    const channel = await requireChannelManager(ctx, { channelId: args.channelId, userId: user._id })
-    if (channel.key === DOGFOOD_CHANNEL_KEY) throw new Error("The default channel cannot be renamed")
-    const name = validateChannelName(args.name)
-    const key = channelKeyFromName(name)
-    const existing = await ctx.db
-      .query("channels")
-      .withIndex("by_workspace_key", (q) => q.eq("workspaceId", channel.workspaceId).eq("key", key))
-      .unique()
-    if (existing !== null && existing._id !== channel._id) {
-      throw new Error("Channel already exists")
-    }
-    await ctx.db.patch(channel._id, { key, name })
-    const updated = await ctx.db.get(channel._id)
-    if (updated === null) throw new Error("Channel not found after update")
-    return toChannelView(updated)
-  })
+  handler: (ctx, args) =>
+    withDogfoodDiagnostics("editChannel", { channelId: args.channelId }, async () => {
+      const user = await requireAllowedCurrentUser(ctx)
+      const channel = await requireChannelManager(ctx, { channelId: args.channelId, userId: user._id })
+      if (channel.key === DOGFOOD_CHANNEL_KEY) throw new Error("The default channel cannot be renamed")
+      const name = validateChannelName(args.name)
+      const key = channelKeyFromName(name)
+      const existing = await ctx.db
+        .query("channels")
+        .withIndex("by_workspace_key", (q) => q.eq("workspaceId", channel.workspaceId).eq("key", key))
+        .unique()
+      if (existing !== null && existing._id !== channel._id) {
+        throw new Error("Channel already exists")
+      }
+      await ctx.db.patch(channel._id, { key, name })
+      const updated = await ctx.db.get(channel._id)
+      if (updated === null) throw new Error("Channel not found after update")
+      return toChannelView(updated)
+    })
 })
 
 export const deleteChannel = mutation({
   args: { channelId: v.id("channels") },
-  handler: (ctx, args) => withDogfoodDiagnostics("deleteChannel", { channelId: args.channelId }, async () => {
-    const user = await requireAllowedCurrentUser(ctx)
-    const channel = await requireChannelManager(ctx, { channelId: args.channelId, userId: user._id })
-    if (channel.key === DOGFOOD_CHANNEL_KEY) throw new Error("The default channel cannot be deleted")
-    await ctx.db.patch(channel._id, {
-      deletedAt: Date.now(),
-      key: `${channel.key}-deleted-${channel._id}`
+  handler: (ctx, args) =>
+    withDogfoodDiagnostics("deleteChannel", { channelId: args.channelId }, async () => {
+      const user = await requireAllowedCurrentUser(ctx)
+      const channel = await requireChannelManager(ctx, { channelId: args.channelId, userId: user._id })
+      if (channel.key === DOGFOOD_CHANNEL_KEY) throw new Error("The default channel cannot be deleted")
+      await ctx.db.patch(channel._id, {
+        deletedAt: Date.now(),
+        key: `${channel.key}-deleted-${channel._id}`
+      })
+      return null
     })
-    return null
-  })
 })
 
 export const eligiblePrivateChannelMembers = query({
   args: {
     channelId: v.optional(v.id("channels"))
   },
-  handler: (ctx, args) => withDogfoodDiagnostics("eligiblePrivateChannelMembers", {
-    channelId: args.channelId ?? "new-channel"
-  }, async () => {
-    const actor = await requireAllowedCurrentUser(ctx)
-    const channel = args.channelId === undefined
-      ? null
-      : await requirePrivateChannelAdmin(ctx, { channelId: args.channelId, userId: actor._id })
-    const workspace = channel === null ? await getDefaultWorkspace(ctx) : null
-    const workspaceId = channel?.workspaceId ?? workspace?._id
-    if (workspaceId === undefined) throw new Error("Workspace not found")
-    await requireWorkspaceMember(ctx, { workspaceId, userId: actor._id })
-    const workspaceMemberships = await ctx.db
-      .query("workspaceMemberships")
-      .withIndex("by_workspace", (q) => q.eq("workspaceId", workspaceId))
-      .take(MAX_ELIGIBLE_PRIVATE_CHANNEL_MEMBER_SCAN)
-    const channelMemberships = channel === null
-      ? []
-      : await ctx.db
-          .query("channelMemberships")
-          .withIndex("by_channel", (q) => q.eq("channelId", channel._id))
-          .take(MAX_PRIVATE_CHANNEL_MEMBERS)
-    const existingUserIds = new Set([actor._id, ...channelMemberships.map((membership) => membership.userId)])
-    const eligible: Array<{ readonly id: Id<"users">; readonly displayName: string }> = []
+  handler: (ctx, args) =>
+    withDogfoodDiagnostics(
+      "eligiblePrivateChannelMembers",
+      {
+        channelId: args.channelId ?? "new-channel"
+      },
+      async () => {
+        const actor = await requireAllowedCurrentUser(ctx)
+        const channel =
+          args.channelId === undefined
+            ? null
+            : await requirePrivateChannelAdmin(ctx, { channelId: args.channelId, userId: actor._id })
+        const workspace = channel === null ? await getDefaultWorkspace(ctx) : null
+        const workspaceId = channel?.workspaceId ?? workspace?._id
+        if (workspaceId === undefined) throw new Error("Workspace not found")
+        await requireWorkspaceMember(ctx, { workspaceId, userId: actor._id })
+        const workspaceMemberships = await ctx.db
+          .query("workspaceMemberships")
+          .withIndex("by_workspace", (q) => q.eq("workspaceId", workspaceId))
+          .take(MAX_ELIGIBLE_PRIVATE_CHANNEL_MEMBER_SCAN)
+        const channelMemberships =
+          channel === null
+            ? []
+            : await ctx.db
+                .query("channelMemberships")
+                .withIndex("by_channel", (q) => q.eq("channelId", channel._id))
+                .take(MAX_PRIVATE_CHANNEL_MEMBERS)
+        const existingUserIds = new Set([actor._id, ...channelMemberships.map((membership) => membership.userId)])
+        const eligible: Array<{ readonly id: Id<"users">; readonly displayName: string }> = []
 
-    for (const membership of workspaceMemberships) {
-      if (existingUserIds.has(membership.userId)) continue
-      const user = await ctx.db.get(membership.userId)
-      if (user === null || !(await isEmailAllowlisted(ctx, user.email))) continue
-      eligible.push({ id: user._id, displayName: user.displayName })
-      if (eligible.length === MAX_ELIGIBLE_PRIVATE_CHANNEL_MEMBERS) break
-    }
+        for (const membership of workspaceMemberships) {
+          if (existingUserIds.has(membership.userId)) continue
+          const user = await ctx.db.get(membership.userId)
+          if (user === null || !(await isEmailAllowlisted(ctx, user.email))) continue
+          eligible.push({ id: user._id, displayName: user.displayName })
+          if (eligible.length === MAX_ELIGIBLE_PRIVATE_CHANNEL_MEMBERS) break
+        }
 
-    return eligible.sort((left, right) => left.displayName.localeCompare(right.displayName))
-  })
+        return eligible.sort((left, right) => left.displayName.localeCompare(right.displayName))
+      }
+    )
 })
 
 export const addPrivateChannelMember = mutation({
@@ -929,39 +975,44 @@ export const addPrivateChannelMember = mutation({
     channelId: v.id("channels"),
     userId: v.id("users")
   },
-  handler: (ctx, args) => withDogfoodDiagnostics("addPrivateChannelMember", {
-    channelId: args.channelId,
-    userId: args.userId
-  }, async () => {
-    const actor = await requireAllowedCurrentUser(ctx)
-    const channel = await requirePrivateChannelAdmin(ctx, { channelId: args.channelId, userId: actor._id })
-    if (channel.workspaceId === undefined) throw new Error("Channel is missing its workspace")
-    await requireEligiblePrivateChannelMember(ctx, { workspaceId: channel.workspaceId, userId: args.userId })
+  handler: (ctx, args) =>
+    withDogfoodDiagnostics(
+      "addPrivateChannelMember",
+      {
+        channelId: args.channelId,
+        userId: args.userId
+      },
+      async () => {
+        const actor = await requireAllowedCurrentUser(ctx)
+        const channel = await requirePrivateChannelAdmin(ctx, { channelId: args.channelId, userId: actor._id })
+        if (channel.workspaceId === undefined) throw new Error("Channel is missing its workspace")
+        await requireEligiblePrivateChannelMember(ctx, { workspaceId: channel.workspaceId, userId: args.userId })
 
-    const existing = await ctx.db
-      .query("channelMemberships")
-      .withIndex("by_channel_user", (q) => q.eq("channelId", channel._id).eq("userId", args.userId))
-      .unique()
-    if (existing !== null) return { channelId: channel._id, userId: args.userId, member: true }
+        const existing = await ctx.db
+          .query("channelMemberships")
+          .withIndex("by_channel_user", (q) => q.eq("channelId", channel._id).eq("userId", args.userId))
+          .unique()
+        if (existing !== null) return { channelId: channel._id, userId: args.userId, member: true }
 
-    const memberships = await ctx.db
-      .query("channelMemberships")
-      .withIndex("by_channel", (q) => q.eq("channelId", channel._id))
-      .take(MAX_PRIVATE_CHANNEL_MEMBERS)
-    if (memberships.length >= MAX_PRIVATE_CHANNEL_MEMBERS) {
-      throw new Error(`Private channels can contain at most ${MAX_PRIVATE_CHANNEL_MEMBERS} members`)
-    }
+        const memberships = await ctx.db
+          .query("channelMemberships")
+          .withIndex("by_channel", (q) => q.eq("channelId", channel._id))
+          .take(MAX_PRIVATE_CHANNEL_MEMBERS)
+        if (memberships.length >= MAX_PRIVATE_CHANNEL_MEMBERS) {
+          throw new Error(`Private channels can contain at most ${MAX_PRIVATE_CHANNEL_MEMBERS} members`)
+        }
 
-    const now = Date.now()
-    await ctx.db.insert("channelMemberships", {
-      channelId: channel._id,
-      userId: args.userId,
-      role: "member",
-      createdAt: now,
-      lastReadAt: now
-    })
-    return { channelId: channel._id, userId: args.userId, member: true }
-  })
+        const now = Date.now()
+        await ctx.db.insert("channelMemberships", {
+          channelId: channel._id,
+          userId: args.userId,
+          role: "member",
+          createdAt: now,
+          lastReadAt: now
+        })
+        return { channelId: channel._id, userId: args.userId, member: true }
+      }
+    )
 })
 
 export const removePrivateChannelMember = mutation({
@@ -969,33 +1020,38 @@ export const removePrivateChannelMember = mutation({
     channelId: v.id("channels"),
     userId: v.id("users")
   },
-  handler: (ctx, args) => withDogfoodDiagnostics("removePrivateChannelMember", {
-    channelId: args.channelId,
-    userId: args.userId
-  }, async () => {
-    const actor = await requireAllowedCurrentUser(ctx)
-    const channel = await requirePrivateChannelAdmin(ctx, { channelId: args.channelId, userId: actor._id })
-    if (channel.workspaceId === undefined) throw new Error("Channel is missing its workspace")
-    await requireWorkspaceMember(ctx, { workspaceId: channel.workspaceId, userId: args.userId })
-    const membership = await ctx.db
-      .query("channelMemberships")
-      .withIndex("by_channel_user", (q) => q.eq("channelId", channel._id).eq("userId", args.userId))
-      .unique()
-    if (membership === null) return { channelId: channel._id, userId: args.userId, member: false }
+  handler: (ctx, args) =>
+    withDogfoodDiagnostics(
+      "removePrivateChannelMember",
+      {
+        channelId: args.channelId,
+        userId: args.userId
+      },
+      async () => {
+        const actor = await requireAllowedCurrentUser(ctx)
+        const channel = await requirePrivateChannelAdmin(ctx, { channelId: args.channelId, userId: actor._id })
+        if (channel.workspaceId === undefined) throw new Error("Channel is missing its workspace")
+        await requireWorkspaceMember(ctx, { workspaceId: channel.workspaceId, userId: args.userId })
+        const membership = await ctx.db
+          .query("channelMemberships")
+          .withIndex("by_channel_user", (q) => q.eq("channelId", channel._id).eq("userId", args.userId))
+          .unique()
+        if (membership === null) return { channelId: channel._id, userId: args.userId, member: false }
 
-    if (membership.role === "admin") {
-      const memberships = await ctx.db
-        .query("channelMemberships")
-        .withIndex("by_channel", (q) => q.eq("channelId", channel._id))
-        .take(MAX_PRIVATE_CHANNEL_MEMBERS)
-      if (!memberships.some((candidate) => candidate.role === "admin" && candidate._id !== membership._id)) {
-        throw new Error("The last channel admin cannot be removed")
+        if (membership.role === "admin") {
+          const memberships = await ctx.db
+            .query("channelMemberships")
+            .withIndex("by_channel", (q) => q.eq("channelId", channel._id))
+            .take(MAX_PRIVATE_CHANNEL_MEMBERS)
+          if (!memberships.some((candidate) => candidate.role === "admin" && candidate._id !== membership._id)) {
+            throw new Error("The last channel admin cannot be removed")
+          }
+        }
+
+        await ctx.db.delete(membership._id)
+        return { channelId: channel._id, userId: args.userId, member: false }
       }
-    }
-
-    await ctx.db.delete(membership._id)
-    return { channelId: channel._id, userId: args.userId, member: false }
-  })
+    )
 })
 
 export const channelMessages = query({
@@ -1003,27 +1059,31 @@ export const channelMessages = query({
     channelId: v.id("channels"),
     paginationOpts: paginationOptsValidator
   },
-  handler: (ctx, args) => withDogfoodDiagnostics("channelMessages", { channelId: args.channelId }, async () => {
-    const user = await requireAllowedCurrentUser(ctx)
+  handler: (ctx, args) =>
+    withDogfoodDiagnostics("channelMessages", { channelId: args.channelId }, async () => {
+      const user = await requireAllowedCurrentUser(ctx)
 
-    await requireChannelMember(ctx, { channelId: args.channelId, userId: user._id })
+      await requireChannelMember(ctx, { channelId: args.channelId, userId: user._id })
 
-    if (!Number.isInteger(args.paginationOpts.numItems) || args.paginationOpts.numItems < 1 ||
-      args.paginationOpts.numItems > MAX_MESSAGE_PAGE_SIZE) {
-      throw new Error(`Message pages must contain between 1 and ${MAX_MESSAGE_PAGE_SIZE} items`)
-    }
+      if (
+        !Number.isInteger(args.paginationOpts.numItems) ||
+        args.paginationOpts.numItems < 1 ||
+        args.paginationOpts.numItems > MAX_MESSAGE_PAGE_SIZE
+      ) {
+        throw new Error(`Message pages must contain between 1 and ${MAX_MESSAGE_PAGE_SIZE} items`)
+      }
 
-    const result = await ctx.db
-      .query("messages")
-      .withIndex("by_channel_created_at", (q) => q.eq("channelId", args.channelId))
-      .order("desc")
-      .paginate(args.paginationOpts)
+      const result = await ctx.db
+        .query("messages")
+        .withIndex("by_channel_created_at", (q) => q.eq("channelId", args.channelId))
+        .order("desc")
+        .paginate(args.paginationOpts)
 
-    return {
-      ...result,
-      page: await toMessageViews(ctx, result.page, user._id)
-    }
-  })
+      return {
+        ...result,
+        page: await toMessageViews(ctx, result.page, user._id)
+      }
+    })
 })
 
 export const searchChannelMessages = query({
@@ -1031,44 +1091,50 @@ export const searchChannelMessages = query({
     channelId: v.id("channels"),
     query: v.string()
   },
-  handler: (ctx, args) => withDogfoodDiagnostics("searchChannelMessages", {
-    channelId: args.channelId,
-    queryLength: args.query.trim().length
-  }, async () => {
-    const user = await requireAllowedCurrentUser(ctx)
-    await requireChannelMember(ctx, { channelId: args.channelId, userId: user._id })
+  handler: (ctx, args) =>
+    withDogfoodDiagnostics(
+      "searchChannelMessages",
+      {
+        channelId: args.channelId,
+        queryLength: args.query.trim().length
+      },
+      async () => {
+        const user = await requireAllowedCurrentUser(ctx)
+        await requireChannelMember(ctx, { channelId: args.channelId, userId: user._id })
 
-    const searchQuery = args.query.trim()
-    if (searchQuery.length === 0) return []
-    if (searchQuery.length > MAX_MESSAGE_SEARCH_QUERY_LENGTH) {
-      throw new Error(`Search queries can contain at most ${MAX_MESSAGE_SEARCH_QUERY_LENGTH} characters`)
-    }
+        const searchQuery = args.query.trim()
+        if (searchQuery.length === 0) return []
+        if (searchQuery.length > MAX_MESSAGE_SEARCH_QUERY_LENGTH) {
+          throw new Error(`Search queries can contain at most ${MAX_MESSAGE_SEARCH_QUERY_LENGTH} characters`)
+        }
 
-    const messages = await ctx.db
-      .query("messages")
-      .withSearchIndex("search_body", (q) => q.search("body", searchQuery).eq("channelId", args.channelId))
-      .take(MAX_MESSAGE_SEARCH_RESULTS)
+        const messages = await ctx.db
+          .query("messages")
+          .withSearchIndex("search_body", (q) => q.search("body", searchQuery).eq("channelId", args.channelId))
+          .take(MAX_MESSAGE_SEARCH_RESULTS)
 
-    return toMessageViews(ctx, messages, user._id)
-  })
+        return toMessageViews(ctx, messages, user._id)
+      }
+    )
 })
 
 export const channelMembers = query({
   args: {
     channelId: v.id("channels")
   },
-  handler: (ctx, args) => withDogfoodDiagnostics("channelMembers", { channelId: args.channelId }, async () => {
-    const user = await requireAllowedCurrentUser(ctx)
+  handler: (ctx, args) =>
+    withDogfoodDiagnostics("channelMembers", { channelId: args.channelId }, async () => {
+      const user = await requireAllowedCurrentUser(ctx)
 
-    const channel = await requireChannelMember(ctx, { channelId: args.channelId, userId: user._id })
+      const channel = await requireChannelMember(ctx, { channelId: args.channelId, userId: user._id })
 
-    if (channel.visibility === "public") {
-      if (channel.workspaceId === undefined) throw new Error("Channel is missing its workspace")
-      return listWorkspaceMembers(ctx, channel.workspaceId)
-    }
+      if (channel.visibility === "public") {
+        if (channel.workspaceId === undefined) throw new Error("Channel is missing its workspace")
+        return listWorkspaceMembers(ctx, channel.workspaceId)
+      }
 
-    return listChannelMembers(ctx, args.channelId)
-  })
+      return listChannelMembers(ctx, args.channelId)
+    })
 })
 
 export const sendMessage = mutation({
@@ -1078,12 +1144,17 @@ export const sendMessage = mutation({
     parentMessageId: v.optional(v.id("messages")),
     attachments: v.optional(v.array(messageAttachmentInput))
   },
-  handler: (ctx, args) => withDogfoodDiagnostics("sendMessage", {
-    channelId: args.channelId,
-    parentMessageId: args.parentMessageId,
-    bodyLength: args.body.trim().length,
-    attachmentCount: args.attachments?.length ?? 0
-  }, () => sendMessageTransaction(ctx, args))
+  handler: (ctx, args) =>
+    withDogfoodDiagnostics(
+      "sendMessage",
+      {
+        channelId: args.channelId,
+        parentMessageId: args.parentMessageId,
+        bodyLength: args.body.trim().length,
+        attachmentCount: args.attachments?.length ?? 0
+      },
+      () => sendMessageTransaction(ctx, args)
+    )
 })
 
 export const editMessage = mutation({
@@ -1092,11 +1163,16 @@ export const editMessage = mutation({
     messageId: v.id("messages"),
     body: v.string()
   },
-  handler: (ctx, args) => withDogfoodDiagnostics("editMessage", {
-    channelId: args.channelId,
-    messageId: args.messageId,
-    bodyLength: args.body.trim().length
-  }, () => editMessageTransaction(ctx, args))
+  handler: (ctx, args) =>
+    withDogfoodDiagnostics(
+      "editMessage",
+      {
+        channelId: args.channelId,
+        messageId: args.messageId,
+        bodyLength: args.body.trim().length
+      },
+      () => editMessageTransaction(ctx, args)
+    )
 })
 
 export const deleteMessage = mutation({
@@ -1104,10 +1180,15 @@ export const deleteMessage = mutation({
     channelId: v.id("channels"),
     messageId: v.id("messages")
   },
-  handler: (ctx, args) => withDogfoodDiagnostics("deleteMessage", {
-    channelId: args.channelId,
-    messageId: args.messageId
-  }, () => deleteMessageTransaction(ctx, args))
+  handler: (ctx, args) =>
+    withDogfoodDiagnostics(
+      "deleteMessage",
+      {
+        channelId: args.channelId,
+        messageId: args.messageId
+      },
+      () => deleteMessageTransaction(ctx, args)
+    )
 })
 
 export const toggleMessageReaction = mutation({
@@ -1116,11 +1197,16 @@ export const toggleMessageReaction = mutation({
     messageId: v.id("messages"),
     emoji: messageReactionEmoji
   },
-  handler: (ctx, args) => withDogfoodDiagnostics("toggleMessageReaction", {
-    channelId: args.channelId,
-    messageId: args.messageId,
-    emoji: args.emoji
-  }, () => toggleMessageReactionTransaction(ctx, args))
+  handler: (ctx, args) =>
+    withDogfoodDiagnostics(
+      "toggleMessageReaction",
+      {
+        channelId: args.channelId,
+        messageId: args.messageId,
+        emoji: args.emoji
+      },
+      () => toggleMessageReactionTransaction(ctx, args)
+    )
 })
 
 const toChannelView = (channel: Doc<"channels">) => ({

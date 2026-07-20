@@ -21,26 +21,46 @@ describe("account context synchronization", () => {
       windowId,
       currentAccountId,
       accounts: [
-        { id: "default", displayName: "Maya", email: "maya@example.com", avatarUrl: null, current: currentAccountId === "default", pending: false },
-        { id: "account-2", displayName: "Archer", email: "archer@example.com", avatarUrl: null, current: currentAccountId === "account-2", pending: false }
+        {
+          id: "default",
+          displayName: "Maya",
+          email: "maya@example.com",
+          avatarUrl: null,
+          current: currentAccountId === "default",
+          pending: false
+        },
+        {
+          id: "account-2",
+          displayName: "Archer",
+          email: "archer@example.com",
+          avatarUrl: null,
+          current: currentAccountId === "account-2",
+          pending: false
+        }
       ]
     }))
 
-    broadcastAccountContexts(
-      { context },
-      [record("window-1", "default", firstSend), record("window-2", "account-2", secondSend)]
-    )
+    broadcastAccountContexts({ context }, [
+      record("window-1", "default", firstSend),
+      record("window-2", "account-2", secondSend)
+    ])
 
-    expect(firstSend).toHaveBeenCalledWith(accountContextChangedChannel, expect.objectContaining({
-      windowId: "window-1",
-      currentAccountId: "default",
-      accounts: expect.arrayContaining([expect.objectContaining({ id: "default", current: true })])
-    }))
-    expect(secondSend).toHaveBeenCalledWith(accountContextChangedChannel, expect.objectContaining({
-      windowId: "window-2",
-      currentAccountId: "account-2",
-      accounts: expect.arrayContaining([expect.objectContaining({ id: "account-2", current: true })])
-    }))
+    expect(firstSend).toHaveBeenCalledWith(
+      accountContextChangedChannel,
+      expect.objectContaining({
+        windowId: "window-1",
+        currentAccountId: "default",
+        accounts: expect.arrayContaining([expect.objectContaining({ id: "default", current: true })])
+      })
+    )
+    expect(secondSend).toHaveBeenCalledWith(
+      accountContextChangedChannel,
+      expect.objectContaining({
+        windowId: "window-2",
+        currentAccountId: "account-2",
+        accounts: expect.arrayContaining([expect.objectContaining({ id: "account-2", current: true })])
+      })
+    )
   })
 
   it("does not send account updates to destroyed windows", () => {

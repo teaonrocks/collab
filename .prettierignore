@@ -1,0 +1,6 @@
+convex/_generated/
+coverage/
+dist/
+out/
+build/
+pnpm-lock.yaml

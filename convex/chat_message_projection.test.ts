@@ -2,15 +2,10 @@ import { describe, expect, it } from "vitest"
 import type { Doc, Id } from "./_generated/dataModel"
 import { aggregateReactionRows, trimParentPreview } from "./chat_message_projection"
 
-const id = <TableName extends "channels" | "messages" | "users" | "messageReactions">(
-  value: string
-): Id<TableName> => value as Id<TableName>
+const id = <TableName extends "channels" | "messages" | "users" | "messageReactions">(value: string): Id<TableName> =>
+  value as Id<TableName>
 
-const reaction = (
-  reactionId: string,
-  userId: Id<"users">,
-  emoji: string
-): Doc<"messageReactions"> => ({
+const reaction = (reactionId: string, userId: Id<"users">, emoji: string): Doc<"messageReactions"> => ({
   _id: id<"messageReactions">(reactionId),
   _creationTime: 1,
   channelId: id<"channels">("channel"),
@@ -26,12 +21,17 @@ describe("message projection internals", () => {
     const currentUserId = id<"users">("current-user")
     const otherUserId = id<"users">("other-user")
 
-    expect(aggregateReactionRows([
-      reaction("one", currentUserId, "🎉"),
-      reaction("two", currentUserId, "🎉"),
-      reaction("three", otherUserId, "👍"),
-      reaction("four", otherUserId, "custom")
-    ], currentUserId)).toEqual([
+    expect(
+      aggregateReactionRows(
+        [
+          reaction("one", currentUserId, "🎉"),
+          reaction("two", currentUserId, "🎉"),
+          reaction("three", otherUserId, "👍"),
+          reaction("four", otherUserId, "custom")
+        ],
+        currentUserId
+      )
+    ).toEqual([
       { emoji: "👍", count: 1, reactedByCurrentUser: false },
       { emoji: "🎉", count: 1, reactedByCurrentUser: true },
       { emoji: "custom", count: 1, reactedByCurrentUser: false }

@@ -12,8 +12,7 @@ const getConvexClient = (url: string): ConvexReactClient => {
   return convexClient
 }
 
-const hasValue = (value: string | undefined): value is string =>
-  value !== undefined && value.trim().length > 0
+const hasValue = (value: string | undefined): value is string => value !== undefined && value.trim().length > 0
 
 export function DogfoodAuthProvider(props: { readonly children: ReactNode }) {
   if (!isDogfoodAuthConfigured()) {

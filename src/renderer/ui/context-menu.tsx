@@ -31,7 +31,7 @@ export function ContextMenuItem({ className, ...props }: ContextMenuItemProps) {
   return (
     <BaseContextMenu.Item
       className={cn(
-        "flex min-h-control-sm cursor-default select-none items-center gap-2 rounded-control px-2 text-foreground outline-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-surface-muted",
+        "flex min-h-control-sm cursor-default items-center gap-2 rounded-control px-2 text-foreground outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-surface-muted",
         className
       )}
       {...props}

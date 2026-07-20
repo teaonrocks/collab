@@ -12,9 +12,7 @@ const rendererContentSecurityPolicy = (): Plugin => {
   return {
     name: "aether-renderer-content-security-policy",
     configResolved: (config) => {
-      content = config.command === "build"
-        ? productionContentSecurityPolicy
-        : developmentContentSecurityPolicy
+      content = config.command === "build" ? productionContentSecurityPolicy : developmentContentSecurityPolicy
     },
     transformIndexHtml: (html) => html.replace("__AETHER_CONTENT_SECURITY_POLICY__", content)
   }

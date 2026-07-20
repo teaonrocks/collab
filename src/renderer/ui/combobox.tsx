@@ -8,18 +8,16 @@ const ComboboxPositioner = BaseCombobox.Positioner
 
 export type ComboboxInputProps = ComponentProps<typeof BaseCombobox.Input>
 
-export const ComboboxInput = forwardRef<HTMLInputElement, ComboboxInputProps>(
-  ({ className, ...props }, ref) => (
-    <BaseCombobox.Input
-      ref={ref}
-      className={cn(
-        "flex h-control w-full rounded-control border border-border-strong bg-surface-raised px-3 text-sm text-foreground outline-none transition-colors placeholder:text-foreground-placeholder focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:bg-surface-sunken disabled:text-foreground-placeholder",
-        className
-      )}
-      {...props}
-    />
-  )
-)
+export const ComboboxInput = forwardRef<HTMLInputElement, ComboboxInputProps>(({ className, ...props }, ref) => (
+  <BaseCombobox.Input
+    ref={ref}
+    className={cn(
+      "flex h-control w-full rounded-control border border-border-strong bg-surface-raised px-3 text-sm text-foreground transition-colors outline-none placeholder:text-foreground-placeholder focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:bg-surface-sunken disabled:text-foreground-placeholder",
+      className
+    )}
+    {...props}
+  />
+))
 
 ComboboxInput.displayName = "ComboboxInput"
 
@@ -46,12 +44,7 @@ export function ComboboxContent({ className, sideOffset = 8, ...props }: Combobo
 export type ComboboxListProps = ComponentProps<typeof BaseCombobox.List>
 
 export function ComboboxList({ className, ...props }: ComboboxListProps) {
-  return (
-    <BaseCombobox.List
-      className={cn("flex max-h-[220px] flex-col gap-1 overflow-auto", className)}
-      {...props}
-    />
-  )
+  return <BaseCombobox.List className={cn("flex max-h-[220px] flex-col gap-1 overflow-auto", className)} {...props} />
 }
 
 export type ComboboxItemProps = ComponentProps<typeof BaseCombobox.Item> & {

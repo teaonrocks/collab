@@ -53,16 +53,20 @@ export const createDesktopNotificationCoordinator = (options: {
     removeWindow(windowId: number) {
       activeConversationByWindowId.delete(windowId)
     },
-    show(record: DesktopNotificationWindowRecord, request: DesktopNotificationRequest): "shown" | "duplicate" | "suppressed" | "unsupported" {
+    show(
+      record: DesktopNotificationWindowRecord,
+      request: DesktopNotificationRequest
+    ): "shown" | "duplicate" | "suppressed" | "unsupported" {
       const key = `${record.accountId}:${request.messageId}`
       if (deduplicationKeys.has(key)) return "duplicate"
       remember(key)
 
       const records = accountRecords(record.accountId)
-      const activelyViewed = records.some((candidate) =>
-        activeConversationByWindowId.get(candidate.window.id) === request.conversationId &&
-        candidate.window.isFocused() &&
-        candidate.window.isVisible()
+      const activelyViewed = records.some(
+        (candidate) =>
+          activeConversationByWindowId.get(candidate.window.id) === request.conversationId &&
+          candidate.window.isFocused() &&
+          candidate.window.isVisible()
       )
       if (activelyViewed) return "suppressed"
       if (!options.isSupported()) return "unsupported"
@@ -70,9 +74,10 @@ export const createDesktopNotificationCoordinator = (options: {
       const notification = options.createNotification({ title: request.title, body: request.body })
       notification.on("click", () => {
         const currentRecords = accountRecords(record.accountId)
-        const target = currentRecords.find((candidate) =>
-          activeConversationByWindowId.get(candidate.window.id) === request.conversationId
-        ) ?? (record.window.isDestroyed() ? currentRecords[0] : record)
+        const target =
+          currentRecords.find(
+            (candidate) => activeConversationByWindowId.get(candidate.window.id) === request.conversationId
+          ) ?? (record.window.isDestroyed() ? currentRecords[0] : record)
         if (target === undefined || target.window.isDestroyed()) return
         if (target.window.isMinimized()) target.window.restore()
         target.window.show()

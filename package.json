@@ -17,13 +17,16 @@
     "convex:codegen": "convex codegen",
     "convex:check": "tsc -p convex/tsconfig.json --noEmit && node scripts/check-convex-bindings.mjs",
     "dogfood:verify": "pnpm typecheck && pnpm convex:check && pnpm lint && pnpm test && pnpm build",
-    "lint": "eslint . && knip",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint . && knip && pnpm format:check",
     "native:macos-auth": "node scripts/build-macos-auth-helper.mjs",
     "start": "electron-vite preview",
     "package:mac": "pnpm build && electron-builder --mac dir --publish never",
     "start:mac": "node scripts/open-packaged-mac.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest"
   },
   "dependencies": {
@@ -53,27 +56,34 @@
   },
   "devDependencies": {
     "@edge-runtime/vm": "^5.0.0",
-    "@eslint/js": "^10.0.1",
+    "@eslint/js": "9.39.5",
     "@tailwindcss/postcss": "^4.3.1",
+    "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.1.0",
+    "@testing-library/user-event": "^14.6.1",
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "@vitest/coverage-v8": "3.2.4",
     "convex-test": "^0.0.53",
     "electron": "^41.0.0",
     "electron-builder": "^26.15.3",
     "electron-vite": "^2.3.0",
-    "eslint": "^10.6.0",
+    "eslint": "9.39.5",
+    "eslint-plugin-boundaries": "^7.0.2",
+    "eslint-plugin-jsx-a11y": "6.10.2",
     "eslint-plugin-react-hooks": "^7.1.1",
     "happy-dom": "^16.0.0",
     "knip": "^6.23.0",
     "postcss": "^8.5.15",
+    "prettier": "^3.9.5",
+    "prettier-plugin-tailwindcss": "^0.8.1",
     "tailwindcss": "^4.3.1",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.62.1",
     "vite": "^5.4.11",
-    "vitest": "^3.2.4"
+    "vitest": "3.2.4"
   },
   "build": {
     "appId": "com.aether.chat",
@@ -97,7 +107,9 @@
     "protocols": [
       {
         "name": "Aether authentication callback",
-        "schemes": ["aether"]
+        "schemes": [
+          "aether"
+        ]
       }
     ]
   }

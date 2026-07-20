@@ -12,7 +12,7 @@ export function SelectTrigger({ className, children, ...props }: SelectTriggerPr
   return (
     <BaseSelect.Trigger
       className={cn(
-        "inline-flex h-control min-w-0 items-center justify-between gap-2 rounded-control border border-border-strong bg-surface-raised px-3 text-sm text-foreground outline-none transition-colors hover:bg-surface-muted focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 data-disabled:cursor-not-allowed data-disabled:opacity-55",
+        "inline-flex h-control min-w-0 items-center justify-between gap-2 rounded-control border border-border-strong bg-surface-raised px-3 text-sm text-foreground transition-colors outline-none hover:bg-surface-muted focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 data-disabled:cursor-not-allowed data-disabled:opacity-55",
         className
       )}
       {...props}
