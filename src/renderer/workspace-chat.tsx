@@ -716,13 +716,13 @@ function ChannelSidebar(props: {
         </header>
 
         <nav className="sidebarSection flex min-w-0 flex-col p-0" aria-label="Channels">
-          <div className="sidebarHeaderRow flex min-h-6 items-center justify-between gap-2 px-4 text-xs font-bold text-foreground-subtle uppercase">
+          <div className="sidebarHeaderRow flex min-h-6 items-center justify-between gap-2 px-5 text-xs font-bold text-foreground-subtle uppercase">
             <span>Channels</span>
             <Button
               type="button"
               variant="ghost"
               size="icon"
-              className="size-6 rounded-[4px] text-foreground-subtle enabled:hover:bg-surface-muted-hover enabled:hover:text-foreground enabled:focus-visible:bg-surface-muted-hover enabled:focus-visible:text-foreground"
+              className="-mr-1 size-6 rounded-[4px] text-foreground-subtle enabled:hover:bg-surface-muted-hover enabled:hover:text-foreground enabled:focus-visible:bg-surface-muted-hover enabled:focus-visible:text-foreground"
               aria-label="Add channel"
               aria-haspopup="dialog"
               aria-expanded={creating}
